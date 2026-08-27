@@ -221,3 +221,67 @@ notebook placed two conflicting claims in adjacent rows. Deduction here is a
 memory problem before it is a reasoning problem, so how much memory the software
 provides is the difficulty dial for the entire game.
 **Status:** open, and it gates the interface design
+
+## D-020 Blind replay demoted from gate to errand
+**Date:** 2026-08-27
+**Decision:** The blind replay of a third prototype is no longer the next action.
+It happens some evening, and nothing waits for it.
+**Why:** The test as specified was slightly wrong. It removed the notebook, but
+the notebook is a designed feature that will exist in the finished game, so the
+condition being tested is one that will never occur. What actually contaminated
+the first playtest was the out of fiction commentary and the nudges, not the
+claim log.
+**Also:** No downstream work depends on the outcome. Schema, validator, fixtures
+and solver are built identically whether it scores well or badly.
+**Supersedes:** the NEXT line in STATE.md as of 26 August.
+**Status:** active
+
+## D-021 First validator rule is event/timeline agreement
+**Date:** 2026-08-27
+**Decision:** The first rule implemented is V1, that every narrative event's
+participants must be placed in that event's room at that event's time slot.
+**Why:** It is the failure that actually occurred in the hand-built prototype 02
+and went unnoticed until interrogation surfaced it, so it is motivated rather
+than hypothetical. It also requires the smallest data model that everything else
+will be built on, and its logic is simple enough that the first unit of work
+stays focused on pytest and Pydantic mechanics rather than on the rule itself.
+**Rejected as first rule:** the alibi breakability rule, which needs claims,
+contradiction and independence machinery before it can be expressed at all.
+**Status:** active
+
+## D-022 The LLM supplies narrative constraints, the solver satisfies them
+**Date:** 2026-08-27
+**Decision:** The LLM does not produce the movement grid, but it does produce
+the list of things that must happen and to whom: a tryst, private, mid-evening;
+a confrontation with exactly one overhearing witness; a discovery. These are
+constraints expressed as desired events. The solver then finds a grid satisfying
+both the hard solvability constraints and every narrative constraint at once.
+**Why:** A pure constraint solver produces a valid and soulless grid. The reason
+the hand-built prototypes felt motivated is that every movement existed to make
+something happen, and that intent has to come from somewhere. It comes from the
+LLM, as input to the solver rather than as output alongside it.
+**Refines:** D-008, whose three-stage split was too coarse. The real split is
+what must happen (LLM), where and when so that everything holds (solver), and
+how it reads (LLM).
+**Consequence:** `Event` is not an annotation on the timeline, it is the
+solver's input. Rule V1 is therefore the acceptance test on the solver's output,
+not merely a guard against hand-written typos.
+**Consequence:** Unsatisfiable constraint sets become a first class failure. The
+solver reports which constraint it could not place, and the system relaxes or
+regenerates that one rather than discarding the whole mystery.
+**Status:** active
+
+## D-023 Rules are classified by who they protect against
+**Date:** 2026-08-27
+**Decision:** Every validator rule records whether it is guarding LLM output,
+our own solver, or a file a human edited. V0, grid completeness, runs at the
+parse boundary rather than after the solver.
+**Why:** If the solver builds placements over the full cross product of
+characters and slots, a hole in the grid is structurally impossible, so a rule
+checking for one would be guarding our own deterministic code and is better
+written as a test of the solver. The same hole is entirely possible in a JSON
+file from the cached corpus or edited by hand, which is untrusted input and
+where the rule belongs.
+**Consequence:** Ask of every new rule which of the three it catches. Rules that
+only guard our own code usually want to be solver tests instead.
+**Status:** active
