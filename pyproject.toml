@@ -7,9 +7,7 @@ authors = [
     { name = "FreddyDeWatersir", email = "freddyraul11@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = [
-    "pydantic>=2.13.4",
-]
+dependencies = []
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
@@ -38,3 +36,7 @@ line-length = 100
 # UP  pyupgrade               modernise syntax for the Python version you target
 # SIM flake8-simplify         needlessly convoluted code
 select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+# Without this, ruff treats "mystery" as third-party and groups it with pytest.
+known-first-party = ["mystery"]

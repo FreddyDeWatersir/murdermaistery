@@ -285,3 +285,27 @@ where the rule belongs.
 **Consequence:** Ask of every new rule which of the three it catches. Rules that
 only guard our own code usually want to be solver tests instead.
 **Status:** active
+
+## D-024 Constraints are underspecified; binding them is the solver's job
+**Date:** 2026-08-27
+**Decision:** `Event` becomes `Constraint`, with `place` and `slot` optional. An
+unbound constraint is what the language model emits; a bound one is what the
+solver produced. Rule V3 fails any constraint still unbound in a finished
+mystery.
+**Why:** `Event` had place and slot as required fields, which made it a
+description of the solver's output rather than of its input, and D-022 says the
+model must not choose rooms and times. "A tryst, private, mid-evening" is a real
+constraint with both fields empty. Conflating the constraint with its solution
+meant the code contradicted the architecture note.
+**Consequence:** The question of whether `Alone` deserves its own type dissolves.
+`people=["alex"], exclusive=True` is the same predicate over a one-element set,
+and no new type or rule is needed. A separate `Alone` would have been a naming
+convenience for the prompt masquerading as a type distinction.
+**Consequence:** Unsatisfiability stops being silent. V3 is the solver saying
+out loud which constraint it could not place, which is what makes relaxing one
+constraint possible instead of discarding the mystery.
+**Note:** This came out of asking whether `Alone` should be its own type. The
+answer was that the question could not be settled because the model underneath
+it was wrong. Worth remembering as a pattern: a question with two equally good
+answers is often a question resting on a bad distinction.
+**Status:** active

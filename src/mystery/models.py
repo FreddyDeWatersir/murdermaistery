@@ -1,6 +1,6 @@
 """Ground truth data model for a mystery.
 
-Design note, see docs/decisions.md D-021 and D-011.
+Design notes: docs/decisions.md D-011, D-021, D-022, D-024.
 
 `placements` is a nested dict rather than a list of records on purpose. With
 `dict[CharacterId, dict[SlotId, PlaceId]]`, "one character in two places during
@@ -24,7 +24,7 @@ class Place(BaseModel):
 
     `within` exists because a dressing room is not the same observational
     position as the corridor it opens onto. Playtesting hit this four separate
-    times (findings F3, decision D-011). No rule uses it yet; it is here so the
+    times (finding F3, decision D-011). No rule uses it yet; it is here so the
     fixture corpus does not have to be migrated later.
     """
 
@@ -46,19 +46,36 @@ class Slot(BaseModel):
     index: int
 
 
-class Event(BaseModel):
-    """Something that happened, at a place, in a slot, to specific people.
+class Constraint(BaseModel):
+    """Something the story requires to be true.
 
-    This is the second description of the same world. The timeline says where
-    everyone was; events say what occurred. Nothing forces the two to agree,
-    which is exactly where rule V1 lives.
+    This is the contract between the language model and the solver (D-022). The
+    model emits constraints; the solver finds a grid satisfying all of them at
+    once.
+
+    `place` and `slot` are optional because an unsolved constraint does not know
+    them yet. "A tryst, private, some time in the middle of the evening" is a
+    real constraint with both fields empty. The solver's whole job is to bind
+    them, and a constraint still unbound after solving means the solver could
+    not place it (D-024).
+
+    `exclusive` means these people and nobody else. It is the constraint behind
+    every tryst, every unwitnessed confrontation, and the murder. Note that
+    "Alex is alone in the back office" needs no separate kind: it is simply
+    `people=["alex"], exclusive=True`. Same predicate, one type.
     """
 
     id: str
-    slot: SlotId
-    place: PlaceId
-    participants: list[CharacterId]
+    people: list[CharacterId]
+    exclusive: bool = False
+    place: PlaceId | None = None
+    slot: SlotId | None = None
     description: str = ""
+
+    @property
+    def is_bound(self) -> bool:
+        """True once the solver has chosen a place and a slot for this."""
+        return self.place is not None and self.slot is not None
 
 
 class Mystery(BaseModel):
@@ -66,5 +83,17 @@ class Mystery(BaseModel):
     characters: list[Character]
     places: list[Place]
     slots: list[Slot]
-    placements: dict[CharacterId, dict[SlotId, PlaceId]]
-    events: list[Event] = Field(default_factory=list)
+    placements: dict[CharacterId, dict[SlotId, PlaceId]] = Field(default_factory=dict)
+    constraints: list[Constraint] = Field(default_factory=list)
+
+    def who_is_in(self, place: PlaceId, slot: SlotId) -> set[CharacterId]:
+        """Everyone the timeline puts in `place` during `slot`.
+
+        The grid is stored character-first because that is how it is written and
+        read. This is the other direction, which the rules need constantly.
+        """
+        return {
+            character
+            for character, by_slot in self.placements.items()
+            if by_slot.get(slot) == place
+        }
