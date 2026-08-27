@@ -7,7 +7,15 @@ authors = [
     { name = "FreddyDeWatersir", email = "freddyraul11@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "anthropic>=0.40",
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+    "structlog>=24.4",
+    # Only needed for the browser version, mystery.web
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
@@ -40,3 +48,8 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.ruff.lint.isort]
 # Without this, ruff treats "mystery" as third-party and groups it with pytest.
 known-first-party = ["mystery"]
+
+[tool.ruff.lint.per-file-ignores]
+# web.py embeds an HTML page, SVG path data included. Wrapping path data to
+# satisfy a line-length rule would make it less readable, not more.
+"src/mystery/web.py" = ["E501"]

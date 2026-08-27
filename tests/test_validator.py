@@ -99,3 +99,138 @@ def test_accepts_a_mystery_where_every_constraint_was_placed(
     result = validate(solved_alone_constraint)
 
     assert result.ok, result.violations
+
+
+# V6: the model's constraints must not contradict each other
+
+
+def test_a_clash_is_rescheduled_rather_than_rejected(coherent_fragment: Mystery) -> None:
+    """The failure that broke a real generated case, and the answer to it.
+
+    The model put one character in two rooms at the same moment. Both scenes are
+    fine; they simply cannot both happen at 20:40. The solver moves the less
+    load-bearing one to a different slot rather than the mystery being thrown
+    away (D-033).
+    """
+    from mystery.models import Constraint
+    from mystery.solver import solve
+
+    clashing = coherent_fragment.model_copy(
+        update={
+            "constraints": [
+                *coherent_fragment.constraints,
+                Constraint(
+                    id="elsewhere",
+                    people=["tomas"],
+                    place="prop_store",
+                    slot="s1",
+                    description="Tomas is also, somehow, in the prop store.",
+                ),
+            ]
+        }
+    )
+
+    # The clash is real and V6 sees it.
+    assert "V6" in validate(clashing).failed_rules
+
+    fixed = solve(clashing, seed=1)
+
+    # And it is gone, with both scenes still in the case.
+    assert validate(fixed).ok, validate(fixed).violations
+    assert all(c.is_bound for c in fixed.constraints), "a scene was dropped"
+
+    moved = next(c for c in fixed.constraints if c.id == "elsewhere")
+    assert (moved.place, moved.slot) != ("prop_store", "s1")
+
+
+def test_v6_still_reports_a_clash_that_survives_repair(coherent_fragment: Mystery) -> None:
+    """V6 has not stopped mattering, it has stopped being fatal at the door."""
+    from mystery.models import Constraint
+
+    impossible = coherent_fragment.model_copy(
+        update={
+            "constraints": [
+                *coherent_fragment.constraints,
+                Constraint(id="elsewhere", people=["tomas"], place="prop_store", slot="s1"),
+            ]
+        }
+    )
+
+    result = validate(impossible)
+
+    assert "V6" in result.failed_rules
+    assert "tomas" in [v.message for v in result.violations if v.rule == "V6"][0]
+
+
+def test_v6_is_quiet_when_constraints_agree(coherent_fragment: Mystery) -> None:
+    assert "V6" not in validate(coherent_fragment).failed_rules
+
+
+# V7: the victim's story ends when they die
+
+
+def _murder_case(victim_trail: dict[str, str], extra=None):
+    """A three-slot case with the murder in slot s1, for testing what comes after."""
+    from mystery.models import Character, Constraint, Mystery, Place, Slot
+
+    slots = [Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)]
+    return Mystery(
+        title="After the fact",
+        killer="k",
+        victim="v",
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v", "b")],
+        places=[Place(id="vault", name="Vault"), Place(id="hall", name="Hall")],
+        slots=slots,
+        placements={
+            "k": {"s0": "hall", "s1": "vault", "s2": "hall"},
+            "b": {"s0": "hall", "s1": "hall", "s2": "hall"},
+            "v": victim_trail,
+        },
+        constraints=[
+            Constraint(id="murder", people=["k", "v"], exclusive=True, place="vault", slot="s1"),
+            *([extra] if extra else []),
+        ],
+    )
+
+
+def test_v7_catches_a_victim_who_walks_away_from_their_own_murder() -> None:
+    """The real failure. Helena was strangled in the vault at 20:30, and was in
+    the main gallery at 20:45."""
+    walking = _murder_case({"s0": "hall", "s1": "vault", "s2": "hall"})
+
+    result = validate(walking)
+
+    assert "V7" in result.failed_rules
+    assert "Bodies stay put" in [v.message for v in result.violations if v.rule == "V7"][0]
+
+
+def test_v7_catches_a_scene_scheduled_after_the_victim_died() -> None:
+    from mystery.models import Constraint
+
+    posthumous = _murder_case(
+        {"s0": "hall", "s1": "vault", "s2": "vault"},
+        Constraint(
+            id="blackmail", people=["v", "b"], exclusive=True, place="hall", slot="s2"
+        ),
+    )
+
+    result = validate(posthumous)
+
+    assert "V7" in result.failed_rules
+    assert "blackmail" in [v.message for v in result.violations if v.rule == "V7"][0]
+
+
+def test_v7_is_quiet_when_the_body_stays_where_it_fell() -> None:
+    resting = _murder_case({"s0": "hall", "s1": "vault", "s2": "vault"})
+
+    assert "V7" not in validate(resting).failed_rules
+
+
+def test_the_solver_lays_the_body_to_rest() -> None:
+    """Not just detected: fixed. The solver pins the victim after the murder."""
+    from mystery.solver import solve
+
+    fixed = solve(_murder_case({"s0": "hall", "s1": "vault", "s2": "hall"}), seed=1)
+
+    assert fixed.placements["v"]["s2"] == "vault"
+    assert validate(fixed).ok, validate(fixed).violations

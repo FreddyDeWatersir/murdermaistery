@@ -1,65 +1,103 @@
 # STATE
 
-**NEXT:** The language model. One call that takes a seed (setting, cast size,
-solution topology) and returns a cast plus a set of unbound constraints, parsed
-into the Pydantic models. Feed it straight into `solve()` and then `validate()`.
-That completes the spine end to end.
+**NEXT:** Play it with someone. In a browser:
+
+    uv add fastapi uvicorn
+    uv run python -m mystery.web --setting "..." --seed 3
+
+Then open http://localhost:8000. Suspect buttons, a chat, and the notebook as a
+live panel on the right. `--model` switches which model plays the suspects.
+
+The terminal version is still there: `uv run python -m mystery.cli --setting "..." --seed N --play`
+is a complete game: generate, solve, validate, interrogate, accuse, reveal.
+
+Nobody has played a generated case yet. The questions that matter are the same
+ones the paper prototype answered: is it fun, do the five suspects sound like
+different people, and does the notebook do too much or too little. Use
+`--show-leaks` to watch the agents while you play.
+
+After that: measure the leak rate against a local model, which is the Ollama
+routing decision (D-004). The suite exists and passes against fakes; what nobody knows yet is
+how often a real model cites something it does not have, and whether llama can do
+this at all. That number is the Ollama routing decision (D-004), settled by
+measurement instead of assertion.
+
+Then the interrogation loop: ask, log the claim, and track contradictions across
+characters. That is the last piece before the game is playable in a terminal.
 
 ---
 
 **Where things are, 27 August 2026**
 
+The pipeline runs end to end against the real model. First real output was valid
+on the first try, and had four things wrong with it that no rule could catch.
+
 - Repo: github.com/FreddyDeWatersir/murdermaistery
-- `src/mystery/models.py` — Mystery, Character, Place, Slot, Constraint
-- `src/mystery/validator.py` — V1, V2, V3
-- `src/mystery/solver.py` — backtracking constraint placement, seeded and
-  reproducible, with movement inertia so grids read like people rather than
-  random walks
-- Seventeen tests green, ruff clean
+- `models.py` — Mystery (with killer and victim), Character, Place, Slot, Constraint
+- `generator.py` — schema-forced Anthropic call, UTF-8 disk cache, fakeable boundary
+- `solver.py` — repairs the model's grid, or builds one from nothing as fallback
+- `validator.py` — V1 to V4, phased into proposed and final. Correctness only
+- `critique.py` — A1 to A3. Quality advisories that report and never fail
+- `cli.py` — generate, solve, validate, critique, print
+- Thirty two tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- Twenty four decisions in `docs/decisions.md`
+- Thirty two decisions in `docs/decisions.md`
 
-**The four layers, and how much of each exists**
+**What was wrong with the first real output**
 
-| Layer | What it does | State |
+1. A character found the body at slot 4 of 5, and the evening carried on around
+   her. Discovery must fall after the last slot. Prompt fixed
+2. Everyone wandered: five rooms in five slots. The same failure the solver had,
+   reproduced by the model. Prompt fixed, A1 now measures it
+3. Anglo-thriller names for an Amsterdam gallery. D-018 arriving on schedule.
+   Prompt fixed
+4. Nothing verified the alibi property the whole design rests on. A2 now
+   measures it, crudely
+
+**The four layers**
+
+| Layer | State |
+|---|---|
+| Generation | runs end to end. Knowledge derivation still missing |
+| Play | nothing |
+| Resolution | nothing |
+| Delivery | nothing |
+
+**Rules and advisories**
+
+| Id | What | Kind |
 |---|---|---|
-| Generation | model writes constraints, solver binds them, knowledge is derived | solver and validator done, model next, derivation after |
-| Play | agents answer in character, claims logged, contradictions tracked | nothing |
-| Resolution | accusation, reveal, clue post mortem | nothing |
-| Delivery | terminal, then web, then Lambda and CI | nothing |
+| V1 | Bound constraints agree with the timeline | fails |
+| V2 | Exclusive constraints are private | fails |
+| V3 | Every constraint was placed | fails |
+| V4 | Every referenced id exists | fails |
+| V6 | No character required in two rooms at once | fails, final phase only |
+| V7 | The victim stays dead and the body stays put | fails |
+| V0 | No holes in the grid | unwritten |
+| A1 | Nobody wanders more than twice | reports |
+| A2 | Two to four people lack an alibi at the murder | reports |
+| A3 | Every suspect has something to conceal | reports |
+| A4 | The victim is a hub, not one subplot among five | reports |
+| A5 | The killer's motive is gated behind another secret | reports |
+| A6 | The killer makes a false claim about where they were | reports |
+| A7 | The alibi breaks on combined testimony, not on any one | reports |
+| A8 | Every suspect had a moment nobody witnessed | reports |
 
-**The working loop**
+**Numbers nobody has justified**
 
-1. Read this NEXT line
-2. Agree what the unit is before writing anything
-3. Claude writes the code, runs it, and reports what changed and why
-4. Claude asks one question that reading the code does not answer
-5. Commit, rewrite this NEXT line, log any decision
-
-**Validator rules**
-
-| Rule | What | Guards | Status |
-|---|---|---|---|
-| V0 | No holes in the grid | hand-edited files, at the parse boundary | unwritten |
-| V1 | Bound constraints agree with the timeline | the solver | live |
-| V2 | Exclusive constraints are private | the solver | live |
-| V3 | Every constraint was placed | the solver | live |
-
-**Constraint vocabulary**
-
-- Live: co-location, exclusivity. `Alone` needed no new type, it is
-  `people=[x], exclusive=True` (D-024)
-- Next: `Overheard`, an exclusive exchange plus a fixed number of named witnesses
-- Later: `Sees` (adjacency and paths, not co-location), `Sustains`, `Apart`
+`STICKINESS = 0.75`, `MAX_MOVES_PER_CHARACTER = 2`, `ALIBI_GAP_RANGE = (2, 4)`,
+`MIN_SUSPECTS_WITH_A_STAKE_IN_THE_VICTIM = 0.5`.
+All invented. All now at least visible. See D-025 and D-031.
 
 **Open questions, in priority order**
 
-1. Notebook versus solver: if the contradiction tracker flags everything
-   automatically, what is left for the player to do. Gates the interface
-2. What goes in the topology library, since variety is structural not cosmetic
-3. Where game state lives between turns
+1. Nothing checks the property the design rests on: that the killer's alibi
+   breaks under two combined testimonies and no single one. A2 is a crude proxy
+2. Notebook versus solver. Gates the interface
+3. Topology library, since variety is structural not cosmetic
+4. Where game state lives between turns
 
 **Errands, not gates**
 
-- V0 and moving fixtures to JSON. Hygiene, parked behind the spine
-- Blind replay of a third prototype, some evening. See D-020
+- V0, and moving a curated corpus from `var/` to `tests/fixtures/`
+- Blind replay of a third prototype. See D-020

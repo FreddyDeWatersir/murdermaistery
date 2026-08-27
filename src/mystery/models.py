@@ -34,8 +34,20 @@ class Place(BaseModel):
 
 
 class Character(BaseModel):
+    """A person at the gathering, and how they behave when questioned.
+
+    Everything below `name` is the half of a character sheet that cannot be
+    derived from a timeline. The grid gives facts; this gives a person. In the
+    hand-built prototypes it was the difference between a witness reciting
+    locations and Renske refusing to answer until she was told something first
+    (D-044).
+    """
+
     id: CharacterId
     name: str
+    wants: str = ""
+    manner: str = ""
+    under_pressure: str = ""
 
 
 class Slot(BaseModel):
@@ -78,13 +90,75 @@ class Constraint(BaseModel):
         return self.place is not None and self.slot is not None
 
 
+class Secret(BaseModel):
+    """Something a character is concealing.
+
+    This is the layer that makes a cast into a mystery rather than a list of
+    people who were in rooms. Constraints say where everyone was; secrets say
+    why anyone would lie about it.
+
+    `about` is usually the victim, and that is the point. In a case that works,
+    the victim holds something over almost everyone, so that half the cast has a
+    motive and the killer is not the only person with a reason to be evasive.
+
+    `revealed_by` names another secret that has to surface first. That gating is
+    what stops the obvious suspect being the answer: the killer's motive stays
+    invisible until some unrelated-looking thread is pulled.
+
+    `is_motive` marks the one secret that explains why the killer did it. A
+    killer usually holds two: the background that made them vulnerable, and the
+    reason they picked up the sculpture. Guessing which is which by taking the
+    first match got A5 wrong on two real cases, so it is stated rather than
+    inferred.
+
+    `breaks_when` is the condition under which the holder stops concealing it.
+    Concealment that never breaks is a wall, not a mystery, and playtesting
+    showed the conditions are per character rather than global: one secret held
+    for five rounds and went under a direct, named press, another went sideways
+    under an emotional question its holder was not braced for (D-012).
+    """
+
+    id: str
+    holder: CharacterId
+    about: CharacterId | None = None
+    summary: str
+    known_by: list[CharacterId] = Field(default_factory=list)
+    revealed_by: str | None = None
+    breaks_when: str = ""
+    is_motive: bool = False
+
+
+class Claim(BaseModel):
+    """Where somebody says they were, which is not where they were.
+
+    Without this the killer has nothing to lie about, and an interrogation game
+    where nobody lies about their movements is a reading exercise.
+    """
+
+    character: CharacterId
+    place: PlaceId
+    slot: SlotId
+
+
 class Mystery(BaseModel):
+    """The whole of a case.
+
+    `killer` and `victim` are separate fields rather than a convention about
+    which constraint is named "murder". Almost everything downstream needs them:
+    knowledge derivation, the reveal, and every quality check that asks a
+    question about the murder rather than about the grid.
+    """
+
     title: str
+    killer: CharacterId | None = None
+    victim: CharacterId | None = None
     characters: list[Character]
     places: list[Place]
     slots: list[Slot]
     placements: dict[CharacterId, dict[SlotId, PlaceId]] = Field(default_factory=dict)
     constraints: list[Constraint] = Field(default_factory=list)
+    secrets: list[Secret] = Field(default_factory=list)
+    false_claim: Claim | None = None
 
     def who_is_in(self, place: PlaceId, slot: SlotId) -> set[CharacterId]:
         """Everyone the timeline puts in `place` during `slot`.
