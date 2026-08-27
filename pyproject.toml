@@ -1,7 +1,7 @@
 [project]
 name = "mystery"
 version = "0.1.0"
-description = "Add your description here"
+description = "An AI-generated murder mystery: structured ground truth, a validator, and a cast of interrogable agents"
 readme = "README.md"
 authors = [
     { name = "FreddyDeWatersir", email = "freddyraul11@gmail.com" }
@@ -18,3 +18,21 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.4",
 ]
+
+[tool.pytest.ini_options]
+# Only look for tests here. Stops pytest wandering into .venv or docs.
+testpaths = ["tests"]
+# -ra prints a summary of everything that did not plainly pass, at the end of the run.
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# E   pycodestyle errors      formatting problems that are actually errors
+# F   pyflakes                real bugs: unused imports, undefined names
+# I   isort                   import ordering
+# B   flake8-bugbear          likely bugs, e.g. mutable default arguments
+# UP  pyupgrade               modernise syntax for the Python version you target
+# SIM flake8-simplify         needlessly convoluted code
+select = ["E", "F", "I", "B", "UP", "SIM"]

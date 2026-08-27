@@ -1,0 +1,20 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environment
+.venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Secrets. API keys go here, never in the repo
+.env
+
+# Windows
+Thumbs.db
+desktop.ini
