@@ -12,7 +12,7 @@ role (D-004).
 
 from mystery.agent import ask, build_brief, leaks, render_system
 from mystery.knowledge import derive
-from mystery.models import Character, Claim, Constraint, Mystery, Place, Secret, Slot
+from mystery.models import Character, Constraint, FalseClaim, Mystery, Place, Secret, Slot
 
 PLACES = [Place(id=p, name=p.replace("_", " ").title()) for p in ("hall", "study", "cellar")]
 SLOTS = [Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)]
@@ -70,10 +70,11 @@ CASE = Mystery(
             about="magnus",
             summary="Magnus threatened to expose the affair.",
             revealed_by="affair",
+            is_motive=True,
             known_by=["clara"],
         ),
     ],
-    false_claim=Claim(character="otto", place="hall", slot="s2"),
+    false_claims=[FalseClaim(character="otto", place="hall", slot="s2")],
 )
 
 KNOW = derive(CASE)
@@ -96,12 +97,12 @@ def test_a_character_is_only_given_what_they_saw() -> None:
     assert "saw:otto@s2" not in brief.licensed, "Clara never saw Otto in the cellar"
 
 
-def test_a_character_is_not_given_someone_elses_secret_to_conceal() -> None:
+def test_a_character_is_not_given_someone_elses_secret_to_keep() -> None:
     clara = build_brief(CASE, KNOW, "clara")
     vera = build_brief(CASE, KNOW, "vera")
 
-    assert not clara.conceals, "Clara holds no secret of her own"
-    assert any("Vera and Otto" in f.text for f in vera.conceals)
+    assert not clara.conceals and not clara.guarded, "Clara holds no secret of her own"
+    assert any("Vera and Otto" in f.text for f in vera.guarded)
 
 
 def test_knowing_a_secret_is_licensed_but_holding_one_is_not() -> None:
@@ -146,17 +147,29 @@ def test_the_victim_never_witnessed_their_own_death() -> None:
 # The prompt
 
 
-def test_concealed_material_is_in_the_brief_but_never_as_a_citable_id() -> None:
+def test_the_killers_motive_is_in_the_brief_and_never_citable() -> None:
     """A character has to know their own secret in order to deflect around it.
 
     That means the prompt contains what the answer must not reveal, which is a
-    real risk and is precisely what the leakage detector is for.
+    real risk and is precisely what the leakage detector is for. For one secret
+    in the case it is absolute: the reason the killer did it never comes out of
+    their own mouth (D-066).
     """
-    vera = build_brief(CASE, KNOW, "vera")
-    system = render_system(vera)
+    otto = build_brief(CASE, KNOW, "otto")
+    system = render_system(otto)
 
-    assert "Vera and Otto are involved" in system
-    assert "[secret:affair]" not in system, "concealed items are not offered as citations"
+    assert "Magnus threatened to expose the affair" in system
+    assert "secret:motive" not in otto.licensed
+    assert "[secret:motive]" not in system, "the motive is not offered as a citation"
+
+
+def test_a_suspects_own_secret_can_be_got_out_of_them() -> None:
+    """Everything except the murder itself is winnable (D-066). Otherwise
+    interrogation is a formality and the secrets layer never surfaces."""
+    vera = build_brief(CASE, KNOW, "vera")
+
+    assert "secret:affair" in vera.licensed
+    assert "[secret:affair]" in render_system(vera)
 
 
 # Leakage
@@ -173,14 +186,27 @@ def test_citing_a_fact_the_character_does_not_have_is_a_leak() -> None:
 
 def test_citing_concealed_material_is_the_worst_kind_of_leak() -> None:
     """The character has handed over the thing they exist to hide."""
+    otto = build_brief(CASE, KNOW, "otto")
+    reply = ask(
+        otto,
+        "Why did you do it?",
+        _responder(speech="He was going to tell her.", used=["secret:motive"]),
+    )
+
+    assert leaks(otto, reply) == ["cited concealed material: secret:motive"]
+
+
+def test_giving_up_your_own_secret_is_a_fold_and_not_a_leak() -> None:
+    """The distinction the third state exists for. Coming clean is legitimate
+    play; saying something you were never told is not."""
     vera = build_brief(CASE, KNOW, "vera")
     reply = ask(
         vera,
-        "Anything between you and Otto?",
-        _responder(speech="We are involved.", used=["secret:affair"]),
+        "Otto has already told me about the two of you.",
+        _responder(speech="Then you know.", used=["secret:affair"]),
     )
 
-    assert leaks(vera, reply) == ["cited concealed material: secret:affair"]
+    assert leaks(vera, reply) == []
 
 
 def test_a_clean_answer_leaks_nothing() -> None:
@@ -235,18 +261,181 @@ def test_a_character_with_no_authored_persona_still_works() -> None:
     assert "(an ordinary guest)" in render_system(magnus)
 
 
-def test_a_concealed_secret_carries_its_breaking_point() -> None:
+def test_a_guarded_secret_carries_its_breaking_point() -> None:
     """Concealment that never breaks is a wall, not a mystery (D-012)."""
     vera = build_brief(CASE, KNOW, "vera")
 
-    affair = next(f for f in vera.conceals if f.id == "secret:affair")
+    affair = next(f for f in vera.guarded if f.id == "secret:affair")
 
     assert "already knows Otto was not where he says" in affair.text
 
 
 def test_a_secret_with_no_breaking_point_says_so_rather_than_going_silent() -> None:
-    otto = build_brief(CASE, KNOW, "otto")
+    stubborn = CASE.model_copy(
+        update={
+            "secrets": [
+                s.model_copy(update={"breaks_when": ""}) if s.id == "affair" else s
+                for s in CASE.secrets
+            ]
+        }
+    )
 
-    motive = next(f for f in otto.conceals if f.id == "secret:motive")
+    vera = build_brief(stubborn, derive(stubborn), "vera")
+    affair = next(f for f in vera.guarded if f.id == "secret:affair")
 
-    assert "You do not give this up." in motive.text
+    assert "no way around it" in affair.text
+
+
+# What the first playtest broke on (D-053, D-054, D-055)
+
+
+def test_a_character_remembers_what_they_already_said() -> None:
+    """The loudest bug from the first playtest.
+
+    Every question was answered as though it were the first, because nothing
+    carried the conversation forward. Consistency is not something a model can
+    invent: it has to be shown what it committed to.
+    """
+    vera = build_brief(CASE, KNOW, "vera")
+    system = render_system(
+        vera, [("Where were you at nine?", "The study, with Clara.")]
+    )
+
+    assert "The study, with Clara." in system
+    assert "Where were you at nine?" in system
+
+
+def test_a_first_question_says_so_rather_than_showing_an_empty_list() -> None:
+    system = render_system(build_brief(CASE, KNOW, "vera"))
+
+    assert "this is the first thing you have been asked" in system
+
+
+def test_opinions_reach_the_prompt_and_are_not_facts() -> None:
+    """The second playtest complaint: they gave nothing back.
+
+    Their whole brief was where they stood, so any question about a person
+    rather than a place had no licensed answer and got a refusal. Impressions
+    are stated freely and are deliberately not citable facts.
+    """
+    case = CASE.model_copy(
+        update={
+            "characters": [
+                c.model_copy(update={"impressions": {"magnus": "He collected debts."}})
+                if c.id == "vera"
+                else c
+                for c in CASE.characters
+            ]
+        }
+    )
+    vera = build_brief(case, derive(case), "vera")
+
+    assert "Magnus: He collected debts." in vera.impressions
+    assert "He collected debts." in render_system(vera)
+    assert not any("collected debts" in f.text for f in vera.facts)
+
+
+def test_the_body_being_found_is_common_knowledge() -> None:
+    """Nothing said the body had been found, so nobody could discuss the death
+    they were being questioned about."""
+    from mystery.models import Discovery
+
+    case = CASE.model_copy(
+        update={
+            "discovery": Discovery(
+                finder="clara", place="cellar", summary="She went down for a bottle."
+            )
+        }
+    )
+
+    for character in ("otto", "vera", "clara"):
+        brief = build_brief(case, derive(case), character)
+        joined = " ".join(brief.common)
+        assert "Clara found the body" in joined
+        assert "Cellar" in joined
+
+
+# --- innocent liars, and the third knowledge state (D-063, D-064) -----------
+
+
+LIARS = CASE.model_copy(
+    update={
+        "false_claims": [
+            FalseClaim(character="otto", place="hall", slot="s2"),
+            FalseClaim(
+                character="vera",
+                place="hall",
+                slot="s1",
+                covers="affair",
+                admits_when="she is told somebody saw her in the study",
+            ),
+        ]
+    }
+)
+LIARS_KNOW = derive(LIARS)
+
+
+def test_an_innocent_liar_is_handed_the_lie_as_their_own_account() -> None:
+    """Same treatment as the killer: they say the lie, not the truth."""
+    vera = build_brief(LIARS, LIARS_KNOW, "vera")
+
+    self_s1 = next(f for f in vera.facts if f.id == "self:s1")
+    assert self_s1.place == "hall", "she claims the hall"
+    assert LIARS.placements["vera"]["s1"] == "study", "she was in the study"
+
+
+def test_an_innocent_can_be_brought_to_the_truth_and_the_killer_cannot() -> None:
+    """The asymmetry the whole design now rests on.
+
+    An innocent's retraction has to reach the notebook, so it is citable. The
+    killer's would end the game, so it never becomes sayable at all: under
+    pressure they have the shield instead.
+    """
+    vera = build_brief(LIARS, LIARS_KNOW, "vera")
+    otto = build_brief(LIARS, LIARS_KNOW, "otto")
+
+    assert "truth:s1" in {f.id for f in vera.guarded}
+    assert "truth:s1" in vera.licensed, "a retraction nobody can cite is a retraction nobody hears"
+
+    assert "truth:s2" in {f.id for f in otto.conceals}
+    assert "truth:s2" not in otto.licensed
+
+
+def test_the_guarded_truth_carries_the_room_it_happened_in() -> None:
+    """Structure travels with the prose (D-050), or the timeline cannot update."""
+    vera = build_brief(LIARS, LIARS_KNOW, "vera")
+
+    truth = next(f for f in vera.guarded if f.id == "truth:s1")
+    assert (truth.subject, truth.slot, truth.place) == ("vera", "s1", "study")
+
+
+def test_the_condition_for_admitting_it_reaches_the_prompt() -> None:
+    vera = build_brief(LIARS, LIARS_KNOW, "vera")
+
+    assert "somebody saw her in the study" in render_system(vera)
+
+
+def test_admitting_it_is_not_a_leak() -> None:
+    vera = build_brief(LIARS, LIARS_KNOW, "vera")
+
+    answer = _responder(speech="Yes. I was.", used=["truth:s1"])
+    reply = ask(vera, "Somebody saw you in the study.", answer)
+
+    assert leaks(vera, reply) == []
+
+
+def test_the_killer_confessing_is_a_leak() -> None:
+    otto = build_brief(LIARS, LIARS_KNOW, "otto")
+
+    reply = ask(otto, "You were in the cellar.", _responder(speech="I was.", used=["truth:s2"]))
+
+    assert leaks(otto, reply) == ["cited concealed material: truth:s2"]
+
+
+def test_a_liar_reports_nothing_from_the_moment_they_are_lying_about() -> None:
+    """D-042, now for everybody. Vera cannot say who was in the study at s1
+    while claiming she was in the hall."""
+    vera = build_brief(LIARS, LIARS_KNOW, "vera")
+
+    assert not [f for f in vera.facts if f.id.startswith("saw:") and f.slot == "s1"]
+    assert [f for f in vera.facts if f.id.startswith("saw:") and f.slot == "s2"]

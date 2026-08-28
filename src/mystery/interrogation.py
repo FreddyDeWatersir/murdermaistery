@@ -56,6 +56,10 @@ class Statement:
     speech: str
     assertions: list[Assertion] = field(default_factory=list)
     refused: bool = False
+    # Every fact id the reply cited, not only the ones that place somebody in a
+    # room. Assertions answer "where was everyone"; this answers "what has the
+    # player actually been told", which is what the accusation needs (D-065).
+    cited: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -99,8 +103,13 @@ def assertions_from(brief: Brief, reply: Reply) -> list[Assertion]:
     Only cited facts count. A model that says something in prose without citing
     it has made a claim the tracker cannot see, which is the same limitation the
     leakage detector has and for the same reason (D-041).
+
+    Guarded facts count too, and that is the whole point of them (D-064). When a
+    liar finally admits where they really were, that retraction has to land in
+    the notebook and flip the timeline, or the player watches somebody come
+    clean while the grid goes on showing the lie.
     """
-    by_id = {fact.id: fact for fact in brief.facts}
+    by_id = {fact.id: fact for fact in (*brief.facts, *brief.guarded)}
 
     return [
         Assertion(subject=fact.subject, slot=fact.slot, place=fact.place)
@@ -132,6 +141,21 @@ class Transcript:
 
     def asked(self, character: CharacterId) -> int:
         return sum(1 for s in self.statements if s.speaker == character)
+
+    def surfaced_secrets(self) -> set[str]:
+        """Which secrets have actually come out.
+
+        Two ways in: the person holding it gave it up (`secret:x`), or somebody
+        who knew it told you (`heard:x`). Both are citations, so this is set
+        membership rather than a judgement about prose, which is the same trick
+        the leak detector uses and for the same reason (D-041).
+        """
+        return {
+            cited.split(":", 1)[1]
+            for statement in self.statements
+            for cited in statement.cited
+            if cited.startswith(("secret:", "heard:"))
+        }
 
     def contradictions(self) -> list[Contradiction]:
         """Every pair of statements that cannot both be true.

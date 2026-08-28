@@ -95,6 +95,113 @@ def check_references_exist(mystery: Mystery) -> list[Violation]:
                 )
             )
 
+    secrets = {secret.id for secret in mystery.secrets}
+
+    if mystery.murder is not None and mystery.murder not in {c.id for c in mystery.constraints}:
+        violations.append(
+            Violation(
+                rule="V4",
+                message=(
+                    f"The murder is said to be constraint {mystery.murder!r}, which does "
+                    f"not exist. `murder` takes the id of one of the constraints"
+                ),
+            )
+        )
+
+    if mystery.false_confessor is not None and mystery.false_confessor not in people:
+        violations.append(
+            Violation(
+                rule="V4",
+                message=(
+                    f"{mystery.false_confessor!r} is set to confess to the murder and "
+                    f"is not in the cast"
+                ),
+            )
+        )
+
+    for claim in mystery.false_claims:
+        if claim.character not in people:
+            violations.append(
+                Violation(
+                    rule="V4",
+                    message=f"A false claim is told by {claim.character!r}, who is not in the cast",
+                )
+            )
+        if claim.place not in places:
+            violations.append(
+                Violation(
+                    rule="V4",
+                    message=(
+                        f"{claim.character!r} claims to have been in {claim.place!r}, "
+                        f"which is not a place in this mystery"
+                    ),
+                )
+            )
+        if claim.slot not in slots:
+            violations.append(
+                Violation(
+                    rule="V4",
+                    message=(
+                        f"{claim.character!r} tells their lie at {claim.slot!r}, "
+                        f"which is not a slot in this mystery"
+                    ),
+                )
+            )
+        if claim.covers and claim.covers not in secrets:
+            violations.append(
+                Violation(
+                    rule="V4",
+                    message=(
+                        f"{claim.character!r} lies to cover secret {claim.covers!r}, "
+                        f"which does not exist. `covers` takes the id of a secret"
+                    ),
+                )
+            )
+
+    return violations
+
+
+def check_false_claims_are_false(mystery: Mystery) -> list[Violation]:
+    """V8: a lie has to be a lie, and one person tells at most one.
+
+    Guards: the model, and one piece of our own bookkeeping.
+
+    A claim that matches the grid is not a false claim, and nothing downstream
+    survives it: the alibi analysis reports the story holds, the brief hands the
+    character a "lie" identical to the truth, and the player is hunting a
+    contradiction that does not exist.
+
+    One lie per person because the brief withholds what a liar saw during the
+    moment they are lying about (D-042). Two lies from one mouth means two
+    withheld moments and a character who saw almost nothing all evening, which
+    reads as evasion rather than as a person.
+    """
+    violations: list[Violation] = []
+    told_by: set[str] = set()
+
+    for claim in mystery.false_claims:
+        truth = mystery.placements.get(claim.character, {}).get(claim.slot)
+
+        if truth is not None and truth == claim.place:
+            violations.append(
+                Violation(
+                    rule="V8",
+                    message=(
+                        f"{claim.character!r} claims {claim.place!r} at {claim.slot!r}, "
+                        f"which is exactly where the timeline puts them. The lie is not a lie"
+                    ),
+                )
+            )
+
+        if claim.character in told_by:
+            violations.append(
+                Violation(
+                    rule="V8",
+                    message=f"{claim.character!r} tells more than one lie about where they were",
+                )
+            )
+        told_by.add(claim.character)
+
     return violations
 
 
@@ -223,17 +330,9 @@ def check_constraints_do_not_contradict(mystery: Mystery) -> list[Violation]:
 
 
 def murder_slot(mystery: Mystery) -> str | None:
-    """The slot in which the killer and the victim were alone together."""
-    if mystery.killer is None or mystery.victim is None:
-        return None
-    for constraint in mystery.constraints:
-        if (
-            constraint.is_bound
-            and mystery.killer in constraint.people
-            and mystery.victim in constraint.people
-        ):
-            return constraint.slot
-    return None
+    """When the killing happens. One definition, on the model (D-071)."""
+    scene = mystery.murder_scene
+    return scene.slot if scene is not None and scene.is_bound else None
 
 
 def check_the_victim_stays_dead(mystery: Mystery) -> list[Violation]:
@@ -309,6 +408,7 @@ FINAL_RULES = [
     check_references_exist,
     check_constraints_do_not_contradict,
     check_the_victim_stays_dead,
+    check_false_claims_are_false,
     check_constraints_match_timeline,
     check_exclusive_constraints_are_private,
     check_every_constraint_was_placed,

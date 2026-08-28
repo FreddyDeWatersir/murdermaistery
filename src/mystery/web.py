@@ -5,48 +5,158 @@
 Then open http://localhost:8000.
 
 One game, held in memory, one process. No database, no sessions, no auth: this
-exists so that two people can sit in front of one laptop and find out whether the
-game is any good, which is the only question that matters right now. Everything
-it does not do is deliberate.
+exists so that two people can find out whether the game is any good, which is the
+only question that matters right now. Everything it does not do is deliberate.
+
+`--share` binds to the local network so anyone on the same wifi can join by
+opening a browser. They share one case and one notebook, which turns out to be
+the right behaviour for two people solving something together rather than an
+oversight to fix later.
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 from mystery.agent import Responder, ask, build_brief
 from mystery.generator import (
+    DRAFT_MODEL,
+    VOICE_MODEL,
     GenerationFailed,
     GenerationRequest,
     anthropic_drafter,
     generate,
 )
 from mystery.interrogation import Statement, Transcript, assertions_from
+from mystery.daily import todays_case, waiting
 from mystery.knowledge import analyse_alibi, derive
+from mystery.library import ART, catalogue
 from mystery.models import Mystery
+from mystery.library import load as load_case
+from mystery.library import save as save_case
+from mystery.session import FileSessions, InMemorySessions, Session, Sessions
+from mystery.solvable import analyse, report
 from mystery.solver import solve
+from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
+from mystery.topology import LIBRARY, assess
 from mystery.validator import validate
 from pydantic import BaseModel
 
 CACHE = Path("var/mysteries")
 
 
-class Game:
-    """One case, one transcript, one process."""
+def _initials(characters: list) -> dict[str, str]:
+    """Short tags for the timeline grid, one per character, all distinct.
 
-    def __init__(self, mystery: Mystery, responder: Responder) -> None:
+    Initials only work as stand-ins if no two people share a pair, so a
+    collision grows the tag along the surname: two Vermeers become IV and IVE
+    rather than two identical squares the player cannot tell apart.
+    """
+    tags: dict[str, str] = {}
+    taken: set[str] = set()
+    for character in characters:
+        parts = [p for p in character.name.replace("-", " ").split() if p] or ["?"]
+        tag = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else parts[0][1:2])).upper()
+        rest = parts[-1][1:].upper()
+        while tag in taken and rest:
+            tag, rest = tag + rest[0], rest[1:]
+        while tag in taken:
+            tag += "'"
+        taken.add(tag)
+        tags[character.id] = tag
+    return tags
+
+
+class Case:
+    """What was generated, and never changes again (D-077).
+
+    The mystery, everything derived from it, and the pictures. Built once and
+    shared by everybody playing it, because none of it is anybody's private
+    business: the briefs are per character, not per player, and two people
+    asking the same suspect the same question are entitled to the same facts.
+    """
+
+    def __init__(
+        self,
+        mystery: Mystery,
+        id: str = "",
+        portraits: dict[str, str] | None = None,
+        scenery: dict[str, str] | None = None,
+    ) -> None:
+        self.id = id or mystery.title
         self.mystery = mystery
-        self.responder = responder
+        self.portraits = portraits or {}
+        self.scenery = scenery or {}
         self.knowledge = derive(mystery)
         self.briefs = {
             c.id: build_brief(mystery, self.knowledge, c.id)
             for c in mystery.characters
             if c.id != mystery.victim
         }
-        self.transcript = Transcript()
-        self.solved = False
+        self.portrait_dir: Path | None = None
+        self.scenery_dir: Path | None = None
+
+
+class Game:
+    """One player, one case: a view rather than a thing.
+
+    Cheap to build, because everything expensive is on the `Case` and everything
+    mutable is on the `Session`. One of these exists for the length of a request
+    and is thrown away, which is what lets a single process serve people who are
+    not solving the same evening together.
+    """
+
+    def __init__(
+        self,
+        case: Case | Mystery,
+        responder: Responder,
+        portraits: dict[str, str] | None = None,
+        scenery: dict[str, str] | None = None,
+        session: Session | None = None,
+    ) -> None:
+        # A bare mystery still works and makes its own case. Most of the tests
+        # and every terminal path have no interest in any of this.
+        self.case = (
+            case
+            if isinstance(case, Case)
+            else Case(case, portraits=portraits, scenery=scenery)
+        )
+        self.responder = responder
+        self.session = session or Session(case_id=self.case.id)
+
+    @property
+    def mystery(self) -> Mystery:
+        return self.case.mystery
+
+    @property
+    def briefs(self):
+        return self.case.briefs
+
+    @property
+    def knowledge(self):
+        return self.case.knowledge
+
+    @property
+    def portraits(self) -> dict[str, str]:
+        return self.case.portraits
+
+    @property
+    def scenery(self) -> dict[str, str]:
+        return self.case.scenery
+
+    @property
+    def transcript(self) -> Transcript:
+        return self.session.transcript
+
+    @property
+    def solved(self) -> bool:
+        return self.session.solved
+
+    @solved.setter
+    def solved(self, value: bool) -> None:
+        self.session.solved = value
 
     @property
     def names(self) -> dict[str, str]:
@@ -60,9 +170,15 @@ class Game:
     def places(self) -> dict[str, str]:
         return {p.id: p.name for p in self.mystery.places}
 
+    def history(self, who: str) -> list[tuple[str, str]]:
+        """What this character has already said, so they can stay consistent."""
+        return [
+            (s.question, s.speech) for s in self.transcript.statements if s.speaker == who
+        ]
+
     def ask(self, who: str, question: str) -> str:
         brief = self.briefs[who]
-        reply = ask(brief, question, self.responder)
+        reply = ask(brief, question, self.responder, history=self.history(who))
         self.transcript.record(
             Statement(
                 round=self.transcript.rounds + 1,
@@ -71,6 +187,7 @@ class Game:
                 speech=reply.speech,
                 assertions=assertions_from(brief, reply),
                 refused=reply.refused,
+                cited=list(reply.used),
             )
         )
         return reply.speech
@@ -135,15 +252,84 @@ class Game:
             }
         )
 
+        # Per-person transcripts, so a player can reread one conversation rather
+        # than scrolling a single mixed log looking for who said what.
+        logs: dict[str, list[dict]] = {c.id: [] for c in self.mystery.characters}
+        for s in self.transcript.statements:
+            logs.setdefault(s.speaker, []).append({"q": s.question, "a": s.speech})
+
+        # Where everyone is *claimed* to have been, as a timeline rather than a
+        # snapshot (D-062). Rooms down the side, slots across, people reduced to
+        # initials so a whole evening fits in a panel. The old version showed one
+        # slot at a time, which is the wrong shape: an alibi is read by comparing
+        # slots, and a player flicking between five tabs is holding the grid in
+        # their head, which is the job the notebook was supposed to take over.
+        tags = _initials(self.mystery.characters)
+        timeline: dict[str, dict[str, list[dict]]] = {}
+        accounted: dict[str, set[str]] = {s.id: set() for s in self.mystery.slots}
+        for (subject, slot), said in claims.items():
+            told = {p for _, p in said}
+            accounted.setdefault(slot, set()).add(subject)
+            for place in sorted(told):
+                sources = sorted({names.get(sp, sp) for sp, p in said if p == place})
+                timeline.setdefault(slot, {}).setdefault(place, []).append(
+                    {
+                        "id": subject,
+                        "tag": tags.get(subject, "??"),
+                        "name": names.get(subject, subject),
+                        # Two people put them in two different rooms at this
+                        # moment. One of them is wrong and that is the game.
+                        "disputed": len(told) > 1,
+                        # One person's word, or two. A claim somebody else
+                        # corroborated is a different object to a claim about
+                        # yourself, and the grid should not flatten them.
+                        "firm": len(sources) > 1,
+                        "source": ", ".join(sources),
+                    }
+                )
+
+        # Nobody has placed these people at this hour. Not innocence, not guilt:
+        # a hole in what the player has been told, which is worth seeing.
+        missing = {
+            s.id: [
+                {"tag": tags[c.id], "name": c.name}
+                for c in self.mystery.characters
+                if c.id not in accounted.get(s.id, set())
+            ]
+            for s in self.mystery.slots
+        }
+
         return {
             "grid": grid,
             "conflicts": conflicts,
             "holes": holes,
             "unasked": unasked,
             "questions": self.transcript.rounds,
+            "logs": logs,
+            # Everything that has actually come out, which is what the
+            # accusation offers as possible motives (D-065).
+            "found": [
+                {"id": secret.id, "text": secret.summary}
+                for secret in self.mystery.secrets
+                if secret.id in self.transcript.surfaced_secrets()
+            ],
+            "timeline": timeline,
+            "missing": missing,
+            "tags": [
+                {"tag": tags[c.id], "name": c.name, "dead": c.id == self.mystery.victim}
+                for c in self.mystery.characters
+            ],
         }
 
-    def accuse(self, who: str) -> dict:
+    def accuse(self, who: str, why: str | None = None) -> dict:
+        """Name a killer, and name what you think they did it for.
+
+        A name on its own was a one-bit answer to a case with one hidden
+        variable, and a coin flip beat a bad player (D-065). Naming the motive
+        as well means the timeline gets you to the person and only the secrets
+        get you to the reason, so "right person, wrong reason" becomes its own
+        ending rather than being scored as a win.
+        """
         self.solved = True
         m, names, places, times = self.mystery, self.names, self.places, self.times
 
@@ -152,7 +338,6 @@ class Game:
             next((s for s in m.secrets if s.holder == m.killer), None),
         )
         analysis = analyse_alibi(m, self.knowledge)
-        surfaced = {a.subject for s in self.transcript.statements for a in s.assertions}
 
         lie = None
         if m.false_claim:
@@ -164,13 +349,40 @@ class Game:
                 f"{places.get(truth, truth)}."
             )
 
+        # You may only offer a motive you actually surfaced. Guessing from a
+        # list of everything would make the list itself the answer.
+        found = self.transcript.surfaced_secrets()
+        right_reason = motive is not None and why == motive.id and why in found
+
         return {
             "correct": who == m.killer,
+            "right_reason": right_reason,
+            "offered": next(
+                (s.summary for s in m.secrets if s.id == why and s.id in found), None
+            ),
             "accused": names.get(who, who),
             "killer": names.get(m.killer, m.killer),
             "questions": self.transcript.rounds,
             "motive": motive.summary if motive else None,
             "lie": lie,
+            # Everybody who lied, and what each lie was actually for. The point
+            # of the reveal now is not only "it was him", it is "here is what
+            # the other two were hiding, which is why you could not tell".
+            "lies": [
+                {
+                    "name": names.get(c.character, c.character),
+                    "claimed": places.get(c.place, c.place),
+                    "time": times.get(c.slot, c.slot),
+                    "truth": places.get(
+                        m.placements.get(c.character, {}).get(c.slot), "?"
+                    ),
+                    "covering": next(
+                        (x.summary for x in m.secrets if x.id == c.covers), ""
+                    ),
+                    "killer": c.character == m.killer,
+                }
+                for c in m.false_claims
+            ],
             "witnesses": [
                 {
                     "name": names.get(p, p),
@@ -178,10 +390,13 @@ class Game:
                 }
                 for p in analysis.contradictors
             ],
+            # What never came out, measured by citation rather than by whether
+            # the holder happened to be mentioned. The old version counted a
+            # secret as found because somebody had placed its holder in a room.
             "missed": [
                 f"{names.get(s.holder, s.holder)}: {s.summary}"
                 for s in m.secrets
-                if s.holder not in surfaced
+                if s.id not in found
             ],
         }
 
@@ -193,38 +408,154 @@ class Question(BaseModel):
 
 class Accusation(BaseModel):
     who: str
+    why: str | None = None
 
 
-def build_app(game: Game) -> FastAPI:
+COOKIE = "mystery_session"
+
+
+def build_app(
+    case: Case | Game,
+    responder: Responder | None = None,
+    sessions: Sessions | None = None,
+    together: bool = False,
+) -> FastAPI:
+    """One case, any number of people playing it separately (D-077).
+
+    `together` puts everybody in one session, which is the old behaviour and the
+    right one for two people in a room with one notebook between them. Off, each
+    visitor gets their own transcript, keyed by a cookie, which is the only way
+    a public URL makes any sense.
+
+    Passing a `Game` still works and means `together`: it is one player's view,
+    so serving it serves that view to everyone.
+    """
     app = FastAPI()
+
+    if isinstance(case, Game):
+        store: Sessions = sessions or InMemorySessions()
+        shared: Session | None = case.session
+        store.save(shared)
+        responder = responder or case.responder
+        case = case.case
+        together = True
+    else:
+        store = sessions or InMemorySessions()
+        shared = store.create(case.id) if together else None
+
+    if responder is None:
+        raise ValueError("build_app needs a responder unless it is given a Game")
+
+    the_case: Case = case
+    answer: Responder = responder
+
+    def player(request: Request, response: Response) -> Game:
+        """The session this request belongs to, made if it does not exist yet."""
+        if shared is not None:
+            return Game(the_case, answer, session=shared)
+
+        found = store.get(request.cookies.get(COOKIE, ""))
+        if found is None:
+            found = store.create(the_case.id)
+            response.set_cookie(
+                COOKIE, found.id, httponly=True, samesite="lax", max_age=60 * 60 * 12
+            )
+        return Game(the_case, answer, session=found)
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return PAGE
 
     @app.get("/state")
-    def state() -> dict:
+    def state(request: Request, response: Response) -> dict:
+        game = player(request, response)
         return {
             "title": game.mystery.title,
             "victim": game.names.get(game.mystery.victim, ""),
             "suspects": [
-                {"id": c.id, "name": c.name, "wants": c.wants, "manner": c.manner}
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    # `wants` and `manner` are not sent. A tooltip on the cast
+                    # chips was showing every suspect's private motive, which is
+                    # the game handing over its own answer (D-074).
+                    "role": c.role,
+                    "gender": c.gender,
+                    "look": c.look,
+                    "portrait": (
+                        f"/portrait/{c.id}.png" if c.id in game.portraits else None
+                    ),
+                }
                 for c in game.mystery.characters
                 if c.id != game.mystery.victim
             ],
-            "times": [s.label for s in sorted(game.mystery.slots, key=lambda s: s.index)],
-            "places": [p.name for p in game.mystery.places],
+            "times": [
+                {"id": s.id, "label": s.label}
+                for s in sorted(game.mystery.slots, key=lambda s: s.index)
+            ],
+            "places": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "scene": f"/scene/{p.id}.png" if p.id in game.scenery else None,
+                }
+                for p in game.mystery.places
+            ],
+            "scene": "/scene/setting.png" if "setting" in game.scenery else None,
+            "discovery": (
+                {
+                    "finder": game.names.get(
+                        game.mystery.discovery.finder, game.mystery.discovery.finder
+                    ),
+                    "place": game.places.get(
+                        game.mystery.discovery.place, game.mystery.discovery.place
+                    ),
+                    "summary": game.mystery.discovery.summary,
+                }
+                if game.mystery.discovery
+                else None
+            ),
             "notebook": game.notebook(),
         }
 
+    @app.get("/portrait/{filename}")
+    def portrait(filename: str):
+        from fastapi.responses import FileResponse
+        from fastapi.responses import Response as Sent
+
+        cid = filename.removesuffix(".png")
+        name = the_case.portraits.get(cid)
+        folder = the_case.portrait_dir
+        if not name or folder is None or not (folder / name).exists():
+            return Sent(status_code=404)
+        return FileResponse(folder / name, media_type="image/png")
+
+    @app.get("/scene/{filename}")
+    def scene(filename: str):
+        from fastapi.responses import FileResponse
+        from fastapi.responses import Response as Sent
+
+        name = the_case.scenery.get(filename.removesuffix(".png"))
+        folder = the_case.scenery_dir
+        if not name or folder is None or not (folder / name).exists():
+            return Sent(status_code=404)
+        return FileResponse(folder / name, media_type="image/png")
+
     @app.post("/ask")
-    def ask_endpoint(question: Question) -> dict:
+    def ask_endpoint(question: Question, request: Request, response: Response) -> dict:
+        game = player(request, response)
         speech = game.ask(question.who, question.text)
+        store.save(game.session)
         return {"speech": speech, "notebook": game.notebook()}
 
     @app.post("/accuse")
-    def accuse_endpoint(accusation: Accusation) -> dict:
-        return game.accuse(accusation.who)
+    def accuse_endpoint(
+        accusation: Accusation, request: Request, response: Response
+    ) -> dict:
+        game = player(request, response)
+        verdict = game.accuse(accusation.who, accusation.why)
+        store.save(game.session)
+        return verdict
 
     return app
 
@@ -248,6 +579,22 @@ overflow:hidden;user-select:none}
 #scene{position:fixed;inset:0;display:flex;flex-direction:column;
 background:radial-gradient(ellipse at 50% 34%,#1a2030 0%,#0b0d12 62%,#070810 100%);
 transition:right .32s cubic-bezier(.2,.8,.2,1)}
+/* The generated backdrop, if there is one (D-069). Two layers so a room can
+   cross-fade in over the setting rather than snapping, and both sit under a
+   heavy vignette because every word on this screen has to stay readable over
+   whatever the image turned out to be. */
+#backdrop,#backdrop2{position:absolute;inset:0;background-size:cover;
+background-position:center;opacity:0;transition:opacity .9s ease;z-index:0}
+#shade{position:absolute;inset:0;z-index:1;pointer-events:none;
+background:radial-gradient(ellipse at 50% 38%,rgba(7,8,16,.30) 0%,
+rgba(7,8,16,.66) 52%,rgba(7,8,16,.90) 100%)}
+#top,#stage,#box,#bar{position:relative;z-index:2}
+#where{position:absolute;right:22px;top:54px;z-index:3;font-family:var(--mono);
+font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+opacity:0;transition:opacity .5s}
+#where.on{opacity:.85}
+th.rm.clickable{cursor:pointer;color:var(--cool)}
+th.rm.clickable:hover{text-decoration:underline}
 #scene.shifted{right:min(430px,92vw)}
 @media(max-width:760px){#scene.shifted{right:0}}
 #top{padding:14px 20px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
@@ -257,10 +604,20 @@ z-index:3}
 #top .right{margin-left:auto;display:flex;gap:8px;align-items:center}
 #stage{flex:1;position:relative;display:flex;align-items:flex-end;
 justify-content:center;min-height:0}
+/* A generated portrait is a square image with its own dark ground, and over a
+   backdrop that reads as a sticker with a visible edge (D-072). Feathering the
+   image into whatever is behind it costs nothing and is the difference between
+   a person standing in a room and a photograph taped to one. */
+#photo{width:min(46vh,340px);display:none;
+transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .35s;
+transform-origin:bottom center;filter:drop-shadow(0 24px 60px rgba(0,0,0,.75));
+-webkit-mask-image:radial-gradient(ellipse 62% 58% at 50% 44%,#000 58%,transparent 100%);
+mask-image:radial-gradient(ellipse 62% 58% at 50% 44%,#000 58%,transparent 100%)}
+#photo.enter{opacity:0;transform:translateY(22px) scale(.97)}
 #portrait{width:min(46vh,340px);transition:transform .5s cubic-bezier(.2,.8,.2,1),
 opacity .35s;transform-origin:bottom center;filter:drop-shadow(0 24px 60px rgba(0,0,0,.75))}
 #portrait.enter{opacity:0;transform:translateY(22px) scale(.97)}
-#portrait.rattled{animation:shake .5s}
+#portrait.rattled,#photo.rattled{animation:shake .5s}
 @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px)}
 40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
 #box{margin:0 auto 0;width:min(920px,94%);background:linear-gradient(180deg,
@@ -300,6 +657,36 @@ border-left:1px solid var(--rule);padding:22px;overflow-y:auto;z-index:5;
 transform:translateX(100%);transition:transform .32s cubic-bezier(.2,.8,.2,1);
 user-select:text}
 #book.open{transform:none}
+#tabs{display:flex;gap:6px;margin-bottom:18px;position:sticky;top:-22px;
+background:var(--panel);padding:6px 0 10px;z-index:2}
+#tabs button{flex:1;font-size:12px;padding:6px 4px}
+#tabs button.on{background:var(--cool);color:#0b0d12;border-color:var(--cool);font-weight:500}
+/* The timeline grid. Scrolls sideways on a phone rather than squeezing the
+   columns until the initials wrap. */
+.tlwrap{overflow-x:auto;margin:0 -4px;padding:0 4px}
+table.tl{border-collapse:separate;border-spacing:3px;font-family:var(--mono);
+font-size:11px;width:100%}
+table.tl th{font-weight:500;color:var(--muted);font-size:9.5px;letter-spacing:.09em;
+text-transform:uppercase;padding:2px 4px;text-align:center;white-space:nowrap}
+table.tl th.rm{text-align:left;max-width:96px;white-space:normal;line-height:1.3}
+table.tl td{background:var(--panel2);border:1px solid var(--rule);border-radius:5px;
+min-width:44px;height:34px;padding:3px;text-align:center;vertical-align:middle}
+table.tl tr.gap td{background:transparent;border-style:dashed}
+table.tl tr.gap th.rm{color:#4d5464}
+.pin{display:inline-block;background:var(--cool);color:#0b0d12;font-size:10.5px;
+font-weight:600;letter-spacing:.03em;border-radius:3px;padding:2px 4px;margin:1px;
+cursor:default}
+.pin.bad{background:var(--bad);color:#fff}
+.pin.off{background:transparent;color:#4d5464;border:1px solid var(--rule);font-weight:400}
+.pin.dead{background:var(--muted);color:#0b0d12}
+/* Corroborated by somebody other than the person themselves. */
+.pin.firm{box-shadow:0 0 0 1.5px var(--ink)}
+.key{margin-top:12px;display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11.5px;
+color:var(--muted)}
+.key span b{font-family:var(--mono);color:var(--ink);font-weight:600;margin-right:4px}
+.qa{margin-bottom:14px}
+.qa .qq{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:3px}
+.qa .aa{font-size:13px;line-height:1.55}
 #book h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
 text-transform:uppercase;color:var(--muted);margin:22px 0 8px;font-weight:500}
 #book h2:first-of-type{margin-top:0}
@@ -308,6 +695,8 @@ td{padding:4px 5px;border-bottom:1px solid var(--rule);vertical-align:top}
 tr.disputed td{color:var(--bad)}
 .item{background:var(--panel2);border-left:2px solid var(--rule);padding:8px 11px;
 margin-bottom:7px;font-size:12.5px;line-height:1.5;border-radius:0 4px 4px 0}
+.item.pick{cursor:pointer;border-left-color:var(--cool)}
+.item.pick:hover{background:var(--rule)}
 .item.hard{border-left-color:var(--bad)}
 .item.soft{border-left-color:var(--warm)}
 .item.cold{border-left-color:var(--rule);color:var(--muted)}
@@ -320,6 +709,8 @@ padding:32px;max-width:640px;width:100%}
 #reveal h3{font-family:var(--display);font-size:34px;margin:0 0 4px;font-weight:400}
 </style></head><body>
 <div id="scene">
+  <div id="backdrop"></div><div id="backdrop2"></div><div id="shade"></div>
+  <div id="where"></div>
   <div id="top">
     <h1 id="title">…</h1><span class="sub" id="sub"></span>
     <div class="right">
@@ -328,7 +719,8 @@ padding:32px;max-width:640px;width:100%}
       <button id="booktoggle">Notebook</button>
     </div>
   </div>
-  <div id="stage"><svg id="portrait" viewBox="0 0 200 250"></svg></div>
+  <div id="stage"><svg id="portrait" viewBox="0 0 200 250"></svg>
+    <img id="photo" alt=""></div>
   <div id="box">
     <div id="nameplate">—</div>
     <div id="said" class="empty">Pick someone below and ask them something.</div>
@@ -344,6 +736,8 @@ padding:32px;max-width:640px;width:100%}
 <script>
 const $=i=>document.getElementById(i);
 let S=null,who=null,busy=false,typer=null,sound=true,lastConflicts=0;
+let tab='book',NB={grid:[],conflicts:[],holes:[],unasked:[],logs:{},timeline:{},
+  missing:{},tags:[],found:[]};
 
 /* ---------- procedural portraits -------------------------------------- */
 function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);
@@ -353,10 +747,18 @@ const HAIR=['#241c18','#4a3527','#7a5638','#b08046','#2b2b33','#5d5049','#8f8f97
 const CLOTH=['#2c3550','#3a2f3f','#204040','#463526','#332f45','#1f3a34','#4a2c2c','#2a3b4a'];
 const ACCENT=['#7fa9ee','#d9a24e','#9d8ce0','#6fbfa8','#e08b7a','#c0a06a','#7fc0d9','#c98fb0'];
 
-function portraitSVG(id,opts){
-  const h=hash(id),o=opts||{};
+function portraitSVG(id,look,gender){
+  /* `look` is a sentence the generator wrote. Reading a man/woman cue out of it
+     stops the drawn faces being a coin flip, which players noticed. */
+  const l=(look||'').toLowerCase();
+  const fem=(gender||'').toLowerCase().startsWith('w')||
+    (!gender&&/\b(woman|women|she|her|lady|girl|mrs|ms|miss)\b/.test(l));
+  const masc=/\b(man|men|he|his|him|gentleman|boy|mr)\b/.test(l);
+  const h=hash(id)+(fem?7:masc?3:0);
   const skin=SKIN[h%8],hair=HAIR[(h>>3)%8],cloth=CLOTH[(h>>6)%8],accent=ACCENT[(h>>9)%8];
-  const style=(h>>12)%6, glasses=((h>>15)%4)===0, collar=((h>>17)%3)===0;
+  const pool=fem?[1,2,3,5]:masc?[0,4,0,4]:[0,1,2,3,4,5];
+  const style=pool[(h>>12)%pool.length], glasses=((h>>15)%4)===0,
+        collar=((h>>17)%3)===0;
   const uid=id.replace(/[^a-z0-9]/gi,'');
   const hairs=[
     `<path d="M56 96C56 58 74 40 100 40s44 18 44 56c0-22-14-30-44-30S56 74 56 96Z" fill="${hair}"/>`,
@@ -451,9 +853,19 @@ function pitchOf(id){return 300+(hash(id)%9)*46}
 function nameOf(id){const s=S.suspects.find(x=>x.id===id);return s?s.name:id}
 
 function showPortrait(id){
-  const p=$('portrait');
-  p.classList.add('enter');
-  setTimeout(()=>{p.innerHTML=portraitSVG(id);p.classList.remove('enter')},60);
+  const s=S.suspects.find(x=>x.id===id);
+  const svg=$('portrait'),img=$('photo');
+  svg.classList.add('enter');img.classList.add('enter');
+  setTimeout(()=>{
+    if(s&&s.portrait){
+      img.src=s.portrait;img.style.display='block';svg.style.display='none';
+      img.classList.remove('enter');
+    }else{
+      svg.innerHTML=portraitSVG(id,s?s.look:'',s?s.gender:'');
+      svg.style.display='block';img.style.display='none';
+      svg.classList.remove('enter');
+    }
+  },60);
 }
 
 function select(id){
@@ -461,19 +873,26 @@ function select(id){
   document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.id===id));
   showPortrait(id);
   const s=S.suspects.find(x=>x.id===id);
-  $('nameplate').innerHTML=esc(s.name)+(s.manner?'<small>'+esc(s.manner)+'</small>':'');
+  $('nameplate').innerHTML=esc(s.name)+(s.role?'<small>'+esc(s.role)+'</small>':'');
   $('q').focus();
 }
 
 async function boot(){
   S=await (await fetch('/state')).json();
+  if(S.scene)showScene(S.scene,'');
   $('title').textContent=S.title;
-  $('sub').textContent=S.victim+' is dead. One of them did it.';
+  $('sub').textContent=S.discovery
+    ? S.victim+' is dead. '+S.discovery.finder+' found the body in the '+
+      S.discovery.place+'.'
+    : S.victim+' is dead. One of them did it.';
   const cast=$('cast');
   S.suspects.forEach(s=>{
     const b=document.createElement('button');
-    b.className='chip';b.dataset.id=s.id;b.title=s.wants||'';
-    b.innerHTML='<svg viewBox="0 0 200 250">'+portraitSVG(s.id)+'</svg><span>'+
+    b.className='chip';b.dataset.id=s.id;b.title=s.role||'';
+    b.innerHTML=(s.portrait
+      ?'<img src="'+s.portrait+'" style="width:30px;height:36px;border-radius:5px;'+
+       'object-fit:cover;display:block">'
+      :'<svg viewBox="0 0 200 250">'+portraitSVG(s.id,s.look,s.gender)+'</svg>')+'<span>'+
       esc(s.name.split(' ')[0])+'</span>';
     b.onclick=()=>select(s.id);
     cast.appendChild(b);
@@ -503,48 +922,155 @@ async function send(){
     paintBook(r.notebook);
     if(r.notebook.conflicts.length>before){
       chime();
-      $('portrait').classList.add('rattled');
-      setTimeout(()=>$('portrait').classList.remove('rattled'),520);
+      ['portrait','photo'].forEach(k=>{$(k).classList.add('rattled');
+        setTimeout(()=>$(k).classList.remove('rattled'),520)});
     }
   }catch(e){$('said').textContent='(no answer came back)'}
   busy=false;inp.focus();
 }
 
 function paintBook(n){
-  lastConflicts=n.conflicts.length;
+  NB=n;lastConflicts=n.conflicts.length;
   $('count').innerHTML=n.questions+(n.questions===1?' question':' questions')+
-    (n.conflicts.length?' · <b>'+n.conflicts.length+' contradiction'+
+    (n.conflicts.length?' \u00b7 <b>'+n.conflicts.length+' contradiction'+
       (n.conflicts.length>1?'s':'')+'</b>':'');
-  let h='<h2>Who was where</h2>';
-  h+=n.grid.length?'<table>'+n.grid.map(r=>'<tr class="'+(r.disputed?'disputed':'')+
-    '"><td>'+esc(r.subject)+'</td><td>'+esc(r.time)+'</td><td>'+esc(r.place)+
-    '</td><td>'+esc(r.source)+'</td></tr>').join('')+'</table>'
-    :'<div class="empty">Nothing established yet.</div>';
+  render();
+}
+
+function render(){
+  const n=NB;
+  let h='<div id="tabs">'+
+    [['book','Notebook'],['log','Transcript'],['map','Map']].map(([k,l])=>
+      '<button data-tab="'+k+'" class="'+(tab===k?'on':'')+'">'+l+'</button>').join('')+
+    '</div>';
+  if(tab==='book')h+=viewBook(n);
+  if(tab==='log')h+=viewLog(n);
+  if(tab==='map')h+=viewMap(n);
+  $('book').innerHTML=h;
+  document.querySelectorAll('#tabs button').forEach(b=>
+    b.onclick=()=>{tab=b.dataset.tab;render()});
+  document.querySelectorAll('th.rm.clickable').forEach(b=>
+    b.onclick=()=>showScene(b.dataset.scene,b.dataset.room));
+}
+
+function viewBook(n){
+  /* Group by person rather than by row, so the panel reads as five short
+     dossiers instead of one long table nobody scans. */
+  const by={};
+  n.grid.forEach(r=>{(by[r.subject]=by[r.subject]||[]).push(r)});
+  let h='';
   if(n.conflicts.length)h+='<h2>Contradictions</h2>'+n.conflicts.map(c=>
     '<div class="item hard">'+esc(c.text)+'<br><span class="empty">'+esc(c.kind)+
     '</span></div>').join('');
-  if(n.holes.length)h+='<h2>Accounts that do not line up</h2>'+n.holes.map(t=>
-    '<div class="item soft">'+esc(t)+'</div>').join('');
-  if(n.unasked.length)h+='<h2>Worth asking</h2>'+n.unasked.map(t=>
-    '<div class="item cold">'+esc(t)+'</div>').join('');
-  $('book').innerHTML=h;
+  if(n.holes.length)h+='<h2>Accounts that do not line up</h2>'+n.holes.map(x=>
+    '<div class="item soft">'+esc(x)+'</div>').join('');
+  h+='<h2>What each of them claims</h2>';
+  if(!Object.keys(by).length)h+='<div class="empty">Nothing established yet.</div>';
+  Object.keys(by).sort().forEach(name=>{
+    h+='<div class="item"><b>'+esc(name)+'</b><table>'+by[name].map(r=>
+      '<tr class="'+(r.disputed?'disputed':'')+'"><td>'+esc(r.time)+'</td><td>'+
+      esc(r.place)+'</td><td>'+esc(r.source)+'</td></tr>').join('')+'</table></div>';
+  });
+  if(n.unasked.length)h+='<h2>Worth asking</h2>'+n.unasked.map(x=>
+    '<div class="item cold">'+esc(x)+'</div>').join('');
+  return h;
 }
 
-async function accuse(id){
-  if(!confirm('Accuse '+nameOf(id)+'? This ends the game.'))return;
+function viewLog(n){
+  const log=(n.logs||{})[who]||[];
+  let h='<h2>Everything '+esc(nameOf(who))+' has said</h2>';
+  if(!log.length)return h+'<div class="empty">You have not asked them anything yet.</div>';
+  return h+log.map(x=>'<div class="qa"><div class="qq">'+esc(x.q)+
+    '</div><div class="aa">'+esc(x.a)+'</div></div>').join('');
+}
+
+function viewMap(n){
+  /* The whole evening at once: rooms down the side, the clock across the top,
+     people as initials. A snapshot of one slot could not show a movement, and a
+     movement is the only thing on this screen worth seeing. */
+  const T=n.timeline||{}, M=n.missing||{}, K=n.tags||[];
+  const dead=new Set(K.filter(k=>k.dead).map(k=>k.tag));
+  let h='<h2>Where they say they were</h2><div class="tlwrap"><table class="tl">'+
+    '<tr><th></th>'+S.times.map(t=>'<th>'+esc(t.label)+'</th>').join('')+'</tr>';
+  S.places.forEach(p=>{
+    h+='<tr><th class="rm'+(p.scene?' clickable" data-scene="'+esc(p.scene)+
+      '" data-room="'+esc(p.name):'')+'">'+esc(p.name)+'</th>'+S.times.map(t=>{
+      const cell=((T[t.id]||{})[p.id])||[];
+      return '<td>'+cell.map(x=>'<span class="pin'+(x.disputed?' bad':
+        (dead.has(x.tag)?' dead':''))+(x.firm?' firm':'')+'" title="'+
+        esc(x.name+', from '+x.source)+
+        '">'+esc(x.tag)+'</span>').join('')+'</td>';
+    }).join('')+'</tr>';
+  });
+  h+='<tr class="gap"><th class="rm">unaccounted for</th>'+S.times.map(t=>
+    '<td>'+((M[t.id]||[]).map(x=>'<span class="pin off" title="'+esc(x.name)+
+      ' — nobody has placed them here yet">'+esc(x.tag)+'</span>').join(''))+
+    '</td>').join('')+'</tr></table></div>';
+  h+='<div class="key">'+K.map(k=>'<span><b>'+esc(k.tag)+'</b>'+esc(k.name)+
+    (k.dead?' (the deceased)':'')+'</span>').join('')+'</div>';
+  return h+'<div class="empty" style="margin-top:12px">Only what somebody has '+
+    'told you. Red means two people put them in different rooms at that hour. '+
+    'The bottom row is where your questions have not reached. A ringed tag was '+
+    'confirmed by somebody other than themselves.'+
+    (S.places.some(p=>p.scene)?' Click a room to stand in it.':'')+'</div>';
+}
+
+function accuse(id){
+  /* Two questions, not one (D-065). The timeline gets you to the person; only
+     the secrets get you to the reason, and you may only offer a reason you
+     actually got out of somebody. */
+  const found=NB.found||[];
+  let h='<h3>Charge '+esc(nameOf(id))+'</h3>'+
+    '<p>Say what they did it for. You can only name something you found out, '+
+    'and this ends the game.</p>';
+  h+=found.map(f=>'<div class="item pick" data-why="'+esc(f.id)+'">'+esc(f.text)+
+    '</div>').join('');
+  h+='<div class="item pick cold" data-why="">'+(found.length?
+    'None of these. I never found out why.':
+    'You have not got a single secret out of anybody. Charge them anyway.')+'</div>';
+  h+='<div style="margin-top:18px"><button id="backout">Not yet</button></div>';
+  $('revealcard').innerHTML=h;$('reveal').style.display='flex';
+  document.querySelectorAll('.pick').forEach(b=>
+    b.onclick=()=>charge(id,b.dataset.why));
+  $('backout').onclick=()=>{$('reveal').style.display='none'};
+}
+
+async function charge(id,why){
   const r=await (await fetch('/accuse',{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({who:id})})).json();
-  let h='<h3>'+(r.correct?'Correct.':'Wrong.')+'</h3>';
+    body:JSON.stringify({who:id,why:why||null})})).json();
+  let h='<h3>'+(r.correct?(r.right_reason?'Correct.':'You named him.'):'Wrong.')+'</h3>';
   h+='<p>The killer was <b>'+esc(r.killer)+'</b>. You asked '+r.questions+' questions.</p>';
+  if(r.correct&&!r.right_reason)h+='<div class="item hard">The right person, and not '+
+    'the reason. '+(r.offered?'You charged him over: '+esc(r.offered):
+    'You never found out why.')+'</div>';
   if(r.motive)h+='<h2>Why</h2><p>'+esc(r.motive)+'</p>';
   if(r.lie)h+='<h2>The lie</h2><p>'+esc(r.lie)+'</p>';
+  if((r.lies||[]).length>1)h+='<h2>Everyone who lied to you</h2>'+r.lies.map(l=>
+    '<div class="item '+(l.killer?'hard':'soft')+'"><b>'+esc(l.name)+'</b> said the '+
+    esc(l.claimed)+' at '+esc(l.time)+'. They were in the '+esc(l.truth)+'.'+
+    (l.covering?'<br><span class="empty">Covering: '+esc(l.covering)+'</span>':'')+
+    '</div>').join('');
   if(r.witnesses.length)h+='<h2>Who could have broken it</h2>'+r.witnesses.map(w=>
-    '<div class="item '+(w.asked?'soft':'cold')+'">'+esc(w.name)+' — '+
+    '<div class="item '+(w.asked?'soft':'cold')+'">'+esc(w.name)+' \u2014 '+
     (w.asked?('asked '+w.asked+'x'):'you never asked them')+'</div>').join('');
   if(r.missed.length)h+='<h2>Secrets you never found</h2>'+r.missed.map(m=>
     '<div class="item cold">'+esc(m)+'</div>').join('');
   $('revealcard').innerHTML=h;$('reveal').style.display='flex';
+}
+
+/* Cross-fade the backdrop between the establishing shot and a room (D-069).
+   Two layers alternating: whichever is hidden gets the new image and fades up,
+   so a room arrives over the place rather than replacing it with a blink. */
+let backTop=false;
+function showScene(url,label){
+  if(!url)return;
+  const next=$(backTop?'backdrop':'backdrop2'), prev=$(backTop?'backdrop2':'backdrop');
+  next.style.backgroundImage='url("'+url+'")';
+  next.style.opacity='1';prev.style.opacity='0';
+  backTop=!backTop;
+  const w=$('where');
+  w.textContent=label;w.className=label?'on':'';
 }
 
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
@@ -553,10 +1079,38 @@ boot();
 """
 
 
-def main(argv: list[str] | None = None) -> int:
-    import uvicorn
-    from mystery.agent import anthropic_responder
+def _lan_address() -> str:
+    """This machine's address on the local network.
 
+    Opening a UDP socket to a public address is the usual trick: nothing is
+    sent, but the OS has to pick which interface it would use, and that is the
+    one other people on this wifi can reach.
+    """
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("8.8.8.8", 80))
+        return probe.getsockname()[0]
+    except OSError:
+        return "localhost"
+    finally:
+        probe.close()
+
+
+def _existing(folder: Path) -> dict[str, str]:
+    """Whatever pictures are already on disk for this case.
+
+    Art belongs to the case rather than to the flag that made it, so a saved
+    case brings its faces and rooms back without --art and without paying twice
+    (D-073).
+    """
+    if not folder.exists():
+        return {}
+    return {path.stem: path.name for path in sorted(folder.glob("*.png"))}
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Play a mystery in a browser.")
     parser.add_argument("--setting", default="a private view at a small art gallery")
     parser.add_argument("--cast", type=int, default=5)
@@ -564,27 +1118,125 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--places", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
-        "--model",
-        default="claude-sonnet-4-5",
-        help="model for the suspects. A stronger one lies better and costs more",
+        "--topology",
+        default=DEFAULT_TOPOLOGY,
+        choices=sorted(LIBRARY),
+        help="the shape of the solution. Different shapes are different puzzles, "
+        "which is what makes a second case worth playing (D-067)",
     )
-    parser.add_argument("--generator-model", default="claude-sonnet-4-5")
+    parser.add_argument(
+        "--model",
+        default=VOICE_MODEL,
+        help="model for the suspects, called once per question. A stronger one "
+        "lies better and costs more",
+    )
+    parser.add_argument(
+        "--generator-model",
+        default=DRAFT_MODEL,
+        help="model that writes the case. Called once, so the strong one is "
+        "nearly free here and decides everything you will play",
+    )
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--portraits",
+        action="store_true",
+        help="generate character portraits with OpenAI. Needs OPENAI_API_KEY. "
+        "Falls back to the drawn faces on any failure",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="play the case shipped with the code instead of generating one. Costs "
+        "nothing to start, and the suspects still answer for real",
+    )
+    parser.add_argument(
+        "--scenery",
+        action="store_true",
+        help="generate a backdrop for the setting and each room with OpenAI. "
+        "Needs OPENAI_API_KEY. Falls back to the painted gradient on any failure",
+    )
+    parser.add_argument(
+        "--art",
+        action="store_true",
+        help="both of the above. Two flags for 'make it look nice' was one too many",
+    )
+    parser.add_argument(
+        "--case",
+        help="play a case you have already got, by name. No model, no waiting, "
+        "and it keeps whatever art it was given",
+    )
+    parser.add_argument(
+        "--cases", action="store_true", help="list the cases on the shelf and stop"
+    )
+    parser.add_argument(
+        "--daily",
+        action="store_true",
+        help="serve today's case, drawn from the buffer. Never generates: if the "
+        "buffer is empty it says so, because a visitor must not be the thing that "
+        "decides to spend money on a model",
+    )
+    parser.add_argument(
+        "--anyway",
+        action="store_true",
+        help="play a case the solvability analysis says cannot be won",
+    )
+    parser.add_argument(
+        "--share",
+        action="store_true",
+        help="serve on the local network so other people on the same wifi can play",
+    )
+    parser.add_argument(
+        "--remember",
+        action="store_true",
+        help="keep sessions on disk, so restarting the server does not throw "
+        "away everybody's notebook. Off, they live in memory and die with the process",
+    )
+    parser.add_argument(
+        "--together",
+        action="store_true",
+        help="everyone shares one notebook, which is what two people in a room "
+        "solving one case actually want. Off, each visitor gets their own",
+    )
     args = parser.parse_args(argv)
+
+    if args.cases:
+        print(catalogue())
+        return 0
+
+    if args.daily:
+        case = todays_case()
+        if case is None:
+            print("  There is no case for today and the buffer is empty.")
+            print("  Run: uv run python -m mystery.cli --fill --setting \"...\"")
+            return 1
+        print(f"  Today's case: {case.id}. {len(waiting())} waiting behind it.")
+        return _serve(case.mystery, case.id, case.setting, case.title, args)
+
+    # A saved case skips everything above the solver: it was solved and checked
+    # on the day it was made (D-073).
+    if args.case:
+        saved = load_case(args.case)
+        return _serve(saved.mystery, saved.id, saved.setting, saved.title, args)
 
     request = GenerationRequest(
         setting=args.setting,
         cast_size=args.cast,
         slot_count=args.slots,
         place_count=args.places,
+        topology=args.topology,
         seed=args.seed,
     )
 
     print("Building a mystery. This takes about half a minute.")
     try:
-        draft = generate(
-            request, drafter=anthropic_drafter(model=args.generator_model), cache_dir=CACHE
+        from mystery.example import OPENING_NIGHT
+
+        drafter = (
+            (lambda request, complaints: OPENING_NIGHT)
+            if args.dry_run
+            else anthropic_drafter(model=args.generator_model)
         )
+        draft = generate(request, drafter=drafter, cache_dir=None if args.dry_run else CACHE)
     except GenerationFailed as failure:
         print(failure)
         return 1
@@ -595,14 +1247,98 @@ def main(argv: list[str] | None = None) -> int:
         print("That mystery came out broken. Try another seed.")
         for violation in result.violations:
             print(f"  [{violation.rule}] {violation.message}")
+        # The draft is cached, so re-running this exact command will fail the
+        # same way for ever. Say where it is: a failure worth looking at is
+        # worth keeping, and one worth forgetting is one file to delete.
+        print(f"\n  The draft is at var/mysteries/{request.cache_key()}.json")
         return 1
 
-    print(f"\n  {solved.title}")
-    print(f"  Open http://localhost:{args.port}\n")
+    # Until now nothing in the browser game ever ran the advisories: every case
+    # went straight from "valid" to "playable", and thirteen quality checks and
+    # a solvability analysis sat there unused while cases were played (D-068).
+    findings = assess(solved, args.topology)
+    winnable = analyse(solved).winnable
+
+    if findings:
+        print("\n  What is wrong with this one:")
+        for finding in findings:
+            print(f"    [{finding.check}] {finding.message}")
+
+    if not winnable and not args.anyway:
+        print("\n  " + report(solved))
+        print(
+            "\n  This case cannot be solved. Try another seed, or --anyway to play "
+            "it regardless."
+        )
+        return 1
+
+    # Kept before anybody plays it, so a case that turns out to be good is still
+    # there tomorrow whatever happens to the prompt in between.
+    kept = save_case(solved, args.setting, args.topology, args.seed)
+    print(f"\n  Saved as {kept.id}. Come back to it with --case {kept.id}")
+
+    return _serve(solved, kept.id, args.setting, solved.title, args)
+
+
+def _serve(mystery, case_id: str, setting: str, title: str, args) -> int:
+    """Everything from a finished case to a running game.
+
+    Shared by the two ways in, a fresh generation and a case off the shelf, so
+    that a saved case is played by exactly the same code that played it new.
+    """
+    import uvicorn
+    from mystery.agent import anthropic_responder
+
+    portraits: dict[str, str] = {}
+    portrait_dir = ART / case_id / "portraits"
+    if args.portraits or args.art:
+        from mystery.portraits import generate_portraits
+
+        print("  Painting the cast. Another half a minute.")
+        portraits = generate_portraits(mystery, ART / case_id, "portraits")
+        if not portraits:
+            print("  No portraits came back. Using the drawn faces.")
+
+    scenery: dict[str, str] = {}
+    scenery_dir = ART / case_id / "scenery"
+    if args.scenery or args.art:
+        from mystery.scenery import generate_scenery
+
+        print("  Painting the house. Another minute or so.")
+        scenery = generate_scenery(mystery, setting, ART / case_id, "scenery")
+        if not scenery:
+            print("  No backdrops came back. Using the painted gradient.")
+
+    # Art already on disk is used whether or not it was asked for again: it was
+    # paid for once and belongs to the case, not to the flag.
+    portraits = portraits or _existing(portrait_dir)
+    scenery = scenery or _existing(scenery_dir)
+
+    case = Case(mystery, id=case_id, portraits=portraits, scenery=scenery)
+    case.portrait_dir = portrait_dir
+    case.scenery_dir = scenery_dir
+
+    print(f"\n  {title}")
+    print(f"  You:    http://localhost:{args.port}")
+    if args.share:
+        print(f"  Others: http://{_lan_address()}:{args.port}")
+        if args.together:
+            print("\n  Everyone shares one case and one notebook. Windows will ask")
+        else:
+            print("\n  Everyone gets the same case and their own notebook.")
+            print("  Add --together to share one between you. Windows will ask")
+        print("  whether to allow Python through the firewall: say yes.\n")
+    else:
+        print("  Add --share to let someone else on this wifi join.\n")
 
     uvicorn.run(
-        build_app(Game(solved, anthropic_responder(model=args.model))),
-        host="127.0.0.1",
+        build_app(
+            case,
+            anthropic_responder(model=args.model),
+            sessions=FileSessions() if args.remember else None,
+            together=args.together,
+        ),
+        host="0.0.0.0" if args.share else "127.0.0.1",  # noqa: S104
         port=args.port,
         log_level="warning",
     )

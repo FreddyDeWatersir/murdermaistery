@@ -724,3 +724,626 @@ budget, another failure mode, and twenty seconds per face.
 recognise before you read the nameplate. That was almost free and it does more
 for the visual novel feel than the portraits do.
 **Status:** active
+
+## D-053 Opinions were never inside the knowledge boundary
+**Date:** 2026-08-27
+**Decision:** The agent prompt splits hard from soft. Facts about who was where
+require a citation and may not be exceeded. Everything else, what a character
+thought of people, how the evening felt, what they make of being questioned, is
+theirs to give freely and is never refused.
+**Why:** The first playtest's loudest complaint was that the suspects gave
+nothing back. The cause was mine: their entire brief was movements and sightings,
+so a question about a *person* rather than a *place* had no licensed answer and
+the model correctly refused. `Character.impressions` now carries what each thinks
+of the others, and the prompt says outright that a question about a person is
+never refused.
+**Not a loosening of the leak model:** the boundary that mattered is unchanged.
+A character still cannot say where anybody was beyond their derived facts.
+**Status:** active
+
+## D-054 The body being found is common knowledge
+**Date:** 2026-08-27
+**Decision:** `Mystery.discovery` records who found the body, where, and how, and
+it goes into every character's brief as something everyone knows.
+**Why:** Nothing in the model said the body had been found, so the suspects could
+not discuss the death they were being questioned about. Playtesters noticed
+immediately and it made every conversation slightly unreal.
+**Status:** active
+
+## D-055 Characters are shown what they have already said
+**Date:** 2026-08-27
+**Decision:** `ask` takes the speaker's own prior questions and answers, and
+renders them into the prompt under "things you have already said".
+**Why:** Every answer was produced as though it were the first, because nothing
+carried the conversation forward at all. A suspect who forgets the last three
+minutes is not a suspect.
+**Note:** it goes in the system prompt rather than as message history, so the
+`Responder` boundary is unchanged and the whole test suite still runs against
+fakes with no network.
+**Status:** active
+
+## D-056 The panel is three views, not one list
+**Date:** 2026-08-27
+**Decision:** Notebook, Transcript and Map. The notebook groups claims per person
+rather than listing rows; the transcript is one conversation at a time; the map
+shows rooms at a chosen hour, filled only with what somebody has actually said.
+**Why:** Playtesters asked for a per-person log and a picture of the rooms, and
+both are the same underlying complaint: one flat table does not let you hold a
+case in your head.
+**The map is deliberately incomplete:** an empty room means nobody has placed
+anyone there, not that it was empty. Showing the truth would hand over the
+answer.
+**Status:** active
+
+## D-057 Some suspects were useless, and A3 and A8 both passed them
+**Date:** 2026-08-27
+**Decision:** A9 checks that every suspect is a *source*: they can contradict the
+killer's alibi, they hold a secret that gates another, somebody else's secret is
+known to them, or the motive is theirs. Fewer than one of those and they are
+decoration. The prompt now tells the generator to weave the cast together
+explicitly.
+**Why:** The second playtest said some characters were useless for the plot, and
+both existing advisories passed them, because holding a secret and having a
+private moment is not the same as mattering. In the hand-built prototypes every
+character was at least two of those four things, which is why every conversation
+went somewhere.
+**The pattern, for the third time:** an advisory can be true and still measure
+the wrong property. A3 asked "do they have something to hide", A8 asked "did they
+have opportunity", and neither asked "does the case run through them".
+**Status:** active
+
+## D-058 Portraits are optional and never load-bearing
+**Date:** 2026-08-27
+**Decision:** `--portraits` generates character images through OpenAI, cached
+beside the mystery. Every failure path, missing key, API error, missing file,
+falls back to the drawn SVG. `openai` is an optional dependency.
+**Why:** Decoration must not be able to stop a game starting. Roughly five cents
+and thirty seconds a case, requested in parallel, and free on a replayed seed.
+**Status:** active
+
+## D-059 Characters describe how they look, which fixes the coin-flip faces
+**Date:** 2026-08-27
+**Decision:** `Character.look` is a sentence of physical description written by
+the generator. The drawn portrait reads a man/woman cue out of it to pick a hair
+set, and it is the prompt when image generation is on.
+**Why:** Appearance was derived from a hash of the character id, so whether
+somebody looked like a man or a woman was random and unrelated to their name.
+Playtesters noticed at once.
+**Status:** active
+
+## D-060 Two model tiers, split by how often the call happens
+**Date:** 2026-08-27
+**Decision:** `DRAFT_MODEL = "claude-opus-5"` writes the case. `VOICE_MODEL =
+"claude-sonnet-5"` speaks for the suspects. Both are `--generator-model` and
+`--model` on the command line and both live in `generator.py` so they cannot
+drift apart.
+**Why:** Generation is one call per case. It decides the cast, the secrets, the
+grid and every conversation that follows, and at one call it is the cheapest
+thing in the system. Interrogation is one call per question, thirty or forty a
+session, and that is where the money goes. Paying top rate for the part that
+runs once and a tier down for the part that runs constantly is the whole of the
+argument.
+**What this corrects:** every case played so far was drafted by Sonnet 4.5,
+including the ones judged against hand-built prototypes that had been written by
+Opus in conversation. The comparison was never like for like.
+**Status:** active
+
+## D-061 The prompt carries a worked case, not just rules
+**Date:** 2026-08-27
+**Decision:** `SYSTEM_PROMPT` ends with prototype 02 abridged to its skeleton:
+hub victim, gated chain, three insufficient contradictors, the shield, the
+decoy, and the two cheap things that made it feel alive at the table. It is
+explicitly labelled as shape rather than content, with an instruction not to
+reuse the setting or the props.
+**Why:** Every rule in the prompt was already true of that case, and the
+generated cases still came out thinner. Rules describe a good case from outside.
+An example shows what the parts feel like when they are load-bearing, which is
+the thing the rules were failing to transmit.
+**Cost:** roughly seven hundred tokens on a call that happens once, and it
+invalidates every cached seed, because the prompt is in the cache key (D-035).
+That is the mechanism working.
+**Risk to watch:** worked examples pull generations toward themselves. If the
+next few cases all feature a theft-shaped shield or a theatre-shaped venue, the
+example is too specific and wants abstracting.
+**Status:** active
+
+## D-062 The map is a timeline, not a snapshot
+**Date:** 2026-08-27
+**Decision:** Rooms down the side, slots across the top, people as two-letter
+initials. Red means two people put someone in different rooms at that hour, a
+ring means somebody other than themselves confirmed it, and the dashed bottom
+row is who nobody has placed at all. Tags are made unique, so two Vermeers do
+not become two identical squares.
+**Why:** The previous map showed one hour at a time behind a row of buttons. An
+alibi is not a fact about an hour, it is a fact about the difference between
+hours, and a player flicking between five tabs is holding the grid in their
+head, which is the job the notebook was supposed to take over.
+**What it deliberately does not show:** the truth. Only what somebody has said.
+An empty cell is a gap in the questioning.
+**Status:** active
+
+## D-063 Innocent people lie too
+**Date:** 2026-08-27
+**Decision:** `Mystery.false_claim` becomes `false_claims`, a list. The killer
+lies and so do two innocents, each with `covers` naming the secret the lie
+protects and `admits_when` naming what makes them drop it. `false_claim` stays
+as a property returning the killer's, because that is what the alibi analysis,
+the reveal and A6 all mean when they say "the lie".
+**Why:** The third playtest found the real flaw. The case had exactly one hidden
+variable: the killer was recoverable from the grid alone, as the one person
+whose claim did not match it, and every secret in the case was scenery around a
+single deduction. Once you knew who lied you were done, and there was nothing
+left to replay. With three liars the timeline hands over a shortlist instead of
+a name, and the only way to shorten it is to find out why each of them lied,
+which drags the secrets onto the critical path.
+**The asymmetry that makes it solvable:** innocent lies break by *presence*,
+somebody saw them where they really were. The killer's breaks by *absence*, they
+were alone with the victim and nobody can place them. That is the discrimination
+the player is really making.
+**Which is also how it could collapse again,** so A12 exists: if every innocent
+liar can be vouched for, "which liar has no witness" is a mechanical shortcut
+straight to the killer and the motive never matters. At least one innocent must
+also have been unobserved.
+**New rules:** V8, a lie must actually be false and one person tells at most
+one. V4 extended to `covers`. A10, the killer is not the only liar. A11, every
+innocent lie has a way out. A12, position alone does not convict.
+**Cost:** ambiguity without resolution is noise rather than depth, which is what
+A11 is guarding. A player who catches somebody out, presses, and gets nothing
+learns that pressing does not pay.
+**Status:** active
+
+## D-064 A third knowledge state: guarded
+**Date:** 2026-08-27
+**Decision:** A brief now has `facts` (will say), `guarded` (true, citable, held
+back until a condition is met) and `conceals` (never). An innocent liar's real
+whereabouts is guarded. The killer's stays concealed and never becomes sayable.
+`assertions_from` reads guarded facts as well as plain ones.
+**Why:** Without it a retraction is invisible. The character says "all right, I
+was in the study", the player sees it, and the notebook goes on showing the lie,
+because only cited facts become assertions and concealed material may not be
+cited. The admission is the entire payoff of an innocent lie and it has to reach
+the grid.
+**Why the killer is excluded:** their retraction ends the game. Under pressure
+they have the shield instead, a smaller true thing that explains the evasiveness
+and is not the murder. Citing their own truth is still a leak, and the leakage
+suite still counts it as one.
+**What this buys beyond the mechanic:** `agent.folded` is logged with the
+character and how many questions it took. Fold on question two and the
+conditions are too soft; never fold and the red herrings never resolve. It is
+the first thing in the project that measures whether the cast are behaving,
+rather than whether the data is correct.
+**Status:** active
+
+## D-065 The accusation asks for the motive as well as the name
+**Date:** 2026-08-27
+**Decision:** `POST /accuse` takes `{who, why}`. `why` is the id of a secret,
+and it only counts if that secret actually surfaced during play. Three endings
+now: right person and right reason, right person and no idea why, wrong person.
+`Statement` gained `cited`, the raw fact ids a reply used, so the transcript can
+answer "what has this player actually been told".
+**Why:** A name alone is a one-bit answer, and a coin flip beat a bad player. The
+timeline gets you to the person and only the secrets get you to the reason, so
+asking for both makes the secrets a win condition rather than a route.
+**Why only surfaced secrets are offered:** a list of every secret in the case
+would itself be the answer. Reading five summaries at accusation time teaches you
+more than an hour of questions.
+**Status:** active
+
+## D-066 A suspect's own secrets are guarded, not concealed
+**Date:** 2026-08-27
+**Decision:** Own secrets move from `conceals` to `guarded`: citable, with
+`breaks_when` attached as the condition. One exception, and it is absolute. The
+secret marked `is_motive` held by the killer stays concealed and never becomes
+sayable.
+**Why:** D-065 needs to know what has surfaced, and a concealed fact cannot be
+cited, so a character giving up their own secret was invisible to the game. The
+same gap as the retraction gap in D-064, found one layer up.
+**What it buys:** the shield stops being a hope and becomes a mechanism. Under
+pressure the killer has exactly one thing to give, the smaller true secret, and
+the reason they killed is the one door in the case that does not open.
+**What it costs:** the leak detector loses its flagship example. Citing your own
+secret used to be the worst kind of leak; now it is a fold, which is legitimate
+play. The distinction is real, though: a leak is saying something you were never
+told, and that is still caught. A13 covers the new hole this opens, which is a
+motive nobody else knows and the player therefore cannot ever name.
+**Status:** active
+
+## D-067 Topologies are a library, not a sentence
+**Date:** 2026-08-27
+**Decision:** New module `topology.py`. A topology has an id, a blurb, a `brief`
+(the paragraph the generator is given about the shape of the solution) and
+`checks` (advisories that only make sense for that shape). Three to start:
+`the_lie`, `mutual_alibi`, `false_confession`. `--topology` on both the CLI and
+the web game, `--topologies` to list them. `assess(mystery, topology)` runs the
+general critique plus the shape's own checks.
+**Why:** `topology` was a freeform string interpolated into the prompt and
+otherwise ignored, so every case ever generated had the same skeleton. Better
+prose does not fix that: the second case is the same puzzle in different clothes
+however good the clothes are, and a player who has solved one has solved the
+pattern. Innocent liars (D-063) added depth inside a case. This is the part that
+makes the *next* case worth playing.
+**Why the checks live with the shape:** a mutual alibi case where nobody
+corroborates anybody is an ordinary false claim wearing a different name, and no
+general advisory would catch it, because none of them knows what was asked for.
+Same split as validator and critique: correctness is universal, quality is
+contextual (D-031).
+**One model change:** `Mystery.false_confessor`, an optional character id, and
+`Brief.instructions` to carry behaviour that no fact can express. A confession
+is a thing somebody does, not a thing they know, so it does not belong in facts,
+guarded or conceals.
+**The cache key now includes the brief,** or editing a shape would change
+nothing on an already-run seed. Same trap as D-035, one level down.
+**Shapes designed and not built,** because each needs a model change rather than
+a paragraph: the body was moved, so alibis are being checked against the wrong
+room; the time of death is not what everyone assumes, so the player must
+establish *when* before *who*.
+**Status:** active
+
+## D-068 Solvability is computed, and the browser game now actually checks
+**Date:** 2026-08-27
+**Decision:** New module `solvable.py`. It computes a closure over the secret
+graph: start from what a player can get cold, add whatever that unlocks, repeat
+until nothing changes. Reports `way_in`, `reachable`, `sealed`, whether the
+motive can be reached and whether the alibi can be broken. S1 to S4 report the
+findings. `assess()` includes them, and `web.py` now runs `assess()` at startup
+and refuses to serve an unwinnable case without `--anyway`.
+**Why, and this is the uncomfortable part:** the browser game never ran the
+advisories at all. Every case played in a browser went straight from `validate`
+to playable, so thirteen quality checks existed, were tested, were paid for in
+tokens, and had never once fired in a real session. The rules were fine. Nothing
+called them.
+**Why a closure and not another advisory:** every existing check measures one
+property in isolation, and a pile of satisfied local properties does not add up
+to solvability. The concrete miss is a cycle: A gated behind B, B gated behind
+A. Both secrets exist, both have holders, both have breaking points, every
+advisory passes, and nobody can solve the case. The same shape hides a motive
+behind a chain whose first link does not exist.
+**What it cannot know:** whether a suspect actually gives something up depends on
+`breaks_when`, which is a sentence in a prompt. So this is a necessary condition,
+not a sufficient one. A case it calls unwinnable is unwinnable; a case it passes
+is only not provably broken. That is still the difference between "no rule
+objected" and "there is a path".
+**Status:** active
+
+## D-069 Backdrops for the setting and each room
+**Date:** 2026-08-27
+**Decision:** `scenery.py`, same contract as `portraits.py`. One wide
+establishing image for the setting, one per room, cached under the case's cache
+key. The setting is the page background from the first moment; clicking a room
+name in the Map tab cross-fades into that room and names it in the corner.
+Optional, `--scenery`, and every failure falls back to the painted gradient.
+**Why the rooms are worth generating at all:** a picture nobody looks at is a
+line on a bill. Putting them behind the Map means a player can stand in the room
+while deciding whether somebody was really in it, which is the moment the art
+does work rather than decoration.
+**No people in any of them.** The cast are portraits and the rooms are empty. A
+generated figure in a doorway would be a person the case does not contain,
+standing in a room the player is reasoning about.
+**Status:** active
+
+## D-070 A case in the repo, and one test that runs the seams
+**Date:** 2026-08-27
+**Decision:** `example.py` holds one hand-written case as a raw dict, the shape a
+model returns rather than a `Mystery`, so it crosses the parse boundary like a
+real draft. `--dry-run` on both the CLI and the web game uses it instead of
+calling a model. `tests/test_pipeline.py` runs the whole chain on it: parse,
+solve, validate, assess, briefs, a full round of questions, notebook, verdict.
+**Why:** a hundred and fifty passing tests did not notice that the browser game
+never called the advisories (D-068), because every one of them was holding a
+single component up to the light. Component tests answer why something is
+broken. Nothing was answering whether the thing works.
+**What the dry run is for:** checking the machinery after a change without
+spending anything, and playing a known-good case while paying only for the
+conversation. It also means there is always a case to look at, which matters
+when a generated one comes out wrong and you need to compare.
+**The shipped case has one live advisory** (the killer moves three times), left
+in on purpose. It shows the critique running rather than decorating, and it is a
+judgement call a person can look at and accept, which is what D-031 said
+advisories are for.
+**Status:** active
+
+## D-071 One definition of which scene is the murder
+**Date:** 2026-08-28
+**Decision:** `Mystery.murder_scene` and `Mystery.murder_slot` on the model.
+Resolution order: an explicit `murder` field naming a constraint id, otherwise
+the latest *exclusive* scene between killer and victim. The solver, the
+validator, A2 and T4 all now ask the model rather than each working it out.
+`murder` is a new optional field, the prompt asks for it, and V4 checks it names
+something.
+**Why:** two real generated cases in a row were rejected as broken and both were
+fine. Four modules each looked for "a constraint containing the killer and the
+victim" and each took the *first* in list order. A good case usually has an
+earlier private scene between exactly those two, the one where the victim says
+the thing that gets them killed, and the prompt asks for it explicitly. So which
+constraint came first was down to the order the model happened to write them in,
+and half the time the confrontation was treated as the killing: the body was
+laid to rest an hour before it died, every later scene became a scene with a
+corpse in it, V7 fired on all of them, and the solver pinned people into the
+wrong rooms, which fired V1.
+**Reproduced before fixing** by swapping two constraints in the shipped case,
+which produced the same violations, character for character. The fix is checked
+both ways round.
+**Why "latest exclusive" is not another guess:** after the murder the victim
+meets nobody, so the last time those two were alone together is the last time
+they could have been. It is the invariant the whole timeline already rests on.
+**The lesson, and it is the third time:** the same piece of knowledge was
+derived independently in four places, and the disagreement was silent. When
+something is asked about the ground truth more than twice, it belongs on the
+ground truth.
+**Also:** a failed final validation now prints the path of the cached draft.
+Drafts are cached before solving, so a case that fails this way fails identically
+for ever, and the file is either worth studying or worth deleting.
+**Status:** active
+
+## D-072 One flag for the art, and portraits that sit in the room
+**Date:** 2026-08-28
+**Decision:** `--art` turns on both `--portraits` and `--scenery`, which stay as
+the granular flags. And `#photo` gets a radial mask so a generated portrait
+feathers into whatever is behind it.
+**Why the flag:** two separate switches for "make it look nice" meant running
+with backdrops and no faces without noticing, which is exactly what happened on
+the first real run.
+**Why the mask:** a generated portrait is a square image with its own dark
+ground. Alone on a gradient that is invisible; over a room it is a visible
+rectangle, and the character reads as a photograph taped to the scene rather
+than a person standing in it. Feathering costs one line of CSS.
+**Noticed by rendering it.** The two features were built in separate sessions
+and their combination had never been on screen at once. Worth remembering: a
+feature that is only ever tested alone is only known to work alone.
+**Status:** active
+
+## D-073 A shelf of saved cases, separate from the generation cache
+**Date:** 2026-08-28
+**Decision:** `library.py`. Every case that generates and validates is written to
+`var/cases/<name>.json` as the solved mystery plus its setting, shape, seed and
+date. `--case <name>` plays or inspects it with no model call at all, `--cases`
+lists the shelf, and generated art moves from `var/portraits/<request hash>/` to
+`var/art/<case name>/`.
+**Why, when there has been a cache since D-005:** the cache is keyed by a hash of
+the request *and* the prompt (D-035), which is right for what it is for, not
+paying twice while a prompt is being developed, and exactly wrong for keeping
+anything. Every prompt edit changes every key, so a case worth replaying became
+`a3f9c2e1....json` that nothing would ever ask for again, and its art orphaned
+with it. Two different jobs that happened to share a folder.
+**Art belongs to the case, not to the flag.** Pictures already on disk are used
+whether or not `--art` is passed again. They were paid for once.
+**Names, not hashes.** A second case called The Vermeer Forgery becomes
+`the-vermeer-forgery-2`. Two cases with one title is not an error, it is Tuesday.
+**Still gitignored.** `var/` stays out of the repo: the art is megabytes and the
+cases are personal. A case good enough to keep is one file to copy into
+`tests/fixtures/` on purpose.
+**Also:** `anthropic_responder` now says what is missing when there is no key,
+which the drafter has done since the beginning and the responder never did.
+**Status:** active
+
+## D-074 What the browser is told, who these people are, and who gets to be the killer
+**Date:** 2026-08-28
+**Four things, one root each.**
+
+**The leak.** The cast chips carried `title=wants`, so hovering a suspect showed
+their private motive. The fix is not to stop drawing the tooltip. `wants` and
+`manner` are no longer sent to the browser at all, because a field the client
+does not have cannot be leaked by the next person who writes some markup. There
+is a test that greps the whole `/state` payload for every character's `wants`
+and `manner`.
+
+**`Character.role`.** One short public phrase, their job here and what they were
+to the victim, printed under their name. The nameplate used to show `manner`,
+which is a behavioural note written for the model rather than an introduction
+written for the player, and reading "cold and precise, answers exactly the
+question asked" under somebody's name is being handed the character sheet.
+
+**Casting comes off the seed.** The killer and the victim were men every time.
+That is not something a check on one case can see, because each case was
+perfectly reasonable; it is a property of the sequence, so it belongs where the
+sequence is known. `_casting(seed)` takes two independent bits and names who
+kills whom, so all four combinations appear across four seeds. A14 covers the
+countable half, which is whether the room around them is all one thing.
+
+**`Character.gender`,** stated rather than sniffed out of the `look` sentence,
+which is what the drawn portrait did before and got wrong whenever the sentence
+did not say (D-059 finally finished).
+
+**On the repeating character types,** which is the same complaint from the other
+end: the prompt was handing over a menu. It listed four manners as examples,
+"one is cold and answers exactly the question asked", and the model copied them,
+because that is what examples are for. They are now described as dimensions to
+vary, with an explicit instruction not to reuse phrasing from the instructions.
+The worked example (D-061) has the same risk and is worth watching next.
+**Status:** active
+
+## D-075 Variety is dealt, not requested
+**Date:** 2026-08-28
+**Decision:** New module `palette.py`: twenty eight manners, twenty motive
+families, twenty four intrigues. Every generation draws five manners, one motive
+and three intrigues from a hash of the seed, the setting and the topology, and
+the *only* thing the model sees is that hand. It never sees the lists.
+**Why not simply a longer list in the prompt:** because that is what the last
+round already was. Four example manners in the prompt produced four repeated
+manners in the cast (D-074), and forty examples would produce the model's three
+favourites, repeatedly. A model given options develops taste. A model given an
+assignment does the assignment.
+**Why the entries are behaviours rather than characters:** "answers a slightly
+different question from the one that was asked" can belong to a bishop or a
+bouncer, and leaves the writing to be done. "Nervous young assistant" is a
+character, and handing over characters is how every case ends up being the same
+five people in different coats.
+**Keyed on seed, setting and topology together,** so running seed 0 against four
+settings is four different hands rather than the same one four times.
+**Roughly four billion combinations** of manners, motive and intrigues, which is
+not the point on its own: the point is that the second case is dealt different
+material before a word of it is written.
+**Also, the cache key now hashes the finished prompt** rather than the request
+plus a couple of the pieces that go into it. Every new piece was another chance
+to forget one; the topology brief was nearly missed and this material would have
+been. A hash of what is actually sent cannot fall behind what is sent.
+**Status:** active
+
+## D-076 Two free ways to look at variety
+**Date:** 2026-08-28
+**Decision:** `--material N` prints the hand the next N seeds would be dealt, and
+`--casts` prints every saved case's cast together: name, gender, role, manner.
+Neither calls a model.
+**Why:** the thing D-075 changed is a property of a *sequence* of cases, and
+until now the only way to look at a sequence was to generate three of them at a
+minute and a few cents each. The material can be inspected before spending
+anything, and the casts can be compared after, without reopening three cases one
+at a time.
+**What `--casts` is actually for:** not whether a cast is good. Whether the third
+one is made of different people from the first, which only shows up when they
+are next to each other.
+**Status:** active
+
+## D-077 A case is shared, a session is not
+**Date:** 2026-08-28
+**Decision:** The old `Game` splits in two. `Case` is what was generated: the
+mystery, the derived knowledge, the briefs, the pictures. Built once, immutable,
+shared by everybody. `Session` is one person's play-through: transcript, whether
+they have accused, an unguessable id. `Game` becomes a cheap view over one of
+each, made per request and thrown away. `Sessions` is a four-method boundary
+with `InMemorySessions` behind it today.
+**Why this before any AWS:** the game could not be deployed at all. One `Game`
+lived in one process and was served to everybody who connected, so two strangers
+would have been filling in each other's timeline and the first to accuse would
+have ended the evening for the rest. That is not a configuration problem.
+**Why a boundary rather than just a dict:** the same argument as D-002. Four
+methods, and anything the deployed version needs has to be expressible through
+them, so the storage decision stays a swap rather than becoming a rewrite. The
+in-memory implementation exists to make the interface honest before there is
+anything to be honest about.
+**`--together` keeps the old behaviour** and is now a choice rather than an
+accident. Two people in a room with one case between them want one notebook;
+two strangers on a URL do not. Passing a `Game` to `build_app` still works and
+means `together`, so nothing that had one breaks.
+**Sessions are a cookie,** httpOnly, twelve hours. The id is the only lock on a
+notebook, so it is `secrets.token_urlsafe` rather than anything countable.
+**Status:** active
+
+## D-078 The nightly job fills a buffer, it does not make today's case
+**Date:** 2026-08-28
+**Decision:** `daily.py`. A rota records which case ran on which day; `waiting()`
+is everything on the shelf that has never been anybody's day, oldest first;
+`todays_case()` draws from the front of that queue the first time it is asked
+each day. `--fill` tops the buffer up to four and is the whole of the nightly
+job. `--daily` serves today's case and **never generates one**.
+**Why not generate today's case tonight:** because the failure happens at three
+in the morning with nobody awake, and then there is no game at nine. With four
+cases waiting, a night the generator fails costs a shorter queue, and there are
+four days of slack before a player could possibly notice. It turns an outage
+into a warning.
+**Bounded attempts, and a taxonomy of failure.** Three tries per case. A
+validation failure is worth retrying, because a complaint can fix it. A case
+that comes back unwinnable is worth retrying for the same reason. Anything else,
+no key, no network, no service, stops the run immediately: retrying costs money
+and changes nothing. "Retry until it works" against a paid API overnight is how
+a bad night becomes a bad bill.
+**A web request never generates.** An empty buffer returns None and the server
+says so. A visitor arriving must not be the thing that decides to spend a minute
+and a few cents on a model.
+**Midnight does not interrupt anybody.** A `Session` stores `case_id`, not
+"today" (D-077), so a case started at 23:50 is finishable next Thursday. Nothing
+was needed for this, which is the nicest kind of design confirmation.
+**One day, in UTC, decided in one function,** because "today" asked in two
+places drifts by a day depending on who is asking.
+**A bug the tests found:** `library.entries()` sorts by filename, so
+`opening-night-2` came before `opening-night` and the queue was an alphabet
+rather than a queue. Saved cases now carry a timestamp rather than a date, and
+the buffer sorts on it.
+**Status:** active
+
+## D-079 The rota claims a day rather than setting one
+**Date:** 2026-08-28
+**Decision:** `Rota` becomes a three-method boundary with `FileRota` behind it.
+The interesting method is `claim(day, case_id) -> str`: "today's case is this
+one, unless somebody already said otherwise, in which case tell me what they
+said". Whoever arrives first wins, and everybody else is handed the winner's
+answer and uses it. `release(day)` exists only for the repair path.
+**Why, and the honest version:** this question was posed expecting a race, and
+walking the old code showed there was not one. Two servers both read an empty
+rota, both computed the same queue, both took `queue[0]`, and both wrote the
+same answer. It was **correct by accident**. Nothing anywhere said the choice had
+to be deterministic, so the first person to add a random pick, or a "prefer
+something nobody has played" rule, would have started handing two players two
+different mysteries on the same day with nothing failing loudly.
+**The real bug was the shape of the record, not the timing.** One document held
+every day ever served, so every write rewrote the whole history, and any two
+overlapping writes meant one silently erased the other. One record per day, and
+writers never touch each other.
+**Why the rota is DynamoDB and the cases are S3:** a conditional write is one
+line in the table and does not exist in the bucket. That single operation is the
+reason the two kinds of data live in two places.
+**A regression the tests caught immediately:** `claim` refuses to overwrite,
+which is the point of it, so a day pointing at a case that had been deleted off
+the shelf could never be repaired. Hence `release`, used nowhere else.
+**Third time for this pattern** after `Drafter` and `Sessions`: smallest
+interface that says what the code needs, local implementation now, cloud
+implementation later, nothing above the boundary knowing which it got.
+**Status:** active
+
+## D-080 A session becomes a record, and there are two stores now
+**Date:** 2026-08-28
+**Decision:** `Session.to_record()` and `from_record()` turn an evening into
+plain JSON and back. `FileSessions` stores one file per session, and `--remember`
+switches the server to it. Sessions carry `expires`, a unix timestamp, forty
+eight hours out.
+**Why serialisation is the whole job:** a dict in a process can hold objects.
+A file, a table and a network hold bytes. Everything else about deploying
+sessions is plumbing; this is the line where a `Transcript` full of `Statement`
+objects full of `Assertion` objects has to become something a database will
+accept, and come back as the same evening. The test that matters is not that the
+prose survives, it is that the *contradiction* does: an answer that comes back
+without its structure is a transcript rather than a notebook.
+**Written by hand rather than pickled.** A pickle is unreadable in a console,
+carries no version, and is unwise to load from anywhere you do not fully
+control.
+**The fork I took without asking:** no DynamoDB implementation yet. I could have
+written one, and it would have been untested code that looks finished, since
+there are no credentials here and I cannot run it. `FileSessions` is a second
+real implementation, which is what actually proves the boundary: one
+implementation behind an interface is a guess about what the interface should
+be, two is an interface. The table implementation is a good first thing to write
+with the AWS console open.
+**`expires` is the timer instinct from the design conversation**, put where it
+belongs. Not a rule about which case somebody may play, which would cut people
+off mid-interrogation, but how long an abandoned record is kept. DynamoDB reads
+exactly this attribute shape and deletes the row for free, so the field is
+written for a database that does not exist yet, because the alternative is a
+migration later.
+**One file per session, never one file holding all of them,** for the same
+reason as the rota (D-079).
+**A session id arrives from a cookie,** which is to say from a stranger, so it
+is filtered before it is allowed anywhere near a filename. There is a test that
+tries `../../etc/passwd`.
+**Status:** active
+
+## D-081 The listing and the contents are two different things
+**Date:** 2026-08-28
+**Decision:** `Card` is an id and a date, and both live in the object's *name*:
+`20260828T124618__opening-night-21aa.json`. `cards()` returns them from a
+directory listing with nothing opened. `entries()` keeps the old behaviour of
+opening everything and is now only used by the two commands a human waits on.
+`waiting()`, which runs on every visit, uses `cards()`. `Shelf` is the three
+method interface: `cards`, `load`, `save`.
+**The bug this removes:** `entries()` did two jobs, saying what exists and
+loading what is in each. `waiting()` called it, `todays_case()` called
+`waiting()`, and a page load called that. Five cases on a laptop is five file
+reads and nobody notices. Three hundred cases on object storage is one listing
+request plus three hundred network round trips, to answer a question whose real
+answer is one case id.
+**Why the metadata is in the name:** a key listing is the one query object
+storage can do. Putting the sort key in the name means the listing *is* the
+ordering, at no extra cost, and no index document has to be maintained. An index
+document would have brought back the read-modify-write problem D-079 just
+removed.
+**Ids are minted, not negotiated.** `_unique` asked "is this name free?" once per
+guess, which is a round trip each and racy: two jobs naming a case at the same
+moment are both told yes. `mint` appends four random characters and asks
+nothing. Note what the randomness is for: a session id is random for *secrecy*,
+this is random for *coordination*. Same tool, different argument, and worth
+being able to say which.
+**Prefix matching pays for it.** `--case the-brine` finds `the-brine-house-k3f9`
+as long as it is unambiguous, and refuses rather than guessing when it is not.
+**Old cases still load.** Files saved before the rename have no stamp in the
+name; they sort first, which is correct, since they are the oldest things on the
+shelf.
+**Status:** active

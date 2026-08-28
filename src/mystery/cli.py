@@ -11,7 +11,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from mystery.critique import critique
+from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
+from mystery.daily import BUFFER, shortfall, todays_case, waiting
+from mystery.example import OPENING_NIGHT
+from mystery.palette import draw as draw_palette
+from mystery.library import catalogue
+from mystery.library import entries as saved_cases
+from mystery.library import load as load_case
+from mystery.library import save as save_case
+from mystery.solvable import report
+from mystery.topology import LIBRARY, assess
+from mystery.topology import catalogue as topologies
 from mystery.generator import (
     GenerationFailed,
     GenerationRequest,
@@ -46,6 +56,90 @@ def render(mystery: Mystery) -> str:
     return "\n".join([header, *rows])
 
 
+# Attempts per case before giving up for the night. A failure that a complaint
+# can fix is worth retrying; a systematic one is not, and unbounded retry against
+# a paid API with nobody awake is how a bad night becomes a bad bill (D-078).
+ATTEMPTS = 3
+
+
+def _fill(args, want: int) -> int:
+    """The nightly job. Generate until the buffer is full or something is wrong.
+
+    Note what it does *not* do: decide which case is today's. That is drawn from
+    the buffer when somebody asks for it, so a night where this fails entirely
+    costs a shorter queue rather than a missing game.
+    """
+    from mystery.solvable import analyse
+
+    needed = shortfall(want=want)
+    if not needed:
+        print(f"  Buffer is full: {len(waiting())} cases waiting. Nothing to do.")
+        return 0
+
+    print(f"  {len(waiting())} waiting, want {want}. Generating {needed}.")
+    made = 0
+
+    for n in range(needed):
+        for attempt in range(ATTEMPTS):
+            seed = args.seed + n * ATTEMPTS + attempt
+            request = GenerationRequest(
+                setting=args.setting,
+                cast_size=args.cast,
+                slot_count=args.slots,
+                place_count=args.places,
+                topology=args.topology,
+                seed=seed,
+            )
+            try:
+                draft = generate(request, drafter=anthropic_drafter(), cache_dir=CACHE)
+            except GenerationFailed as failure:
+                print(f"  seed {seed}: {failure}")
+                continue
+            except Exception as error:  # noqa: BLE001
+                # Nothing a complaint can fix: no key, no network, no service.
+                # Retrying costs money and changes nothing.
+                print(f"  Stopping: {error}")
+                return 1
+
+            solved = solve(draft, seed=seed)
+            result = validate(solved)
+            if not result.ok:
+                print(f"  seed {seed}: invalid, {[v.rule for v in result.violations]}")
+                continue
+            if not analyse(solved).winnable:
+                print(f"  seed {seed}: valid but not winnable")
+                continue
+
+            kept = save_case(solved, args.setting, args.topology, seed)
+            print(f"  {kept.id}")
+            made += 1
+            break
+        else:
+            print(f"  Gave up after {ATTEMPTS} attempts. {made} made, buffer short.")
+            return 1
+
+    print(f"  {made} added. {len(waiting())} waiting.")
+    return 0
+
+
+def _casts() -> str:
+    """Every saved cast, one line each, for reading three cases side by side.
+
+    The thing being looked for is not whether one cast is good. It is whether
+    the third one is made of different people from the first (D-075), and that
+    only shows up when they are next to each other.
+    """
+    blocks = []
+    for case in saved_cases():
+        people = [
+            f"    {c.name:<22} {c.gender or '?':<6} {c.role or '(no role given)'}\n"
+            f"    {'':<22} {'':<6} {c.manner or '(no manner given)'}"
+            for c in case.mystery.characters
+        ]
+        blocks.append(f"  {case.id}  ({case.topology or 'the_lie'})\n" + "\n".join(people))
+    return "\n\n".join(blocks) or "  Nothing saved yet."
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate, solve and check one mystery.")
     parser.add_argument("--setting", default="a private view at a small art gallery")
@@ -54,7 +148,57 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--places", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--topology",
+        default=DEFAULT_TOPOLOGY,
+        choices=sorted(LIBRARY),
+        help="the shape of the solution. Run --topologies to see what each one means",
+    )
+    parser.add_argument(
+        "--topologies", action="store_true", help="list the shapes a case can have and stop"
+    )
+    parser.add_argument(
         "--no-cache", action="store_true", help="ignore var/mysteries and call the model"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run the whole pipeline on the case shipped with the code. No key, no "
+        "network, no spend. This is how you check the machinery still works",
+    )
+    parser.add_argument(
+        "--case", help="look at a case you already have, by name. Calls no model"
+    )
+    parser.add_argument(
+        "--cases", action="store_true", help="list the cases on the shelf and stop"
+    )
+    parser.add_argument(
+        "--casts",
+        action="store_true",
+        help="print the cast of every saved case together, for reading three of "
+        "them side by side. Calls no model",
+    )
+    parser.add_argument(
+        "--fill",
+        nargs="?",
+        type=int,
+        const=BUFFER,
+        metavar="N",
+        help="top the buffer up to N unplayed cases and stop. This is the nightly "
+        "job: it does not make today's case, it makes sure there is always one "
+        "ready. Bounded attempts, and it stops on the first error it cannot fix",
+    )
+    parser.add_argument(
+        "--today",
+        action="store_true",
+        help="which case is today's, and how many are waiting behind it",
+    )
+    parser.add_argument(
+        "--material",
+        type=int,
+        metavar="N",
+        help="show the manners, motive and threads the next N seeds would be "
+        "dealt, and stop. Free, and the fastest way to see whether variety is "
+        "actually varying",
     )
     parser.add_argument(
         "--play", action="store_true", help="interrogate the suspects in the terminal"
@@ -66,19 +210,64 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.topologies:
+        print(topologies())
+        return 0
+
+    if args.cases:
+        print(catalogue())
+        return 0
+
+    if args.casts:
+        print(_casts())
+        return 0
+
+    if args.today:
+        case = todays_case()
+        queue = waiting()
+        print(f"  Today:   {case.id if case else 'NOTHING. Run --fill'}")
+        print(f"  Waiting: {len(queue)} ({', '.join(c.id for c in queue) or 'none'})")
+        return 0
+
+    if args.fill:
+        return _fill(args, args.fill)
+
+    if args.material:
+        for seed in range(args.seed, args.seed + args.material):
+            print(f"\n=== seed {seed} " + "=" * 52)
+            print(draw_palette(seed, args.setting, args.topology, args.cast).brief())
+        return 0
+
     request = GenerationRequest(
         setting=args.setting,
         cast_size=args.cast,
         slot_count=args.slots,
         place_count=args.places,
+        topology=args.topology,
         seed=args.seed,
+    )
+
+    if args.case:
+        saved = load_case(args.case)
+        solved = saved.mystery
+        print(f"\n{solved.title}\n")
+        print(render(solved))
+        print("\n" + report(solved))
+        for advisory in assess(solved, saved.topology or args.topology):
+            print(f"  [{advisory.check}] {advisory.message}")
+        return 0
+
+    # The dry run swaps the model for a case that is already in the repo. Every
+    # other stage is the real one, parse boundary included (D-070).
+    drafter = (
+        (lambda request, complaints: OPENING_NIGHT) if args.dry_run else anthropic_drafter()
     )
 
     try:
         draft = generate(
             request,
-            drafter=anthropic_drafter(),
-            cache_dir=None if args.no_cache else CACHE,
+            drafter=drafter,
+            cache_dir=None if (args.no_cache or args.dry_run) else CACHE,
         )
     except GenerationFailed as failure:
         print(failure)
@@ -156,8 +345,13 @@ def main(argv: list[str] | None = None) -> int:
     for violation in result.violations:
         print(f"  [{violation.rule}] {violation.message}")
 
+    if result.ok:
+        kept = save_case(solved, args.setting, args.topology, args.seed)
+        print(f"\nSaved as {kept.id}. Come back with --case {kept.id}")
+        print("\n" + report(solved))
+
     # Advisories on a broken mystery are noise: fix correctness first.
-    advisories = critique(solved) if result.ok else []
+    advisories = assess(solved, args.topology) if result.ok else []
     if advisories:
         print("\nValid, but:")
         for advisory in advisories:

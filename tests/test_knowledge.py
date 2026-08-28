@@ -5,7 +5,7 @@ project was specified around and could not be written until now.
 """
 
 from mystery.knowledge import analyse_alibi, derive
-from mystery.models import Character, Claim, Constraint, Mystery, Place, Secret, Slot
+from mystery.models import Character, Constraint, FalseClaim, Mystery, Place, Secret, Slot
 
 PLACES = [Place(id=p, name=p.title()) for p in ("hall", "study", "cellar")]
 SLOTS = [Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)]
@@ -27,7 +27,7 @@ def _case(placements, secrets=(), claim=None) -> Mystery:
         placements=placements,
         constraints=[MURDER],
         secrets=list(secrets),
-        false_claim=claim,
+        false_claims=[claim] if claim else [],
     )
 
 
@@ -90,7 +90,7 @@ def test_knowing_someone_elses_secret_is_not_the_same_as_holding_it() -> None:
 # The alibi analysis, which is the point of all of the above
 
 
-CLAIM = Claim(character="killer", place="hall", slot="s2")
+CLAIM = FalseClaim(character="killer", place="hall", slot="s2")
 
 
 def test_people_in_the_room_the_killer_claims_can_contradict_it() -> None:
@@ -104,7 +104,7 @@ def test_people_in_the_room_the_killer_claims_can_contradict_it() -> None:
 
 
 def test_a_claim_that_matches_the_timeline_is_not_a_lie() -> None:
-    honest = Claim(character="killer", place="cellar", slot="s2")
+    honest = FalseClaim(character="killer", place="cellar", slot="s2")
     case = _case(GRID, claim=honest)
 
     assert analyse_alibi(case, derive(case)).claim_holds
@@ -117,7 +117,7 @@ def test_an_alibi_only_one_person_can_touch_is_flagged_as_unbreakable() -> None:
     and there is one of those. One testimony is not combined testimony, and a
     player who does not think to ask that exact person cannot solve the case.
     """
-    lonely_room = Claim(character="killer", place="study", slot="s2")
+    lonely_room = FalseClaim(character="killer", place="study", slot="s2")
     case = _case(GRID, claim=lonely_room)
 
     analysis = analyse_alibi(case, derive(case))
@@ -134,7 +134,7 @@ def test_being_seen_elsewhere_also_contradicts_a_claim() -> None:
     was alone at the murder is much harder to catch: the only witness to where he
     really was is the person who died.
     """
-    seen = Claim(character="killer", place="study", slot="s0")
+    seen = FalseClaim(character="killer", place="study", slot="s0")
     case = _case(GRID, claim=seen)
 
     analysis = analyse_alibi(case, derive(case))

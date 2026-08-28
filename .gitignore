@@ -19,5 +19,9 @@ dist/
 Thumbs.db
 desktop.ini
 
-# Cached model output and scratch
+# Cached model output, saved cases, generated art, scratch.
+#
+# All of it is reproducible or personal, and the art is megabytes. If a case is
+# good enough to keep in the repo, copy its file out of var/cases into
+# tests/fixtures and commit that deliberately.
 var/

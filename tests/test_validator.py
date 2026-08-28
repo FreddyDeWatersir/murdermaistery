@@ -234,3 +234,170 @@ def test_the_solver_lays_the_body_to_rest() -> None:
 
     assert fixed.placements["v"]["s2"] == "vault"
     assert validate(fixed).ok, validate(fixed).violations
+
+
+# --- V8, and the list of lies (D-063) ---------------------------------------
+
+
+def _liar_case(*claims):
+    """The same three-slot case, with whatever lies the test wants told."""
+    from mystery.models import Character, Constraint, Mystery, Place, Slot
+
+    return Mystery(
+        title="Everyone lies",
+        killer="k",
+        victim="v",
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v", "b")],
+        places=[Place(id="vault", name="Vault"), Place(id="hall", name="Hall")],
+        slots=[Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)],
+        placements={
+            "k": {"s0": "hall", "s1": "vault", "s2": "vault"},
+            "b": {"s0": "hall", "s1": "hall", "s2": "hall"},
+            "v": {"s0": "hall", "s1": "vault", "s2": "vault"},
+        },
+        constraints=[
+            Constraint(id="murder", people=["k", "v"], exclusive=True, place="vault", slot="s1")
+        ],
+        false_claims=list(claims),
+    )
+
+
+def test_v8_catches_a_lie_that_is_not_a_lie() -> None:
+    """Where the whole mechanic quietly dies: a claim matching the grid.
+
+    Nothing downstream survives it. The alibi analysis reports the story holds,
+    the brief hands the character a lie identical to the truth, and the player
+    hunts a contradiction that was never there.
+    """
+    from mystery.models import FalseClaim
+
+    honest = _liar_case(FalseClaim(character="k", place="vault", slot="s1"))
+
+    result = validate(honest)
+
+    assert "V8" in result.failed_rules
+    assert "not a lie" in [v.message for v in result.violations if v.rule == "V8"][0]
+
+
+def test_v8_allows_one_lie_each() -> None:
+    from mystery.models import FalseClaim
+
+    two_liars = _liar_case(
+        FalseClaim(character="k", place="hall", slot="s1"),
+        FalseClaim(character="b", place="vault", slot="s0"),
+    )
+
+    assert "V8" not in validate(two_liars).failed_rules
+
+
+def test_v8_stops_one_person_telling_two_lies() -> None:
+    """A liar's sightings are withheld for the moment they lie about (D-042).
+    Two lies means two blind moments and a witness who saw nothing all evening.
+    """
+    from mystery.models import FalseClaim
+
+    overworked = _liar_case(
+        FalseClaim(character="b", place="vault", slot="s0"),
+        FalseClaim(character="b", place="vault", slot="s2"),
+    )
+
+    result = validate(overworked)
+
+    assert "V8" in result.failed_rules
+    assert "more than one lie" in [v.message for v in result.violations if v.rule == "V8"][0]
+
+
+def test_v4_catches_a_lie_covering_a_secret_that_does_not_exist() -> None:
+    from mystery.models import FalseClaim
+
+    dangling = _liar_case(
+        FalseClaim(character="b", place="vault", slot="s0", covers="the_affair")
+    )
+
+    result = validate(dangling)
+
+    assert "V4" in result.failed_rules
+    assert "the_affair" in [v.message for v in result.violations if v.rule == "V4"][0]
+
+
+def test_the_killers_lie_is_the_one_the_case_turns_on() -> None:
+    """Three lies in the list, and everything that says "the lie" means one."""
+    from mystery.models import FalseClaim
+
+    case = _liar_case(
+        FalseClaim(character="b", place="vault", slot="s0"),
+        FalseClaim(character="k", place="hall", slot="s1"),
+    )
+
+    assert case.false_claim is not None
+    assert case.false_claim.character == "k"
+    assert case.lie_by("b").slot == "s0"
+    assert case.lie_by("v") is None
+
+
+# --- which scene is the murder (D-071) --------------------------------------
+
+
+def _two_scenes(order, murder_id=None):
+    """The killer and the victim alone twice: the threat, then the killing."""
+    from mystery.models import Character, Constraint, Mystery, Place, Slot
+
+    threat = Constraint(
+        id="threat", people=["k", "v"], exclusive=True, place="hall", slot="s0"
+    )
+    killing = Constraint(
+        id="the_end", people=["k", "v"], exclusive=True, place="vault", slot="s2"
+    )
+    scenes = [threat, killing] if order == "threat first" else [killing, threat]
+
+    return Mystery(
+        title="Twice alone",
+        killer="k",
+        victim="v",
+        murder=murder_id,
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v", "b")],
+        places=[Place(id="vault", name="Vault"), Place(id="hall", name="Hall")],
+        slots=[Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)],
+        placements={
+            "k": {"s0": "hall", "s1": "hall", "s2": "vault"},
+            "v": {"s0": "hall", "s1": "hall", "s2": "vault"},
+            "b": {"s0": "vault", "s1": "hall", "s2": "hall"},
+        },
+        constraints=scenes,
+    )
+
+
+def test_the_murder_is_the_last_time_they_were_alone_not_the_first() -> None:
+    """The bug that broke two real cases in a row.
+
+    Every module looked for "a constraint with the killer and the victim in it"
+    and took the first in list order. The prompt asks for an earlier private
+    confrontation, so which one came first was down to the model's typing order,
+    and half the time the threat was treated as the killing.
+    """
+    for order in ("threat first", "killing first"):
+        case = _two_scenes(order)
+        assert case.murder_scene.id == "the_end", order
+        assert case.murder_slot == "s2", order
+
+
+def test_an_explicit_murder_id_beats_the_guess() -> None:
+    """A model that tells us outranks us working it out."""
+    unusual = _two_scenes("threat first", murder_id="threat")
+
+    assert unusual.murder_scene.id == "threat"
+
+
+def test_v4_catches_a_murder_that_names_no_constraint() -> None:
+    from mystery.validator import validate
+
+    assert "V4" in validate(_two_scenes("threat first", murder_id="the_stabbing")).failed_rules
+
+
+def test_the_victim_may_meet_people_before_the_murder() -> None:
+    """V7 fired on every legitimate pre-murder scene while the confrontation
+    was being mistaken for the killing."""
+    from mystery.validator import validate
+
+    for order in ("threat first", "killing first"):
+        assert "V7" not in validate(_two_scenes(order)).failed_rules, order

@@ -1,67 +1,81 @@
 # STATE
 
-**NEXT:** Play it with someone. In a browser:
+**NEXT:** Generate three cases on consecutive seeds and read the casts side by
+side. Every seed now deals its own manners, motive and intrigues (D-075), and
+the question is whether that shows up as five different people or as five
+different labels on the same five people. If it is the latter, the worked
+example in the prompt is the next suspect: it is the last place the model is
+still being shown somebody else's finished cast.
 
-    uv add fastapi uvicorn
-    uv run python -m mystery.web --setting "..." --seed 3
+Then play two cases of different shapes back to back and see whether they feel
+like different puzzles or the same one.
 
-Then open http://localhost:8000. Suspect buttons, a chat, and the notebook as a
-live panel on the right. `--model` switches which model plays the suspects.
+    uv run python -m mystery.web --setting "..." --topology mutual_alibi
 
-The terminal version is still there: `uv run python -m mystery.cli --setting "..." --seed N --play`
-is a complete game: generate, solve, validate, interrogate, accuse, reveal.
+Three things to watch. Whether catching somebody in a lie still ends the
+investigation or whether the player now has to ask why. `agent.folded` in the
+log: how many questions it takes an innocent to admit where they were, where
+folding on question two means the conditions are too soft and never folding
+means the red herrings never resolve. And whether the false confession lands as
+a twist or as an annoyance.
 
-Nobody has played a generated case yet. The questions that matter are the same
-ones the paper prototype answered: is it fun, do the five suspects sound like
-different people, and does the notebook do too much or too little. Use
-`--show-leaks` to watch the agents while you play.
+Cached seeds are invalidated again by the prompt change, so the first run of any
+seed costs a fresh Opus draft. That is D-035 working, not a bug.
 
-After that: measure the leak rate against a local model, which is the Ollama
-routing decision (D-004). The suite exists and passes against fakes; what nobody knows yet is
-how often a real model cites something it does not have, and whether llama can do
-this at all. That number is the Ollama routing decision (D-004), settled by
-measurement instead of assertion.
-
-Then the interrogation loop: ask, log the claim, and track contradictions across
-characters. That is the last piece before the game is playable in a terminal.
+Optional: `--art` (faces and rooms, or `--portraits` and `--scenery`
+separately) needs `OPENAI_API_KEY` and
+`uv sync --extra portraits`. Run `uv sync` either way: the tests now need httpx.
 
 ---
 
 **Where things are, 27 August 2026**
 
-The pipeline runs end to end against the real model. First real output was valid
-on the first try, and had four things wrong with it that no rule could catch.
+The game is playable end to end in a browser, three playtests deep. The third
+one found the structural flaw: one liar meant one hidden variable, and the
+timeline answered the case on its own (D-063).
 
 - Repo: github.com/FreddyDeWatersir/murdermaistery
-- `models.py` — Mystery (with killer and victim), Character, Place, Slot, Constraint
-- `generator.py` — schema-forced Anthropic call, UTF-8 disk cache, fakeable boundary
+- `models.py` — Mystery, Character (`role` and `gender` public, `wants` not),
+  Place, Slot, Constraint, Secret, FalseClaim, Discovery
+- `generator.py` — schema-forced Anthropic call, UTF-8 disk cache, fakeable
+  boundary, and the two model tiers
 - `solver.py` — repairs the model's grid, or builds one from nothing as fallback
-- `validator.py` — V1 to V4, phased into proposed and final. Correctness only
-- `critique.py` — A1 to A3. Quality advisories that report and never fail
-- `cli.py` — generate, solve, validate, critique, print
-- Thirty two tests green, ruff clean, no test calls an API
+- `validator.py` — V1 to V8, phased into proposed and final. Correctness only
+- `critique.py` — A1 to A14. Quality advisories that report and never fail
+- `knowledge.py` — co-location arithmetic, no model involved
+- `agent.py` — briefs, citation-checked replies, three knowledge states
+- `interrogation.py` — transcript, contradictions, leads, what has surfaced
+- `web.py` — the browser game, portraits, notebook, transcript, timeline
+- `topology.py` — the shapes a case can have, and the checks each one demands
+- `solvable.py` — is there a way in, and does it lead to the motive
+- `scenery.py` — optional backdrops for the setting and the rooms
+- `example.py` — one case in the repo, for `--dry-run` and the end-to-end test
+- `library.py` — the shelf: cheap listings, whole cases, and the art with them
+- `palette.py` — the manners, motives and intrigues each case is dealt
+- `session.py` — a play-through, as a record, with two stores behind one boundary
+- `daily.py` — the rota: claim a day, and the buffer behind it
+- `portraits.py` — optional generated faces, never load-bearing
+- Two hundred and twenty two tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- Thirty two decisions in `docs/decisions.md`
+- Eighty one decisions in `docs/decisions.md`
 
-**What was wrong with the first real output**
+**Which model does what**
 
-1. A character found the body at slot 4 of 5, and the evening carried on around
-   her. Discovery must fall after the last slot. Prompt fixed
-2. Everyone wandered: five rooms in five slots. The same failure the solver had,
-   reproduced by the model. Prompt fixed, A1 now measures it
-3. Anglo-thriller names for an Amsterdam gallery. D-018 arriving on schedule.
-   Prompt fixed
-4. Nothing verified the alibi property the whole design rests on. A2 now
-   measures it, crudely
+| Job | Model | How often |
+|---|---|---|
+| Drafting the case | `claude-opus-5` | once per case |
+| Speaking as a suspect | `claude-sonnet-5` | once per question |
+
+Both overridable: `--generator-model` and `--model`. See D-060.
 
 **The four layers**
 
 | Layer | State |
 |---|---|
-| Generation | runs end to end. Knowledge derivation still missing |
-| Play | nothing |
-| Resolution | nothing |
-| Delivery | nothing |
+| Generation | three shapes, dealt material, and self-correcting retries |
+| Play | browser, five suspects, notebook, transcript, timeline |
+| Resolution | name the killer and the motive, three endings, full reveal |
+| Delivery | localhost, or `--share` on the wifi. Sessions per visitor |
 
 **Rules and advisories**
 
@@ -73,6 +87,7 @@ on the first try, and had four things wrong with it that no rule could catch.
 | V4 | Every referenced id exists | fails |
 | V6 | No character required in two rooms at once | fails, final phase only |
 | V7 | The victim stays dead and the body stays put | fails |
+| V8 | A lie is actually a lie, one per person | fails |
 | V0 | No holes in the grid | unwritten |
 | A1 | Nobody wanders more than twice | reports |
 | A2 | Two to four people lack an alibi at the murder | reports |
@@ -82,22 +97,68 @@ on the first try, and had four things wrong with it that no rule could catch.
 | A6 | The killer makes a false claim about where they were | reports |
 | A7 | The alibi breaks on combined testimony, not on any one | reports |
 | A8 | Every suspect had a moment nobody witnessed | reports |
+| A9 | Every suspect is load-bearing | reports |
+| A10 | The killer is not the only liar | reports |
+| A11 | Every innocent lie has a way out | reports |
+| A12 | Position alone does not convict | reports |
+| A13 | Somebody other than the killer knows the motive | reports |
+| A14 | The cast is not five of the same person | reports |
+| T1 | Mutual alibi: somebody actually vouches for the killer | reports |
+| T2 | Mutual alibi: the corroborator can be broken from their own side | reports |
+| T3 | False confession: the confessor is not the killer | reports |
+| T4 | False confession: the confession can be disproved | reports |
+| S1 | There is a secret the player can get with nothing in hand | reports |
+| S2 | No secret is sealed behind a loop or a missing gate | reports |
+| S3 | The motive is reachable | reports |
+| S4 | Every lie covers something that can surface | reports |
 
 **Numbers nobody has justified**
 
 `STICKINESS = 0.75`, `MAX_MOVES_PER_CHARACTER = 2`, `ALIBI_GAP_RANGE = (2, 4)`,
-`MIN_SUSPECTS_WITH_A_STAKE_IN_THE_VICTIM = 0.5`.
-All invented. All now at least visible. See D-025 and D-031.
+`MIN_SUSPECTS_WITH_A_STAKE_IN_THE_VICTIM = 0.5`, `INNOCENT_LIARS = 2`.
+All invented. All at least visible. See D-025 and D-031.
 
 **Open questions, in priority order**
 
-1. Nothing checks the property the design rests on: that the killer's alibi
-   breaks under two combined testimonies and no single one. A2 is a crude proxy
-2. Notebook versus solver. Gates the interface
-3. Topology library, since variety is structural not cosmetic
-4. Where game state lives between turns
+1. Stage 4. Sessions (D-077) and the daily rota (D-078) are in and run locally.
+   The rota claims a day (D-079) and a session is a record with two stores
+   behind it (D-080). What is left: the shelf behind its own interface, then the
+   S3 and DynamoDB implementations written with the console open, then Lambda,
+   Terraform and CI. The budget guard is
+   not optional: a public URL that calls a model per question is how people wake
+   up to a four figure bill
+2. Does the case still fall to the timeline alone? Three liars is the structural
+   fix; whether it works is a question about play, not about code
+3. How hard should an innocent be to crack. `agent.folded` measures it and
+   nothing tunes it yet
+4. What else is built and never called. The end-to-end test (D-070) covers the
+   library seams; nothing yet covers `main()` in either entry point
+5. Two more shapes, both needing a model change rather than a paragraph: the
+   moved body, and the unpinned time of death
+
+**How to check the state of things, cheapest first**
+
+    uv sync                                   # httpx is new
+    uv run pytest                             # 222 tests, no network, no spend
+    uv run ruff check .
+    uv run python -m mystery.cli --topologies
+    uv run python -m mystery.cli --material 3 --setting "..."  # what 3 seeds get dealt
+    uv run python -m mystery.cli --casts      # every saved cast, side by side
+    uv run python -m mystery.cli --dry-run    # the whole pipeline, no key needed
+    uv run python -m mystery.cli --setting "..." --topology mutual_alibi
+    uv run python -m mystery.cli --today      # today's case, and what is queued
+    uv run python -m mystery.cli --fill       # the nightly job: top up to four
+    uv run python -m mystery.web --daily      # serve today's, never generate
+    uv run python -m mystery.web --cases      # what you have already got
+    uv run python -m mystery.web --case <name> # play it again, no model, no wait
+    uv run python -m mystery.web --dry-run    # play the shipped case
+    uv run python -m mystery.web --setting "..." --topology mutual_alibi --art
+
+The CLI and the web game share `var/mysteries`, so a case inspected with the
+first is free to start with the second, as long as every flag matches.
 
 **Errands, not gates**
 
-- V0, and moving a curated corpus from `var/` to `tests/fixtures/`
+- V0
 - Blind replay of a third prototype. See D-020
+- Stages 4 and 5, AWS and the daily shared case, untouched

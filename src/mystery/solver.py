@@ -20,7 +20,7 @@ raising, so the failure arrives through rule V3 with the constraint named.
 import random
 
 import structlog
-from mystery.models import Claim, Constraint, Mystery, PlaceId, SlotId
+from mystery.models import Constraint, FalseClaim, Mystery, PlaceId, SlotId
 
 Grid = dict[str, dict[str, PlaceId]]
 Cell = tuple[PlaceId, SlotId]
@@ -82,64 +82,119 @@ def _repair(mystery: Mystery, rng: random.Random) -> Mystery:
         update={
             "placements": grid,
             "constraints": [_bind(c, placed.get(c.id)) for c in mystery.constraints],
-            "false_claim": _repair_the_lie(mystery, grid, placed),
+            "false_claims": _repair_the_lies(mystery, grid, placed),
         }
     )
 
 
-def _repair_the_lie(mystery: Mystery, grid: Grid, placed: dict[str, Cell]) -> Claim | None:
-    """Make sure the killer's story can actually be broken.
+def _repair_the_lies(
+    mystery: Mystery, grid: Grid, placed: dict[str, Cell]
+) -> list[FalseClaim]:
+    """Make sure every story in the case can actually be broken.
 
-    A model asked to invent a lie will sometimes have the killer claim a room
-    that was empty. Nobody can then contradict them, and the case is unsolvable
-    however many questions the player asks. A real case had exactly this, with
-    zero possible contradictors.
+    A model asked to invent a lie will sometimes have somebody claim a room that
+    was empty. Nobody can then contradict them, the lie never surfaces, and a
+    red herring nobody can detect is not a red herring, it is a wasted
+    character. A real case had exactly this on the killer, with zero possible
+    contradictors.
 
-    Which room the killer *names* carries no story: it is not a scene, nothing
+    Which room a liar *names* carries no story: it is not a scene, nothing
     happened there, and nobody's motive depends on it. So it is safe to move,
-    unlike everything else in the timeline. Prefer a room with at least two
-    people in it, all of whom are hiding something of their own, since a witness
-    with nothing to hide settles the case in one question (D-039).
+    unlike everything else in the timeline.
+
+    The killer's lie is held to a higher bar than the rest (D-063). Theirs wants
+    two witnesses who are themselves compromised, because a witness with nothing
+    to hide settles the case in one question (D-039). An innocent's lie only
+    needs one person who can say they were not there, because the interesting
+    work on an innocent lie is not detecting it, it is finding out what it was
+    covering.
     """
-    claim = mystery.false_claim
-    if claim is None or mystery.killer is None:
-        return None
-
     murder = _murder_cell(mystery, placed)
-    slot = murder[1] if murder else claim.slot
-    compromised = {s.holder for s in mystery.secrets}
 
-    def witnesses(place: PlaceId) -> set[str]:
+    def is_the_murder_cell(place: PlaceId, slot: SlotId) -> bool:
+        """Only the room *and* the hour together are off limits.
+
+        Claiming the vault at nine is claiming the murder scene. Claiming it at
+        seven, before anyone died, is an ordinary alibi and a perfectly good
+        thing for an innocent to lie about.
+        """
+        return murder is not None and (place, slot) == murder
+
+    def witnesses(place: PlaceId, slot: SlotId, liar: str) -> set[str]:
         return {
             person
             for person, by_slot in grid.items()
-            if by_slot.get(slot) == place
-            and person not in (mystery.killer, mystery.victim)
+            if by_slot.get(slot) == place and person not in (liar, mystery.victim)
         }
 
-    if len(witnesses(claim.place)) >= 2 and claim.place != (murder[0] if murder else None):
-        return claim
+    def truth(liar: str, slot: SlotId) -> PlaceId | None:
+        return grid.get(liar, {}).get(slot)
 
-    ranked = sorted(
-        (p.id for p in mystery.places if p.id != (murder[0] if murder else None)),
-        key=lambda place: (
-            len(witnesses(place)) >= 2,
-            all(w in compromised for w in witnesses(place)),
-            len(witnesses(place)),
-        ),
-        reverse=True,
-    )
+    compromised = {secret.holder for secret in mystery.secrets}
+    repaired: list[FalseClaim] = []
 
-    if not ranked or not witnesses(ranked[0]):
-        return claim
+    for claim in mystery.false_claims:
+        is_killer = claim.character == mystery.killer
+        # The killer lies about the murder itself. Everyone else lies about
+        # whichever moment they were embarrassed by, and that stays where the
+        # model put it.
+        slot = murder[1] if (is_killer and murder) else claim.slot
+        wanted = 2 if is_killer else 1
 
-    log.info(
-        "solver.relocated_lie",
-        was=claim.place,
-        now=ranked[0],
-        witnesses=len(witnesses(ranked[0])),
-    )
-    return claim.model_copy(update={"place": ranked[0], "slot": slot})
+        here = witnesses(claim.place, slot, claim.character)
+        already_good = (
+            len(here) >= wanted
+            and not is_the_murder_cell(claim.place, slot)
+            and claim.place != truth(claim.character, slot)
+        )
+        if already_good:
+            repaired.append(
+                claim if slot == claim.slot else claim.model_copy(update={"slot": slot})
+            )
+            continue
+
+        ranked = sorted(
+            (
+                place.id
+                for place in mystery.places
+                if not is_the_murder_cell(place.id, slot)
+                and place.id != truth(claim.character, slot)
+            ),
+            key=lambda place: (
+                len(witnesses(place, slot, claim.character)) >= wanted,
+                all(w in compromised for w in witnesses(place, slot, claim.character)),
+                len(witnesses(place, slot, claim.character)),
+            ),
+            reverse=True,
+        )
+
+        if not ranked:
+            repaired.append(claim)
+            continue
+
+        # Nowhere in the house has anybody who could contradict them. Keep what
+        # the model wrote if it is at least false, since an unbreakable lie is
+        # an advisory problem and a lie that is not a lie is a V8 failure that
+        # stops the whole run.
+        nowhere_better = not witnesses(ranked[0], slot, claim.character)
+        still_a_lie = claim.place != truth(claim.character, slot) and not is_the_murder_cell(
+            claim.place, slot
+        )
+        if nowhere_better and still_a_lie:
+            log.warning("solver.unbreakable_lie", liar=claim.character, place=claim.place)
+            repaired.append(claim.model_copy(update={"slot": slot}))
+            continue
+
+        log.info(
+            "solver.relocated_lie",
+            liar=claim.character,
+            was=claim.place,
+            now=ranked[0],
+            witnesses=len(witnesses(ranked[0], slot, claim.character)),
+        )
+        repaired.append(claim.model_copy(update={"place": ranked[0], "slot": slot}))
+
+    return repaired
 
 
 def _importance(constraint: Constraint, mystery: Mystery) -> tuple:
@@ -150,7 +205,8 @@ def _importance(constraint: Constraint, mystery: Mystery) -> tuple:
     a moment matter, and bigger scenes outrank smaller ones because they are
     harder to reschedule.
     """
-    is_murder = mystery.killer in constraint.people and mystery.victim in constraint.people
+    scene = mystery.murder_scene
+    is_murder = scene is not None and constraint.id == scene.id
     return (is_murder, constraint.exclusive, len(constraint.people), constraint.id)
 
 
@@ -281,17 +337,9 @@ def _rehome(
 
 
 def _murder_cell(mystery: Mystery, placed: dict[str, Cell]) -> Cell | None:
-    """Where and when the killer was alone with the victim."""
-    if mystery.killer is None or mystery.victim is None:
-        return None
-    for constraint in mystery.constraints:
-        if (
-            constraint.id in placed
-            and mystery.killer in constraint.people
-            and mystery.victim in constraint.people
-        ):
-            return placed[constraint.id]
-    return None
+    """Where and when the killing happens, as the model defines it (D-071)."""
+    scene = mystery.murder_scene
+    return placed.get(scene.id) if scene is not None else None
 
 
 def _lay_the_body_to_rest(

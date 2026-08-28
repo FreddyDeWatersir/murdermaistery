@@ -158,3 +158,20 @@ def test_a_witness_who_has_said_nothing_is_only_worth_asking() -> None:
 
     assert len(against_otto) == 1
     assert not against_otto[0].witness_has_spoken
+
+
+def test_a_retraction_reaches_the_notebook() -> None:
+    """D-064. A liar who comes clean has to move the timeline, or the admission
+    is a nice sentence the game never heard."""
+    from mystery.agent import Brief, Fact
+
+    brief = Brief(
+        character="vera",
+        name="Vera",
+        facts=[Fact(id="self:s1", text="the hall", subject="vera", slot="s1", place="hall")],
+        guarded=[Fact(id="truth:s1", text="the study", subject="vera", slot="s1", place="study")],
+    )
+
+    assertions = assertions_from(brief, Reply(speech="All right. The study.", used=["truth:s1"]))
+
+    assert assertions == [Assertion(subject="vera", slot="s1", place="study")]

@@ -66,17 +66,8 @@ def alibi_breadth(mystery: Mystery) -> list[Advisory]:
     Too few and the killer is the only person who cannot account for themselves.
     Too many and having no alibi means nothing at all.
     """
-    murder = next(
-        (
-            c
-            for c in mystery.constraints
-            if c.is_bound
-            and mystery.killer in c.people
-            and mystery.victim in c.people
-        ),
-        None,
-    )
-    if murder is None:
+    murder = mystery.murder_scene
+    if murder is None or not murder.is_bound:
         return [
             Advisory(
                 check="A2",
@@ -382,6 +373,244 @@ def alibi_is_breakable_but_not_trivially(mystery: Mystery) -> list[Advisory]:
     return advisories
 
 
+def everyone_is_load_bearing(mystery: Mystery) -> list[Advisory]:
+    """A9: suspects the case would not miss.
+
+    The complaint after the second playtest was that some characters were
+    useless. A3 and A8 were already passing them, because they held a secret and
+    had a private moment, and were still decoration: nothing in the case ran
+    *through* them.
+
+    A character earns their place by being a source. They can break the killer's
+    alibi, they hold the secret that gates another secret, somebody else's secret
+    is known to them, or the motive is theirs. In the hand-built prototypes every
+    single character was at least two of those, which is why every conversation
+    went somewhere.
+    """
+    if mystery.killer is None or not mystery.secrets:
+        return []
+
+    useful: set[str] = {mystery.killer}
+    useful |= set(analyse_alibi(mystery, derive(mystery)).contradictors)
+
+    gates = {s.revealed_by for s in mystery.secrets if s.revealed_by}
+    for secret in mystery.secrets:
+        if secret.id in gates or secret.is_motive:
+            useful.add(secret.holder)
+        useful |= set(secret.known_by)
+
+    return [
+        Advisory(
+            check="A9",
+            message=(
+                f"{character.name} is not a source of anything. They cannot break "
+                f"the killer's story, they gate nobody's secret, and nobody's secret "
+                f"reaches through them. Remove them or give them a thread"
+            ),
+        )
+        for character in mystery.characters
+        if character.id not in useful and character.id != mystery.victim
+    ]
+
+
+# How many people besides the killer should lie about where they were. With
+# nobody else lying, "who lied" and "who did it" are one question and the
+# timeline answers it alone, which is the flaw the second playtest found. Two
+# innocent liars means the timeline hands over a shortlist and the secrets have
+# to do the rest. More than three and every conversation is a retraction.
+INNOCENT_LIARS = 2
+
+
+def the_killer_is_not_the_only_liar(mystery: Mystery) -> list[Advisory]:
+    """A10: does cracking the timeline crack the case?
+
+    This is the structural fix for the complaint that the game ends the moment
+    you find out who lied about where they were (D-063). It is a count, and a
+    crude one, but the property it stands for is the whole replay value of a
+    case: the timeline should narrow the field, not name the answer.
+    """
+    if mystery.killer is None:
+        return []
+
+    innocents = [c for c in mystery.false_claims if c.character != mystery.killer]
+
+    if len(innocents) < INNOCENT_LIARS:
+        return [
+            Advisory(
+                check="A10",
+                message=(
+                    f"{len(innocents)} innocent people lie about where they were, "
+                    f"wanted at least {INNOCENT_LIARS}. With this few, working out "
+                    f"who lied is the same as working out who killed him, and every "
+                    f"secret in the case is decoration"
+                ),
+            )
+        ]
+    return []
+
+
+def every_lie_has_a_way_out(mystery: Mystery) -> list[Advisory]:
+    """A11: can the player resolve an innocent lie, or only detect it?
+
+    A lie that surfaces and never resolves is not a red herring, it is a dead
+    end wearing one. The player catches somebody out, presses, gets nothing, and
+    learns that pressing does not pay, which is the opposite of what the
+    mechanic is for.
+
+    Two exits count. Either the secret it covers is known to somebody else, so
+    the player can hear it from a third party, or the liar has a condition under
+    which they will admit it themselves. Neither one and the lie is sealed.
+    """
+    if not mystery.false_claims:
+        return []
+
+    secrets = {secret.id: secret for secret in mystery.secrets}
+    advisories = []
+
+    for claim in mystery.false_claims:
+        if claim.character == mystery.killer:
+            continue
+
+        secret = secrets.get(claim.covers)
+
+        if secret is None:
+            advisories.append(
+                Advisory(
+                    check="A11",
+                    message=(
+                        f"{claim.character!r} lies about where they were and no secret "
+                        f"says why. A lie with no reason behind it is noise: the player "
+                        f"catches them and finds nothing underneath"
+                    ),
+                )
+            )
+            continue
+
+        if not secret.known_by and not claim.admits_when:
+            advisories.append(
+                Advisory(
+                    check="A11",
+                    message=(
+                        f"{claim.character!r} lies to cover {secret.id!r}, which nobody "
+                        f"else knows and which they have no condition for admitting. "
+                        f"The player can catch the lie and can never resolve it"
+                    ),
+                )
+            )
+
+    return advisories
+
+
+def position_alone_does_not_convict(mystery: Mystery) -> list[Advisory]:
+    """A12: is there still a mechanical shortcut to the killer?
+
+    The subtle way this whole idea collapses back into one move. Innocent liars
+    break by *presence*: somebody saw them where they really were, so their
+    story resolves and they are cleared. The killer breaks by *absence*: they
+    were alone with the victim and nobody can place them anywhere. So a player
+    who notices that asymmetry stops solving the case and starts asking "which
+    liar can nobody vouch for", and the secrets go back to being scenery.
+
+    The fix is that at least one innocent must also have been unwitnessed when
+    they lied, so the positional test leaves two candidates and the motive has
+    to break the tie.
+    """
+    if mystery.killer is None or not mystery.false_claims:
+        return []
+
+    knowledge = derive(mystery)
+
+    def vouched_for(claim) -> bool:
+        return any(
+            knowledge[c.id].saw(claim.character, claim.slot)
+            for c in mystery.characters
+            if c.id not in (claim.character, mystery.victim)
+        )
+
+    unvouched = [c.character for c in mystery.false_claims if not vouched_for(c)]
+
+    if unvouched == [mystery.killer]:
+        return [
+            Advisory(
+                check="A12",
+                message=(
+                    "The killer is the only liar nobody can place. A player who asks "
+                    "'which of the liars has no witness' is handed the answer without "
+                    "touching a motive. At least one innocent should have been alone "
+                    "when they lied about where they were"
+                ),
+            )
+        ]
+    return []
+
+
+def the_motive_can_be_found(mystery: Mystery) -> list[Advisory]:
+    """A13: can the player ever learn *why*?
+
+    The killer never gives up their own motive (D-066), so the only way it
+    reaches the player is somebody else saying it. If nobody else knows, the
+    reason for the murder exists in the ground truth and nowhere a player can
+    reach, and the best ending in the game is unreachable by design.
+    """
+    if mystery.killer is None:
+        return []
+
+    motive = next(
+        (s for s in mystery.secrets if s.holder == mystery.killer and s.is_motive), None
+    )
+    if motive is None or motive.known_by:
+        return []
+
+    return [
+        Advisory(
+            check="A13",
+            message=(
+                f"Nobody but the killer knows {motive.id!r}, which is why they did it. "
+                f"They will never say it themselves, so the player cannot find the "
+                f"motive at all. Somebody has to half know it"
+            ),
+        )
+    ]
+
+
+def the_cast_is_not_all_one_kind(mystery: Mystery) -> list[Advisory]:
+    """A14: is this five of the same person with different jobs?
+
+    Only the countable half of a real problem. Left to itself the generator cast
+    men as the killer and the victim every time, and the cast around them
+    followed (D-074). Who kills whom is decided from the seed now, because it is
+    a property of the *sequence* of cases and no check on one case can see it.
+    What one case can be asked is whether anybody in it is anything other than
+    the default.
+    """
+    stated = [c.gender.strip().lower() for c in mystery.characters if c.gender.strip()]
+    if len(stated) < len(mystery.characters):
+        return [
+            Advisory(
+                check="A14",
+                message=(
+                    f"{len(mystery.characters) - len(stated)} of the cast have no "
+                    f"stated gender, so their drawn portrait is a guess made from "
+                    f"prose"
+                ),
+            )
+        ]
+
+    women = sum(1 for g in stated if g.startswith("w"))
+    if women < 2 or len(stated) - women < 2:
+        return [
+            Advisory(
+                check="A14",
+                message=(
+                    f"{women} women and {len(stated) - women} men. A cast that is "
+                    f"nearly all one thing reads as the same person five times, and "
+                    f"the second case will read as the first"
+                ),
+            )
+        ]
+    return []
+
+
 ADVISORIES = [
     wandering,
     alibi_breadth,
@@ -391,6 +620,12 @@ ADVISORIES = [
     motive_is_gated,
     killer_lies_about_where_they_were,
     alibi_is_breakable_but_not_trivially,
+    everyone_is_load_bearing,
+    the_killer_is_not_the_only_liar,
+    every_lie_has_a_way_out,
+    position_alone_does_not_convict,
+    the_motive_can_be_found,
+    the_cast_is_not_all_one_kind,
 ]
 
 

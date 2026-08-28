@@ -222,5 +222,6 @@ def run(mystery: Mystery, responder: Responder, show_leaks: bool = False) -> Non
                 speech=reply.speech,
                 assertions=assertions_from(brief, reply),
                 refused=reply.refused,
+                cited=list(reply.used),
             )
         )

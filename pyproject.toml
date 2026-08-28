@@ -15,7 +15,13 @@ dependencies = [
     # Only needed for the browser version, mystery.web
     "fastapi>=0.115",
     "uvicorn>=0.32",
+    "openai>=3.5.0",
 ]
+
+[project.optional-dependencies]
+# Only for --portraits and --scenery. The game runs without either.
+portraits = ["openai>=1.50"]
+scenery = ["openai>=1.50"]
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
@@ -25,6 +31,8 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.4",
+    # fastapi.testclient needs it. Only the tests do, so it lives here.
+    "httpx>=0.28",
 ]
 
 [tool.pytest.ini_options]

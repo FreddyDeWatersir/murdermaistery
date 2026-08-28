@@ -178,3 +178,46 @@ def test_an_impossible_set_leaves_a_constraint_unbound_rather_than_crashing() ->
     assert "V3" in result.failed_rules
     assert len([c for c in solved.constraints if not c.is_bound]) == 1
     assert len(solved.constraints) == 2, "the unplaceable constraint was dropped"
+
+
+def test_the_solver_moves_an_innocents_lie_somewhere_it_can_be_caught() -> None:
+    """An unbreakable lie is a wasted character (D-063).
+
+    If nobody was in the room somebody claims, nobody can contradict them, the
+    lie never surfaces, and the red herring the case was counting on does not
+    fire. The room a liar names carries no story, so it is safe to move.
+    """
+    from mystery.models import Character, Constraint, FalseClaim, Mystery, Place, Slot
+    from mystery.solver import solve
+
+    case = Mystery(
+        title="Nobody saw a thing",
+        killer="k",
+        victim="v",
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v", "b", "c")],
+        places=[Place(id=p, name=p.title()) for p in ("hall", "vault", "attic")],
+        slots=[Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)],
+        placements={
+            "k": {"s0": "hall", "s1": "vault", "s2": "vault"},
+            "v": {"s0": "hall", "s1": "vault", "s2": "vault"},
+            "b": {"s0": "hall", "s1": "hall", "s2": "hall"},
+            # Somebody has to be somewhere else, or there is nowhere for a liar
+            # to be caught out and the repair has nothing to work with.
+            "c": {"s0": "vault", "s1": "hall", "s2": "hall"},
+        },
+        constraints=[
+            Constraint(id="murder", people=["k", "v"], exclusive=True, place="vault", slot="s1")
+        ],
+        false_claims=[
+            FalseClaim(character="k", place="hall", slot="s1"),
+            # The attic was empty all evening, so this one can never be caught.
+            FalseClaim(character="b", place="attic", slot="s0", covers="something"),
+        ],
+    )
+
+    fixed = solve(case, seed=3)
+    lie = fixed.lie_by("b")
+
+    assert lie.place != "attic", "an empty room is an unbreakable alibi"
+    assert fixed.who_is_in(lie.place, lie.slot) - {"b"}, "somebody has to be able to deny it"
+    assert lie.covers == "something", "the repair must not lose why they lied"

@@ -33,6 +33,9 @@ from typing import Any
 import structlog
 from dotenv import load_dotenv
 from mystery.models import Mystery
+from mystery.palette import draw as draw_palette
+from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
+from mystery.topology import get as get_topology
 from pydantic import BaseModel, ValidationError
 
 # Reads .env from the project root if present, so a key can live in a
@@ -41,7 +44,18 @@ load_dotenv()
 
 log = structlog.get_logger()
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+# Two jobs, two models (D-060).
+#
+# Drafting happens once per case and settles everything the player will meet:
+# whether the cast are people or job titles, whether the secrets interlock,
+# whether the grid means anything. One call, a few cents, and every later call
+# in the session inherits whatever it decided. It gets the strongest model.
+DRAFT_MODEL = "claude-opus-5"
+
+# The suspects answer one question at a time, dozens of times an evening. This
+# is where the money actually goes, so it stays a tier down. Override with
+# --model if a case is worth the better liar.
+VOICE_MODEL = "claude-sonnet-5"
 
 
 class GenerationRequest(BaseModel):
@@ -52,18 +66,26 @@ class GenerationRequest(BaseModel):
     cast_size: int = 5
     slot_count: int = 5
     place_count: int = 5
-    topology: str = "the killer lies about where they were"
+    # The id of a shape in the topology library, not a description. What the
+    # shape means is a paragraph the generator is given, and it is the only part
+    # of the instructions that changes between cases (D-067).
+    topology: str = DEFAULT_TOPOLOGY
     seed: int = 0
 
     def cache_key(self) -> str:
-        """Hash of the request *and* the prompt that will be sent with it.
+        """A hash of exactly what is about to be sent, and nothing else.
 
-        Without the prompt in the key, editing the system prompt changes nothing:
-        every previously generated seed keeps returning the draft it produced
-        under the old instructions, and you spend an afternoon wondering why your
-        changes had no effect. They did. You were reading a cached answer.
+        Without the prompt in the key, editing the prompt changes nothing: every
+        previously generated seed keeps returning the draft it produced under the
+        old instructions, and you spend an afternoon wondering why your changes
+        had no effect. They did. You were reading a cached answer (D-035).
+
+        This used to hash the request plus a couple of the pieces that go into
+        the prompt, which meant every new piece was a new chance to forget one.
+        The topology brief was nearly missed, the drawn material would have been
+        (D-075). Hashing the finished prompt cannot fall behind.
         """
-        payload = (self.model_dump_json(exclude_none=True) + SYSTEM_PROMPT).encode()
+        payload = (SYSTEM_PROMPT + _user_prompt(self)).encode()
         return hashlib.sha256(payload).hexdigest()[:16]
 
 
@@ -90,19 +112,46 @@ Only one of those secrets is the murder. A cast where three people have nothing 
 to hide is three cooperative witnesses and one obvious liar, and there is no \
 game.
 
-For every character fill in `wants`, `manner` and `under_pressure`. These are \
-not decoration: they are the whole difference between a witness reciting \
-locations and a person. Make them specific and make them different from each \
-other. One talks too much and volunteers irrelevant detail. One is cold and \
-answers exactly the question asked and nothing more. One is performing \
-composure and it is costing them. One is helpful in manner and unhelpful in \
-substance. Somebody should be willing to trade information rather than simply \
-give it.
+For every character fill in `role`, `gender`, `look`, `wants`, `manner`, \
+`under_pressure`, and `impressions`.
 
-2. The murder. Who, whom, how, and above all why. The motive should come out of \
-what the killer is concealing.
+`role` is one short public phrase: their job here and what they were to the \
+victim. "The stage manager, twenty two years in this building." "His \
+business partner." "The understudy." This is printed under their name before \
+the player has asked anything, so it must contain nothing they would hide.
 
-3. The secrets, and this is the step that decides whether the case is any good.
+`wants` is the opposite: private, what they are actually after tonight. The \
+player never sees it written down and has to work it out.
+
+`gender` is "woman" or "man". `look` is one sentence: roughly how old, build, \
+and how they are dressed this evening. Be concrete, and vary it. Not everyone \
+is elegant and in their forties. Somebody is over sixty. Somebody is under \
+twenty five.
+
+`manner` and `under_pressure` are how they behave when questioned, and they are \
+the whole difference between a witness reciting locations and a person. This \
+case arrives with a list of manners, one per suspect, under MATERIAL FOR THIS \
+CASE. Use them. They are behaviours rather than characters, so the work is \
+yours: decide who gets which, decide what it looks like in *this* person in \
+*this* house, and write `manner` and `under_pressure` in your own words rather \
+than copying the line. A manner should change what somebody actually says when \
+pressed, not sit in a field being true.
+
+`impressions` maps each *other* character's id to what this person thinks of \
+them, in a sentence, in their voice. Give every character an impression of the \
+victim and of at least two others. This is what makes them worth talking to: \
+without it a suspect can only recite where they stood, and a player who asks \
+"what did you make of him" gets nothing back.
+
+2. The murder. Who, whom, how, and above all why. The motive comes with the \
+case, under MATERIAL FOR THIS CASE, as a situation rather than a plot: make it \
+specific to these people, and make it come out of what the killer is \
+concealing.
+
+3. The secrets, and this is the step that decides whether the case is any good. \
+The threads listed under MATERIAL FOR THIS CASE are what the innocent suspects \
+are busy hiding: turn each one into a secret with a holder, and let them cross \
+each other rather than running in parallel.
 
 **The victim is the hub.** Do not give five suspects five unrelated subplots \
 with one murder bolted on. The victim held something over most of the room: a \
@@ -116,17 +165,51 @@ must be reachable only after some other character's secret has surfaced. Set \
 `revealed_by` on it to the id of that other secret. This is what stops the \
 obvious suspect from being the answer.
 
-**The killer lies about where they were.** Fill in `false_claim` with the room \
-and the slot they will claim, which must not be where they actually were. \
-Choose a room that had **at least two other people in it at that moment**, and \
-ideally people who are themselves concealing something. An empty room is an \
-unbreakable alibi: nobody can say the killer was not there, and the case cannot \
-be solved at all. Compromised witnesses matter too, because a witness with \
-nothing to hide is believed instantly and ends the game in one question.
+**Three people lie about where they were, and only one of them is the killer.** \
+This is the most important instruction here. If the killer is the only liar, \
+then working out who lied is the same as working out who did it, the player \
+solves the case from the timeline alone, and every secret you have written is \
+decoration. Fill in `false_claims` with three entries: the killer, and two \
+innocent people who lied for their own reasons.
+
+For every entry give the room and the slot they will claim, which must not be \
+where they actually were, plus `covers` (the id of the secret the lie protects) \
+and `admits_when` (what would make them drop it). The innocent lies are the \
+good part: somebody was where they should not have been, with someone they \
+should not have been with, going through papers that were not theirs. Being \
+caught out is embarrassing rather than fatal, and that is exactly why they hold \
+the line for a while.
+
+Every liar must claim a room that had **at least one other person in it at that \
+moment**, and the killer's room needs **two**, ideally people who are themselves \
+concealing something. An empty room is an unbreakable alibi: nobody can say they \
+were not there, the lie never surfaces, and a red herring nobody can detect is a \
+wasted character. A witness with nothing to hide is believed instantly and ends \
+the game in one question.
+
+**Give every innocent lie a way out.** The player must be able to resolve it, \
+not merely detect it. Either somebody else knows the secret it covers, so it can \
+be heard from a third party, or `admits_when` names a real condition under which \
+they will come clean. A lie the player catches and can never get underneath \
+teaches them that pressing does not pay, which is the opposite of the point.
+
+**One innocent liar must also have been alone.** The killer is unwitnessed at \
+the murder because they were alone with the victim. If every innocent liar can \
+be vouched for by somebody, the player stops thinking and asks "which liar has \
+no witness", and the answer is always the killer. Put at least one innocent \
+somewhere unobserved when they lied, so that test leaves two candidates and the \
+motive has to break the tie.
 
 **Mark the killer's motive.** The killer holds two secrets: the background that \
 made them vulnerable, and the reason they killed. Set `is_motive` to true on the \
 second one, and gate it with `revealed_by`.
+
+**Somebody else must half know why.** The killer will never say the reason they \
+did it, so put at least one other character in the motive's `known_by`: someone \
+who saw the argument, was told part of it, or worked out enough of it to repeat. \
+Without that the reason for the murder exists nowhere the player can reach, and \
+naming it is impossible. The player is asked for the killer *and* the motive at \
+the end, so the motive has to be findable.
 
 **Every secret needs a breaking point.** Fill in `breaks_when` with the \
 condition under which its holder stops concealing it: confronted with a named \
@@ -178,9 +261,30 @@ floating without a place and slot.
 to and including the murder and its immediate aftermath. Discovery happens after \
 the last slot, because everything the player investigates is what people were \
 doing before anyone knew. Never write a constraint where someone finds the body.
-- Name the killer and the victim in the `killer` and `victim` fields.
+- Name the killer and the victim in the `killer` and `victim` fields, and set \
+`murder` to the id of the constraint where the killing happens. A good case \
+usually has an earlier private scene between those same two people, the one \
+where the victim says the thing that gets them killed, so which of the two is \
+the murder cannot be guessed from the outside. Say which.
+- Fill in `discovery`: who found the body, in which room, and a sentence about \
+how. This happened after the last slot and everybody knows it. Without it the \
+suspects cannot discuss the death they are being questioned about.
 
 Design rules for a case worth playing:
+
+**Every character must be load-bearing.** Before you finish, go through the cast \
+one at a time and ask what the case loses if you delete them. If the answer is \
+nothing, they are decoration and the player will waste questions on them and \
+feel cheated. Each suspect must be at least two of the following: someone who \
+can contradict the killer's story, someone whose secret gates another secret, \
+someone who knows a secret that is not theirs (put them in that secret's \
+`known_by`), or the holder of the motive.
+
+Weave them together. A knows something about B. B is the only person who can \
+undermine C. C's secret is what makes A's behaviour make sense. A cast of five \
+separate people with five separate problems is five short conversations that go \
+nowhere.
+
 - The killer's alibi must be breakable by combining at least two people's \
 testimony, and by no single person's alone.
 - The killer's motive should only become visible after some unrelated-looking \
@@ -191,8 +295,103 @@ Names belong to the setting. A gathering in Amsterdam has Dutch names, one in \
 Naples has Italian ones. Reaching for the same handful of Anglo-thriller \
 surnames every time is the fastest way to make every case feel like the last one.
 
-Ids are short lowercase snake_case. Every id you reference must exist.\
+Ids are short lowercase snake_case. Every id you reference must exist.
+
+---
+
+Here is one case that worked, abridged to its skeleton. It is here for the \
+*shape*, not the content. Do not reuse the setting, the names, the theft, the \
+counterweight bar, or the lighting box. Build something that holds together the \
+way this one does.
+
+**Opening night at an Amsterdam theatre.** Rooms: stage and wings, green room, \
+dressing corridor, prop store, lighting box, stage door. Slots: 19:40 half hour \
+call, 20:00 Act 1, 20:40 Act 1 continued, 21:00 interval, 21:20 Act 2.
+
+*The cast, and what each of them is sitting on.* Ilse, the lead, late forties, \
+overheard the producer say she was finished after this run and has told nobody. \
+Tomas, the director, has been inflating production costs and pocketing the \
+difference. Nadia, the understudy, was sleeping with the producer, who promised \
+her the part and then went cold. Wouter, stage manager, twenty two years in this \
+building, has been quietly selling theatre equipment. Renske, co-producer, found \
+out her partner was moving money out of the company. Bram, the producer, is the \
+victim, and note what he is: not a nice man who died, but the one thing all five \
+have in common. He had leverage over every person in the room. That is what \
+makes it a case rather than five separate problems with a corpse in the middle.
+
+*The murder.* Wouter. At the half hour call Bram told him he had traced the \
+missing equipment and would go to the police after the run. Wouter asked him to \
+the prop store at the interval to show him where it all went, and killed him \
+there.
+
+*The lie.* Wouter says he spent the interval in the lighting box running the Act \
+2 cue stack. He picked a room he could account for and even logged a cue under \
+his initials afterwards to back it up.
+
+*The other liars, which is what makes it a case rather than a quiz.* Renske says \
+she was in the green room during the interval. She was in the lighting box going \
+through Bram's files, and she will not say so, because saying so means admitting \
+what she was looking for. Nadia says she was in the dressing corridor the whole \
+of Act 1 and was in fact at the stage door with Bram, having the argument that \
+ended it. Both are caught out on the timeline exactly as easily as Wouter is. \
+Neither of them killed anybody. A player who finds one of these and stops has \
+accused the wrong person with complete confidence, which is the best feeling this \
+game can produce.
+
+*Why the lie holds for a while.* Renske was in the lighting box the whole \
+interval, so she knows it was empty, and she will not say so, because saying so \
+means admitting she was going through Bram's files. Her testimony is gated \
+behind cracking her, and she cracks only once the player knows about the money. \
+Ilse saw a figure cross toward the prop store and thought it was Wouter by the \
+walk, but the corridor was half lit and she will not swear to it. The prop store \
+was locked afterwards and only two men held keys, one of them the dead one, but \
+a spare has been missing for months and Wouter can say so truthfully. Three \
+contradictors, not one of them enough alone, and together conclusive.
+
+*The chain the player has to walk:* learn Bram was moving money, which cracks \
+Renske, which empties the lighting box, which turns Ilse's half sighting and the \
+key into evidence.
+
+*The shield.* Pressed hard, Wouter confesses to the theft. He does it with shame \
+and relief and it plays like a breakthrough: it explains the evasiveness, the \
+keys, the lying, all of it. It is true. It is not the crime. Give your killer \
+something real to surrender that is smaller than what they did.
+
+*The decoy.* Tomas is the obvious suspect and is meant to be. He was publicly \
+told his career here was over, he has money to hide, and he cannot account for \
+himself. He is innocent.
+
+Two things that made it feel alive at the table, and both are cheap. Every \
+character had a *manner* that survived contact with a hostile question: one \
+performed composure while it cost her, one answered exactly what was asked and \
+nothing further, one talked too much and buried the useful sentence in the \
+middle. And every character had an opinion about every other character, in their \
+own voice, which meant a player could ask "what did you make of him" and get a \
+person back rather than a timetable.\
 """
+
+
+def _casting(seed: int) -> str:
+    """Who is the killer and who is the victim, decided here rather than there.
+
+    Left to a model, both came out men every time (D-074). This is not a
+    quality judgement about any one case: it is that the same coin lands the
+    same way on every seed, and the fix belongs in the one place that knows the
+    seed. Two independent bits, so all four combinations happen.
+    """
+    killer = "a woman" if seed % 2 else "a man"
+    victim = "a woman" if (seed // 2) % 2 else "a man"
+    return (
+        f"Casting, not negotiable: the killer is {killer} and the victim is "
+        f"{victim}. Everything else about them is yours. The rest of the cast "
+        f"must contain at least two women and at least two men."
+    )
+
+
+def _material(request: GenerationRequest) -> str:
+    return draw_palette(
+        request.seed, request.setting, request.topology, request.cast_size
+    ).brief()
 
 
 def _user_prompt(request: GenerationRequest) -> str:
@@ -201,7 +400,9 @@ def _user_prompt(request: GenerationRequest) -> str:
         f"Cast: {request.cast_size} suspects plus one victim.\n"
         f"Places: {request.place_count} distinct rooms or areas.\n"
         f"Time: {request.slot_count} consecutive slots.\n"
-        f"Shape of the solution: {request.topology}\n\n"
+        f"SHAPE OF THE SOLUTION\n{get_topology(request.topology).brief}\n\n"
+        f"{_casting(request.seed)}\n\n"
+        f"{_material(request)}\n"
         f"Variation key {request.seed}: use it to take a different angle on this "
         f"setting than you otherwise would."
     )
@@ -219,7 +420,7 @@ def _tool_schema() -> dict[str, Any]:
 
 
 def anthropic_drafter(
-    model: str = DEFAULT_MODEL, api_key: str | None = None
+    model: str = DRAFT_MODEL, api_key: str | None = None
 ) -> Drafter:
     """Build a Drafter backed by the Anthropic API.
 

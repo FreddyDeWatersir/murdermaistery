@@ -253,3 +253,21 @@ def test_a_generated_mystery_survives_the_whole_pipeline() -> None:
     result = validate(solved)
 
     assert result.ok, result.violations
+
+
+def test_who_kills_whom_is_decided_here_not_by_the_model() -> None:
+    """Every case came out with a man killing a man (D-074). Two independent
+    bits off the seed, so all four combinations happen across a run of seeds."""
+    from mystery.generator import _casting
+
+    seen = {(("woman" in _casting(s).split("victim")[0]),
+             ("woman" in _casting(s).split("victim")[1])) for s in range(4)}
+
+    assert len(seen) == 4, "all four castings must appear in the first four seeds"
+
+
+def test_the_casting_note_reaches_the_prompt() -> None:
+    from mystery.generator import GenerationRequest, _user_prompt
+
+    assert "the killer is a woman" in _user_prompt(GenerationRequest(setting="x", seed=1))
+    assert "the killer is a man" in _user_prompt(GenerationRequest(setting="x", seed=0))
