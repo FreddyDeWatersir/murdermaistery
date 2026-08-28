@@ -1347,3 +1347,41 @@ as long as it is unambiguous, and refuses rather than guessing when it is not.
 name; they sort first, which is correct, since they are the oldest things on the
 shelf.
 **Status:** active
+
+## D-082 The pictures cost forty five times what I said they did
+**Date:** 2026-08-28
+**What was wrong:** `portraits.py` claimed "roughly five cents a case". Two
+errors compounded. `--art` makes **eleven** images, not five: a portrait each
+for the cast plus an establishing shot and one per room, and the backdrops are
+landscape, which costs half again as much. And neither module set `quality`, so
+both inherited the API default, which is the expensive tier. At current prices
+that is about **$2.34** a case, not five cents.
+**Worse until D-073:** art was cached under the *request* key, which includes
+the prompt. Every prompt edit changed the key, so the next `--art` run
+regenerated all eleven images for what was effectively the same case. Moving art
+under the case id was written as tidiness and was in fact the fix for a leak.
+**Decision:** quality is chosen rather than inherited, `--art-quality` with
+`low` as the default, and the estimate is printed before anything is spent. Low
+is about fifteen cents a case, medium four times that, high fifteen times. Low
+is right for the backdrops on their own merits: they sit under a heavy vignette
+and a sharper image would be thrown away by the CSS.
+**Art already on disk is never regenerated**, flag or no flag, which was true in
+spirit and is now checked before the estimate rather than after the spending.
+**The general lesson, and it is not about images:** a cost written in a docstring
+is a guess with a confident voice. Nothing in a program can check it, no test
+will ever fail because of it, and it will be believed for exactly as long as
+nobody looks at a bill. Anything that spends money should say what it is about
+to spend, out loud, in the terminal, before it spends it.
+**Status:** active
+
+## D-083 A case travels as one file
+**Date:** 2026-08-28
+**Decision:** `--bundle <case>` writes a zip holding the case and its pictures.
+`--unbundle <file>` puts both on this machine's shelf. Nothing inside is
+machine-specific.
+**Why:** `var/` is gitignored for good reasons, the art is megabytes and the
+cases are personal, and those reasons are exactly wrong when the thing you want
+is one good case on your other laptop. Pulling the repo gives you the engine and
+an empty shelf, and regenerating means paying for a draft and eleven images to
+get a case you already own.
+**Status:** active

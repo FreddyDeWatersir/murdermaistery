@@ -28,6 +28,12 @@ from mystery.models import Mystery
 
 log = structlog.get_logger()
 
+# Landscape costs half again as much as square, and there are six of these per
+# case against five portraits, so the backdrops are the larger half of the bill
+# (D-082). They also sit under a heavy vignette, which is the best possible
+# argument for the cheap tier.
+PRICES = {"low": 0.016, "medium": 0.063, "high": 0.250}
+
 STYLE = (
     "Muted noir interior illustration, painterly and flat, restrained "
     "desaturated palette, low warm light and long shadows, deep unlit corners, "
@@ -53,7 +59,7 @@ def _room_prompt(mystery: Mystery, place, setting: str) -> str:
 
 
 def generate_scenery(
-    mystery: Mystery, setting: str, cache_dir: Path, key: str
+    mystery: Mystery, setting: str, cache_dir: Path, key: str, quality: str = "low"
 ) -> dict[str, str]:
     """Return {"setting" or place id: relative file path}, missing meaning skip.
 
@@ -89,6 +95,7 @@ def generate_scenery(
                 # Landscape, because it sits behind a whole screen rather than
                 # in a frame beside one.
                 size="1536x1024",
+                quality=quality,
                 n=1,
             )
             target.write_bytes(base64.b64decode(result.data[0].b64_json))

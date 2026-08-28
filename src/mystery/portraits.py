@@ -7,9 +7,14 @@ decoration and decoration must never be able to stop a game starting.
 
     uv run python -m mystery.web --setting "..." --portraits
 
-Costs roughly five cents a case at current prices and adds twenty to thirty
-seconds to generation, since the five are requested in parallel. Cached beside
-the mystery, so replaying a seed is free.
+Cached beside the case, so replaying one is free (D-073).
+
+**On cost, having got this badly wrong once (D-082).** A portrait is not five
+cents. At the API's default quality it is about seventeen, and a case asks for
+five of them alongside six backdrops, so `--art` was quietly costing well over
+two dollars a go. The quality is now chosen explicitly rather than inherited,
+and the default is the cheap tier, because a portrait that will be feathered
+into a dim room does not need the expensive one.
 """
 
 import base64
@@ -21,6 +26,10 @@ import structlog
 from mystery.models import Mystery
 
 log = structlog.get_logger()
+
+# What a portrait costs at each tier, for the estimate printed before spending
+# anything. 1024x1024.
+PRICES = {"low": 0.011, "medium": 0.042, "high": 0.167}
 
 STYLE = (
     "Muted noir character portrait, head and shoulders, painterly flat "
@@ -38,7 +47,9 @@ def _prompt(mystery: Mystery, character) -> str:
     )
 
 
-def generate_portraits(mystery: Mystery, cache_dir: Path, key: str) -> dict[str, str]:
+def generate_portraits(
+    mystery: Mystery, cache_dir: Path, key: str, quality: str = "low"
+) -> dict[str, str]:
     """Return {character id: relative file path}, missing entries meaning fall back.
 
     Failures are logged and dropped rather than raised. Half a cast with images
@@ -65,6 +76,7 @@ def generate_portraits(mystery: Mystery, cache_dir: Path, key: str) -> dict[str,
                 model="gpt-image-1",
                 prompt=_prompt(mystery, character),
                 size="1024x1024",
+                quality=quality,
                 n=1,
             )
             target.write_bytes(base64.b64decode(result.data[0].b64_json))

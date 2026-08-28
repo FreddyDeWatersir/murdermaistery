@@ -15,6 +15,8 @@ from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.daily import BUFFER, shortfall, todays_case, waiting
 from mystery.example import OPENING_NIGHT
 from mystery.palette import draw as draw_palette
+from mystery.library import ART
+from mystery.library import LIBRARY as LIBRARY_DIR
 from mystery.library import catalogue
 from mystery.library import entries as saved_cases
 from mystery.library import load as load_case
@@ -122,6 +124,66 @@ def _fill(args, want: int) -> int:
     return 0
 
 
+def _bundle(case_id: str) -> int:
+    """One case, its art, and nothing else, in a file you can email.
+
+    The shelf and the art are both under `var/`, which is gitignored on purpose:
+    the pictures are megabytes and the cases are personal. That is right for a
+    repository and useless for moving one good case to a laptop, which is what
+    this is for (D-083).
+    """
+    import zipfile
+
+    case = load_case(case_id)
+    art = ART / case.id
+    out = Path(f"{case.id}.zip")
+
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as bundle:
+        source = next(LIBRARY_DIR.glob(f"*__{case.id}.json"), None) or (
+            LIBRARY_DIR / f"{case.id}.json"
+        )
+        bundle.write(source, f"cases/{source.name}")
+
+        pictures = sorted(art.rglob("*.png")) if art.exists() else []
+        for picture in pictures:
+            bundle.write(picture, f"art/{picture.relative_to(art)}")
+
+    size = out.stat().st_size / 1_000_000
+    print(f"  {out}  ({len(pictures)} pictures, {size:.1f} MB)")
+    print(f"  On the other machine: uv run python -m mystery.cli --unbundle {out}")
+    return 0
+
+
+def _unbundle(path: Path) -> int:
+    import zipfile
+
+    if not path.exists():
+        print(f"  No such bundle: {path}")
+        return 1
+
+    with zipfile.ZipFile(path) as bundle:
+        names = bundle.namelist()
+        case_files = [n for n in names if n.startswith("cases/") and n.endswith(".json")]
+        if not case_files:
+            print("  That zip has no case in it.")
+            return 1
+
+        LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+        for name in case_files:
+            (LIBRARY_DIR / Path(name).name).write_bytes(bundle.read(name))
+
+        case_id = Path(case_files[0]).stem.split("__", 1)[-1]
+        pictures = [n for n in names if n.startswith("art/") and n.endswith(".png")]
+        for name in pictures:
+            target = ART / case_id / Path(name).relative_to("art")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(bundle.read(name))
+
+    print(f"  {case_id} is on the shelf, with {len(pictures)} pictures.")
+    print(f"  Play it: uv run python -m mystery.web --case {case_id}")
+    return 0
+
+
 def _casts() -> str:
     """Every saved cast, one line each, for reading three cases side by side.
 
@@ -193,6 +255,17 @@ def main(argv: list[str] | None = None) -> int:
         help="which case is today's, and how many are waiting behind it",
     )
     parser.add_argument(
+        "--bundle",
+        metavar="CASE",
+        help="pack a case and its pictures into one zip you can carry to another "
+        "machine. Nothing in it is machine-specific",
+    )
+    parser.add_argument(
+        "--unbundle",
+        metavar="FILE",
+        help="unpack a bundle onto this machine's shelf, art included",
+    )
+    parser.add_argument(
         "--material",
         type=int,
         metavar="N",
@@ -221,6 +294,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.casts:
         print(_casts())
         return 0
+
+    if args.bundle:
+        return _bundle(args.bundle)
+
+    if args.unbundle:
+        return _unbundle(Path(args.unbundle))
 
     if args.today:
         case = todays_case()

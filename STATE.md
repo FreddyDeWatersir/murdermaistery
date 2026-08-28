@@ -57,7 +57,7 @@ timeline answered the case on its own (D-063).
 - `portraits.py` — optional generated faces, never load-bearing
 - Two hundred and twenty two tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- Eighty one decisions in `docs/decisions.md`
+- Eighty three decisions in `docs/decisions.md`
 
 **Which model does what**
 
@@ -153,6 +153,12 @@ All invented. All at least visible. See D-025 and D-031.
     uv run python -m mystery.web --case <name> # play it again, no model, no wait
     uv run python -m mystery.web --dry-run    # play the shipped case
     uv run python -m mystery.web --setting "..." --topology mutual_alibi --art
+    uv run python -m mystery.cli --bundle NAME    # carry a case to another machine
+    uv run python -m mystery.cli --unbundle F.zip # and unpack it there
+
+`--art` costs about fifteen cents a case at the default `--art-quality low`,
+four times that at medium and fifteen times at high. It prints the estimate
+before spending and never regenerates pictures already on disk. See D-082.
 
 The CLI and the web game share `var/mysteries`, so a case inspected with the
 first is free to start with the second, as long as every flag matches.

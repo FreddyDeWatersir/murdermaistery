@@ -1098,6 +1098,24 @@ def _lan_address() -> str:
         probe.close()
 
 
+def _estimate(mystery, quality: str, faces: bool, rooms: bool) -> float:
+    """What the pictures for this case are about to cost.
+
+    Eleven images, not five: a portrait each for the cast, plus an establishing
+    shot and one room. The backdrops are landscape and landscape costs half
+    again as much, so they are the larger half of the bill.
+    """
+    from mystery.portraits import PRICES as FACES
+    from mystery.scenery import PRICES as ROOMS
+
+    total = 0.0
+    if faces:
+        total += FACES[quality] * len([c for c in mystery.characters if c.id != mystery.victim])
+    if rooms:
+        total += ROOMS[quality] * (1 + len(mystery.places))
+    return total
+
+
 def _existing(folder: Path) -> dict[str, str]:
     """Whatever pictures are already on disk for this case.
 
@@ -1174,6 +1192,14 @@ def main(argv: list[str] | None = None) -> int:
         help="serve today's case, drawn from the buffer. Never generates: if the "
         "buffer is empty it says so, because a visitor must not be the thing that "
         "decides to spend money on a model",
+    )
+    parser.add_argument(
+        "--art-quality",
+        default="low",
+        choices=["low", "medium", "high"],
+        help="how much to spend on pictures. Low is about fifteen cents a case, "
+        "medium four times that, high fifteen times. Low is the default because "
+        "the backdrops sit under a heavy vignette anyway (D-082)",
     )
     parser.add_argument(
         "--anyway",
@@ -1289,23 +1315,35 @@ def _serve(mystery, case_id: str, setting: str, title: str, args) -> int:
     import uvicorn
     from mystery.agent import anthropic_responder
 
+    quality = getattr(args, "art_quality", "low")
     portraits: dict[str, str] = {}
     portrait_dir = ART / case_id / "portraits"
-    if args.portraits or args.art:
+    scenery_dir = ART / case_id / "scenery"
+
+    want_faces = (args.portraits or args.art) and not _existing(portrait_dir)
+    want_rooms = (args.scenery or args.art) and not _existing(scenery_dir)
+
+    if want_faces or want_rooms:
+        # Said out loud before it is spent, because "roughly five cents a case"
+        # was wrong by a factor of forty five and nothing in the program was
+        # ever going to notice (D-082).
+        print(f"  About ${_estimate(mystery, quality, want_faces, want_rooms):.2f} "
+              f"of pictures at {quality} quality.")
+
+    if want_faces:
         from mystery.portraits import generate_portraits
 
         print("  Painting the cast. Another half a minute.")
-        portraits = generate_portraits(mystery, ART / case_id, "portraits")
+        portraits = generate_portraits(mystery, ART / case_id, "portraits", quality)
         if not portraits:
             print("  No portraits came back. Using the drawn faces.")
 
     scenery: dict[str, str] = {}
-    scenery_dir = ART / case_id / "scenery"
-    if args.scenery or args.art:
+    if want_rooms:
         from mystery.scenery import generate_scenery
 
         print("  Painting the house. Another minute or so.")
-        scenery = generate_scenery(mystery, setting, ART / case_id, "scenery")
+        scenery = generate_scenery(mystery, setting, ART / case_id, "scenery", quality)
         if not scenery:
             print("  No backdrops came back. Using the painted gradient.")
 
