@@ -1385,3 +1385,32 @@ is one good case on your other laptop. Pulling the repo gives you the engine and
 an empty shelf, and regenerating means paying for a draft and eleven images to
 get a case you already own.
 **Status:** active
+
+## D-084 The model calls say what they cost too
+**Date:** 2026-08-28
+**Decision:** `generator.py` holds `RATES`, the real published price per million
+tokens for every model this program can call, and a `cost()` that turns a token
+count into dollars. Every model call already logged its token usage; now the
+same log line carries `usd`. `mystery.drafted` says what the draft cost,
+`agent.answered` says what the answer cost.
+**And before the spending, not only after it:** `--fill` is the one command that
+can make several drafts in a row without being asked again, so it prints how
+many it is about to generate and what that costs, with the retry ceiling stated
+as well, since a case that needs three attempts costs three drafts. About
+nineteen cents a draft at Opus prices, so a full buffer of four is about
+seventy seven cents, up to about two thirty if every one of them fights back.
+**Why now:** D-082 was written as a fix to the image prices and ended with a
+general rule, that anything spending money should say what it is about to spend
+before it spends it. The image path obeyed that rule the same afternoon and the
+model path did not, which made the rule a paragraph rather than a practice. The
+image bill was the one that surprised him, but the drafts are the recurring
+cost: eleven pictures happen once per case, and a question happens forty times
+an evening.
+**The estimate is a measurement, not a guess.** `TYPICAL_DRAFT` is eight and a
+half thousand tokens in and six thousand out, taken from the logs of real
+drafts, and it sits next to the rates where the next person to read a bill will
+find it. When the prompt grows, the estimate goes stale in the one place where
+somebody can notice and correct it, rather than in a docstring nothing checks.
+**What it does not do:** nothing here stops a spend. A budget guard belongs at
+the boundary of the public deployment, not in the CLI, and it is still open.
+**Status:** active

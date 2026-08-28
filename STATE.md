@@ -57,7 +57,7 @@ timeline answered the case on its own (D-063).
 - `portraits.py` — optional generated faces, never load-bearing
 - Two hundred and twenty two tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- Eighty three decisions in `docs/decisions.md`
+- Eighty four decisions in `docs/decisions.md`
 
 **Which model does what**
 
@@ -67,6 +67,11 @@ timeline answered the case on its own (D-063).
 | Speaking as a suspect | `claude-sonnet-5` | once per question |
 
 Both overridable: `--generator-model` and `--model`. See D-060.
+
+A draft costs about nineteen cents, a question about half a cent, so a case is
+roughly twenty cents to make and twenty five more to play through. Every model
+call logs its own `usd`, and `--fill` prints the bill before it starts. See
+D-084.
 
 **The four layers**
 
@@ -147,7 +152,7 @@ All invented. All at least visible. See D-025 and D-031.
     uv run python -m mystery.cli --dry-run    # the whole pipeline, no key needed
     uv run python -m mystery.cli --setting "..." --topology mutual_alibi
     uv run python -m mystery.cli --today      # today's case, and what is queued
-    uv run python -m mystery.cli --fill       # the nightly job: top up to four
+    uv run python -m mystery.cli --fill --setting "..."   # top up the shelf to four
     uv run python -m mystery.web --daily      # serve today's, never generate
     uv run python -m mystery.web --cases      # what you have already got
     uv run python -m mystery.web --case <name> # play it again, no model, no wait
@@ -155,6 +160,10 @@ All invented. All at least visible. See D-025 and D-031.
     uv run python -m mystery.web --setting "..." --topology mutual_alibi --art
     uv run python -m mystery.cli --bundle NAME    # carry a case to another machine
     uv run python -m mystery.cli --unbundle F.zip # and unpack it there
+
+Every command that generates a case keeps it: `--cases` is empty only because
+nothing has been generated since the shelf existed. A draft is about nineteen
+cents, and `--fill` says so before it starts (D-084).
 
 `--art` costs about fifteen cents a case at the default `--art-quality low`,
 four times that at medium and fifteen times at high. It prints the estimate

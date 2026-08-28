@@ -29,7 +29,7 @@ import structlog
 # The two model tiers live in generator.py because that is where the model
 # boundary was first drawn (D-060). Importing the name rather than repeating the
 # string keeps them from drifting apart the next time one is bumped.
-from mystery.generator import VOICE_MODEL
+from mystery.generator import VOICE_MODEL, cost
 from mystery.knowledge import Knowledge
 from mystery.models import CharacterId, Mystery, PlaceId, SlotId
 
@@ -500,6 +500,9 @@ def anthropic_responder(model: str = VOICE_MODEL, api_key: str | None = None):
             model=model,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
+            usd=round(
+                cost(model, response.usage.input_tokens, response.usage.output_tokens), 4
+            ),
         )
         for block in response.content:
             if block.type == "tool_use":

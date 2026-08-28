@@ -11,28 +11,28 @@ import argparse
 import sys
 from pathlib import Path
 
-from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.daily import BUFFER, shortfall, todays_case, waiting
 from mystery.example import OPENING_NIGHT
-from mystery.palette import draw as draw_palette
-from mystery.library import ART
-from mystery.library import LIBRARY as LIBRARY_DIR
-from mystery.library import catalogue
-from mystery.library import entries as saved_cases
-from mystery.library import load as load_case
-from mystery.library import save as save_case
-from mystery.solvable import report
-from mystery.topology import LIBRARY, assess
-from mystery.topology import catalogue as topologies
 from mystery.generator import (
     GenerationFailed,
     GenerationRequest,
     anthropic_drafter,
+    draft_estimate,
     generate,
 )
 from mystery.knowledge import analyse_alibi, derive
+from mystery.library import ART, catalogue
+from mystery.library import LIBRARY as LIBRARY_DIR
+from mystery.library import entries as saved_cases
+from mystery.library import load as load_case
+from mystery.library import save as save_case
 from mystery.models import Mystery
+from mystery.palette import draw as draw_palette
+from mystery.solvable import report
 from mystery.solver import solve
+from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
+from mystery.topology import LIBRARY, assess
+from mystery.topology import catalogue as topologies
 from mystery.validator import validate
 
 CACHE = Path("var/mysteries")
@@ -78,7 +78,11 @@ def _fill(args, want: int) -> int:
         print(f"  Buffer is full: {len(waiting())} cases waiting. Nothing to do.")
         return 0
 
+    # Said before it is spent (D-084). A draft is about nineteen cents at Opus
+    # prices, and a retry costs the same again, so the honest number is a range.
+    least = draft_estimate(drafts=needed)
     print(f"  {len(waiting())} waiting, want {want}. Generating {needed}.")
+    print(f"  About ${least:.2f}, up to ${least * ATTEMPTS:.2f} if every one needs retries.")
     made = 0
 
     for n in range(needed):

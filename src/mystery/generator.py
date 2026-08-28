@@ -32,11 +32,12 @@ from typing import Any
 
 import structlog
 from dotenv import load_dotenv
+from pydantic import BaseModel, ValidationError
+
 from mystery.models import Mystery
 from mystery.palette import draw as draw_palette
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import get as get_topology
-from pydantic import BaseModel, ValidationError
 
 # Reads .env from the project root if present, so a key can live in a
 # gitignored file instead of being re-exported in every new terminal.
@@ -56,6 +57,31 @@ DRAFT_MODEL = "claude-opus-5"
 # is where the money actually goes, so it stays a tier down. Override with
 # --model if a case is worth the better liar.
 VOICE_MODEL = "claude-sonnet-5"
+
+# Dollars per million tokens, input then output. Here so that the log can say
+# what a call actually cost rather than leaving it to a bill three weeks later,
+# which is the lesson from getting the image prices wrong by a factor of forty
+# five (D-082, D-084).
+RATES = {
+    "claude-opus-5": (5.0, 25.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-sonnet-4-5": (3.0, 15.0),
+}
+
+# What one draft has actually been costing, from the logs: about eight and a
+# half thousand tokens in and six thousand out. Used for the estimate printed
+# before a run, since nobody knows the real numbers until afterwards.
+TYPICAL_DRAFT = (8500, 6000)
+
+
+def cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """What a call cost, in dollars. Zero for a model we have no rate for."""
+    rate_in, rate_out = RATES.get(model, (0.0, 0.0))
+    return (input_tokens * rate_in + output_tokens * rate_out) / 1_000_000
+
+
+def draft_estimate(model: str = DRAFT_MODEL, drafts: int = 1) -> float:
+    return cost(model, *TYPICAL_DRAFT) * drafts
 
 
 class GenerationRequest(BaseModel):
@@ -471,6 +497,9 @@ def anthropic_drafter(
             attempt_had_complaints=len(complaints),
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
+            usd=round(
+                cost(model, response.usage.input_tokens, response.usage.output_tokens), 4
+            ),
             seconds=round(time.monotonic() - started, 2),
             setting=request.setting,
         )
