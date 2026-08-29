@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import structlog
+
 from mystery.models import Mystery
 
 log = structlog.get_logger()

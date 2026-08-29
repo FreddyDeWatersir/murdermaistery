@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Protocol
 
 import structlog
+
 from mystery.library import LIBRARY, Card, SavedCase, cards
 
 log = structlog.get_logger()

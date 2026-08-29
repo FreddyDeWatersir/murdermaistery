@@ -126,6 +126,12 @@ class Secret(BaseModel):
     showed the conditions are per character rather than global: one secret held
     for five rounds and went under a direct, named press, another went sideways
     under an emotional question its holder was not braced for (D-012).
+
+    `evidence` is the thing itself, when the secret has one: the ledger pages,
+    the forged letter, the photograph. A secret with an object attached hands
+    the player something they can carry to somebody else and put in front of
+    them, which is the only way a gate can be checked rather than judged
+    (D-087). Most secrets have none and are simply things you know.
     """
 
     id: str
@@ -135,6 +141,7 @@ class Secret(BaseModel):
     known_by: list[CharacterId] = Field(default_factory=list)
     revealed_by: str | None = None
     breaks_when: str = ""
+    evidence: str = ""
     is_motive: bool = False
 
 

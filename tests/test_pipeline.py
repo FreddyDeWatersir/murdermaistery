@@ -107,17 +107,44 @@ def _reply_of(game, who):
 
 
 def test_the_case_can_be_won_and_can_be_lost() -> None:
+    """The whole chain, end to end, including the gate (D-087).
+
+    Renske knows why he did it and Wouter never will say. But her knowing is
+    gated behind her own secret, so the motive only reaches the player after
+    the object that secret carries has been put in front of her.
+    """
     case = _case()
     game = Game(case, _cites_everything)
 
-    # Renske knows why he did it. Nobody else can tell you, because he never will.
+    # Cold, she does not have it, and pressing her cannot produce it.
     game.ask("renske", "Why would anybody want him dead?")
+    early = game.accuse("wouter", "the_reckoning")
+    assert early["correct"] and not early["right_reason"]
+
+    # Her own secret surfaces, which is what puts the printouts in your hand.
+    game = Game(case, _cites_everything)
+    game.ask("renske", "What did you find in the accounts?")
+    assert "the_books" in game.transcript.surfaced_secrets()
+    assert [item["name"] for item in game.held] == ["the transfer printouts"]
+
+    # Produce them, and the reason comes out.
+    assert game.show("renske", "the_books")
+    game.ask("renske", "Then why would anybody want him dead?")
     won = game.accuse("wouter", "the_reckoning")
 
     assert won["correct"] and won["right_reason"]
 
     lost = Game(case, _cites_everything).accuse("tomas", None)
     assert not lost["correct"]
+
+
+def test_you_cannot_show_what_you_have_not_found() -> None:
+    """The page is not the authority on what the player is holding."""
+    game = Game(_case(), _cites_everything)
+
+    assert game.held == []
+    assert not game.show("renske", "the_books")
+    assert game.session.seen_by("renske") == set()
 
 
 # --- the checks actually run ------------------------------------------------

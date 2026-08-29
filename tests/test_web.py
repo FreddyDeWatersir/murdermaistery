@@ -13,9 +13,10 @@ function that returns a fixed line.
 
 import json
 
+from test_agent import CASE
+
 from mystery.models import FalseClaim
 from mystery.web import Game, _initials
-from test_agent import CASE
 
 
 class Person:
@@ -265,3 +266,84 @@ def test_the_browser_is_told_who_these_people_are() -> None:
 
     assert by_id["vera"] == "The housekeeper"
     assert by_id["clara"] == "His sister"
+
+
+def test_each_person_gets_their_own_log_and_nobody_elses() -> None:
+    """The box under a portrait recalls what *that* person said.
+
+    The payload is what the page reads to do it, so this is the seam worth
+    holding: a log keyed by speaker, with the last entry being the last thing
+    that speaker said rather than the last thing anybody said.
+    """
+    game = Game(CASE, responder_saying("I was in the study.", []))
+    game.ask("vera", "Where were you at nine?")
+    game.ask("otto", "And you?")
+    game.ask("vera", "All evening?")
+
+    logs = game.notebook()["logs"]
+
+    assert [entry["q"] for entry in logs["vera"]] == [
+        "Where were you at nine?",
+        "All evening?",
+    ]
+    assert [entry["q"] for entry in logs["otto"]] == ["And you?"]
+    # Otto spoke second and Vera spoke last. Reading Otto's log must not reach
+    # past him to Vera's later answer, which is exactly the bug this replaces.
+    assert logs["otto"][-1]["q"] == "And you?"
+
+
+def test_somebody_never_asked_has_an_empty_log_rather_than_no_log() -> None:
+    """The page distinguishes "not asked yet" from "asked and said nothing".
+
+    A missing key would make the first look like the second, so every character
+    is in the payload from the start.
+    """
+    game = Game(CASE, responder_saying("", []))
+    logs = game.notebook()["logs"]
+
+    assert set(logs) == {c.id for c in CASE.characters}
+    assert all(entries == [] for entries in logs.values())
+
+
+def test_the_hand_is_empty_until_a_secret_with_an_object_surfaces() -> None:
+    game = Game(CASE, responder_saying("Nothing to tell.", []))
+    assert game.notebook()["held"] == []
+
+
+def test_showing_is_scoped_to_the_person_it_was_shown_to() -> None:
+    """The core of D-087. What the player knows is not what a suspect knows the
+    player knows, and the second thing is the only one that opens a gate."""
+    game = Game(CASE, responder_saying("Yes, alright.", ["secret:affair"]))
+    game.ask("vera", "What is between you and Otto?")
+
+    assert [item["id"] for item in game.held] == ["affair"]
+    assert game.show("clara", "affair")
+
+    book = game.notebook()
+    assert book["shown"] == {"clara": ["affair"]}
+    assert "heard:motive" in game.brief_for("clara").licensed
+    assert "heard:motive" not in game.brief_for("otto").licensed
+
+
+def test_showing_the_same_thing_twice_is_not_two_showings() -> None:
+    game = Game(CASE, responder_saying("Yes, alright.", ["secret:affair"]))
+    game.ask("vera", "What is between you and Otto?")
+
+    game.show("clara", "affair")
+    game.show("clara", "affair")
+
+    assert game.session.shown["clara"] == ["affair"]
+
+
+def test_the_show_endpoint_refuses_evidence_the_player_never_found() -> None:
+    """A crafted request must not open a gate the transcript never opened."""
+    from fastapi.testclient import TestClient
+
+    from mystery.web import build_app
+
+    client = TestClient(build_app(Game(CASE, responder_saying("No.", []))))
+    sent = client.post("/show", json={"who": "clara", "evidence": "affair"})
+
+    assert sent.status_code == 200
+    assert sent.json()["opened"] is False
+    assert sent.json()["notebook"]["shown"] == {}

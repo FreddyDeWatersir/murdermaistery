@@ -1414,3 +1414,179 @@ somebody can notice and correct it, rather than in a docstring nothing checks.
 **What it does not do:** nothing here stops a spend. A budget guard belongs at
 the boundary of the public deployment, not in the CLI, and it is still open.
 **Status:** active
+
+## D-085 The box under a portrait belongs to that portrait
+**Date:** 2026-08-28
+**What was wrong:** `select()` switched the face, the nameplate and the role, and
+left `#said` holding whatever was last on screen. Ask Marisol something, click
+Nicanor, and Nicanor's face sits above Marisol's words with no marking to say so.
+In a game whose entire subject is who said what, that is not an empty panel, it
+is the interface asserting something false.
+**Decision:** switching to somebody recalls their own last answer, from the
+per-person `logs` the payload has carried since D-062, with the question that
+produced it above it and a count of how many earlier answers there are. Somebody
+never questioned says so by name rather than showing the generic opening line,
+because "not asked yet" and "asked and said nothing" are different states and the
+player is entitled to tell them apart.
+**No typewriter on a recall.** The animation means *this is being said to you
+now*. Replaying it every time the player flicks between two suspects would make
+a five-year-old memory look like a fresh statement, and would be slow.
+**The live answer got the same shape,** question above, answer below, so the box
+does not change form when you leave a person and come back. The question also
+appears the moment it is sent rather than after the reply lands, so the panel is
+already that person's while they think.
+**Why the data was already there:** `logs` was built per speaker for the
+Transcript tab. The page had everything it needed to do this correctly and did
+not use it, which is the fourth time in this project the same shape has appeared:
+something derived correctly in one place and ignored in another. See D-071 and
+D-068.
+**Status:** active
+
+## D-086 Everybody is told who everybody is
+**Date:** 2026-08-28
+**What was wrong:** found in a real playtest. The same woman was called the
+victim's niece by one suspect, his daughter by another and his wife by a third.
+Not a style problem: no brief said who anyone was, so five models each invented a
+relationship independently and the player was given three of them.
+**The brief had the death and not the room.** `WHAT EVERYONE KNOWS` carried the
+body, the finder and the place. Everything else about the other four people
+arrived only through `impressions`, which is free prose about what you think of
+somebody and mentions their job only by accident.
+**Decision:** a `WHO THE OTHERS ARE` block in every brief, built from the public
+`role` field, with the victim marked dead. Stated as public and binding: say it
+freely, do not contradict it, and if you are asked how two people are related
+this is the answer.
+**Why `role` and nothing else.** It was added (D-074) as the line printed under
+a portrait on the page, which makes it public by construction. Anything richer
+would be handing five models a shared script and inviting them to recite it.
+**The pattern, again:** the field existed, the page showed it, the prompt never
+saw it. That is the same shape as the murder scene computed four ways (D-071),
+the advisories nobody called (D-068), and the per-person transcript the page
+ignored (D-085). Something true in one place and absent in another.
+**Status:** active
+
+## D-087 A gate you can produce, not a gate you argue with
+**Date:** 2026-08-28
+**What the playtest found.** A hundred and five questions, the right killer, the
+wrong reason. Reading the case file afterwards found two failures pointing in
+opposite directions, both fatal to the same evening.
+**The gate did not exist at runtime.** `revealed_by` was read by `solvable.py`,
+which computes the closure and decides whether a case is winnable, and by
+nothing else in the program. `knowledge.py` handed a secret to everyone in
+`known_by` unconditionally and `build_brief` turned it into a plain fact. So the
+killer's motive, in full, including the murder weapon, sat in a witness's FACTS
+block from question one. The chain the case was built around was real when the
+case was validated and gone when it was played.
+**And nothing made it come out.** That witness was asked twenty four questions
+and never said it, because the FACTS block is introduced as the whitelist of
+things you may state about where anyone was, so a model reads the whole list as
+whereabouts and volunteers none of it.
+**The conditions that did fire were unguessable, and one was unperformable.**
+`breaks_when` is a sentence judged privately by the model with no partial credit
+and no accumulated pressure, so twenty questions of circling produce the same
+verdict as one. The motive's condition was "only when shown the ledger pages",
+which names an action the game had no verb for. The player completed the entire
+discoverable chain and lost on the one link that required holding something.
+**Decision, and it is the player's design rather than mine.** Secrets may carry
+`evidence`: the object that proves them. A secret whose gate carries an object
+is withheld from every brief until that object has been put in front of *that
+character*, at which point it moves to a fourth state, `yielding`: it is coming
+out in this answer, and the only thing left to the model is how. Grudgingly, in
+pieces, angry at being caught. The fact is guaranteed, the manner is not.
+**Per character, never global.** The unlock is keyed to what was produced in
+this conversation, not to what the player knows. The alternative, rebuilding
+briefs from the player's global knowledge, has Nicanor becoming willing to talk
+because of something Teodora said in another room, which is the game reading the
+player's mind. This was the correction that made the rest of it work.
+**Withheld by omission, not by instruction.** A gated secret is absent from the
+brief rather than present with a warning attached. A brief cannot leak what it
+does not contain, which is the same argument as D-042.
+**The killer still never yields their motive.** D-066 outranks the object. Show
+them everything in the house and they will not say why.
+**Old cases keep working.** A gate whose secret carries no object falls back to
+the previous behaviour, because there is nothing to produce and the only
+mechanism left is persuasion. That is worse, and it is what every case generated
+before today has, so it degrades rather than breaking.
+**S5** reports exactly that shape: gated behind something with no object, so the
+gate can only be argued at. It fires on the case that lost the playtest.
+**What is not solved:** `breaks_when` for an ungated secret is still a private
+judgement with no notion of pressure across a conversation. Objects fix the
+chain; they do not fix persuasion.
+**Status:** active
+
+## D-088 Somebody else's secret was filed under where people were
+**Date:** 2026-08-28
+**The report:** "I definitely mentioned the references myself a lot and yet she
+never broke." Reading her brief, both things she was holding, the forged
+reference and her retraction of the lie, carry the same condition: *told that
+someone has already raised the reference*. Not asked about it. Told that another
+person had already brought it up. So the model was reading the condition
+correctly and holding correctly, and the player was doing the one thing that
+condition explicitly does not accept.
+**The intended path went through two other people.** The case even writes it
+down: "Nicanor or Marisol will both say it if asked about her directly." Both of
+them hold the forgery, and both of them said nothing, which is the same silence
+that hid the motive in D-087.
+**Why they said nothing.** A secret you merely know went into `facts`, and the
+prompt introduces `facts` as "only these may be stated as fact about where
+anyone was". A model reads that heading and treats the whole block as
+whereabouts. Nothing in it invites you to bring up what you know about a person,
+so nobody ever did. The material was licensed, present, and effectively invisible.
+**Decision:** a fifth block, `hearsay`, for things this character knows about
+other people and has no stake in protecting. Stated as such: not yours, you are
+not guarding it, if somebody asks you about that person this is what you have
+and you should say it, and how readily is a matter of your manner. Nobody needs
+to be asked ten times.
+**Manner still governs, difficulty does not.** The palette already deals a
+manner that volunteers other people's business freely and one that trades
+rather than gives (D-075). Those should make somebody quicker or slower, not
+make a fact unreachable. Reluctance is a personality; a wall is a bug.
+**A gated secret with nothing to produce stays in `guarded`,** not in the new
+block. Otherwise every case generated before D-087 would become solvable in one
+question, which is the opposite failure and just as bad.
+**What is still not solved,** and it is now the biggest thing left: `breaks_when`
+on an ungated secret is a sentence a model judges privately, with no notion of
+pressure accumulating across a conversation. Twenty questions of circling get the
+same verdict as one. Objects fixed the chain (D-087) and this fixes the plumbing;
+neither touches persuasion.
+**Status:** active
+
+## D-089 The character is told how long this has been going on
+**Date:** 2026-08-28
+**The gap:** `under_pressure` has been authored per character since D-044, one
+line of real writing per suspect about what being leaned on does to them, and it
+is printed in every brief. Nothing in the program has ever told a character that
+pressure was high. The field described a state that never arrived. So a suspect
+on their ninth consecutive question answered as though it were the first, under
+an instruction that read "until then you stay with the story you told". That is
+not a difficult person, it is a person with no memory of the last half hour.
+**Decision:** a `HOW LONG THIS HAS BEEN GOING ON` block, derived from the length
+of the history that was already being passed, so no new state anywhere. It says
+which question this is, that the first few were a conversation and this is not
+that any more, and how long they have been carrying what they are carrying.
+**A temperature, not a threshold.** It opens nothing and it fires no rule. The
+last line is explicit that people hold out all night and people crack on the
+sixth question, and which one they are is written under `under_pressure` and is
+theirs. Anything that counted to five and unlocked a secret would be exactly the
+countable, rule-following game this is not supposed to be.
+**And the conditions were reworded from locks to descriptions.** `breaks_when`
+now reads as "the thing that would open you fastest ... the easiest way in, not
+the only one", and the instruction to hold the line regardless is gone. A model
+that has been worked at for twenty questions can decide the person has had
+enough, which is what a person would do. Before this, a condition phrased as
+"told that somebody else already mentioned it" could not be satisfied by any
+amount of asking, and a player who asked about exactly that thing a dozen times
+got the same verdict every time.
+**Why this and not a rule.** Asked whether the case should be finishable when
+nobody cracks, the answer was yes, keep the floor. So there are two layers now,
+and they do different jobs. The floor is structural: objects you can produce,
+gates that are checked rather than judged, a case that ends even if every
+suspect stonewalls all night (D-087). Persuasion sits on top and is entirely
+soft: no counters, no thresholds, no guarantees, and a suspect who never breaks
+costs the player elegance rather than the ending.
+**Where the risk moved.** It is now possible for a character to give something
+up early because they judged the pressure real, which the old wording made
+almost impossible. `agent.folded` already logs `after=N`, so the number of
+questions a fold took is measurable rather than felt. Folding on question two,
+repeatedly, is the signal that this went too far.
+**Status:** active

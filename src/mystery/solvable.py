@@ -161,6 +161,24 @@ def why_not(mystery: Mystery) -> list[Advisory]:
                 )
             )
 
+    by_id = {secret.id: secret for secret in mystery.secrets}
+    for secret in mystery.secrets:
+        gate = by_id.get(secret.revealed_by) if secret.revealed_by else None
+        if gate and not gate.evidence:
+            found.append(
+                Advisory(
+                    check="S5",
+                    message=(
+                        f"{secret.id!r} is gated behind {gate.id!r}, and {gate.id!r} "
+                        f"carries no object. So the gate can never be produced, only "
+                        f"argued for, and whether it opens is a private judgement by "
+                        f"the model playing the holder. That is the shape that cost a "
+                        f"real playtest its ending (D-087): give the gating secret an "
+                        f"`evidence`, or stop gating this one"
+                    ),
+                )
+            )
+
     return found
 
 

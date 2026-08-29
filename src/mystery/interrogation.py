@@ -30,6 +30,7 @@ So the tracker does the remembering and leaves the deciding.
 from dataclasses import dataclass, field
 
 import structlog
+
 from mystery.agent import Brief, Reply
 from mystery.knowledge import Knowledge
 from mystery.models import CharacterId, Mystery, PlaceId, SlotId

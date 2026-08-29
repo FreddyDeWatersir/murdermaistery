@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Protocol
 
 import structlog
+
 from mystery.models import Mystery
 
 log = structlog.get_logger()

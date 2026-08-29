@@ -20,6 +20,7 @@ raising, so the failure arrives through rule V3 with the constraint named.
 import random
 
 import structlog
+
 from mystery.models import Constraint, FalseClaim, Mystery, PlaceId, SlotId
 
 Grid = dict[str, dict[str, PlaceId]]

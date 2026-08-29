@@ -72,8 +72,23 @@ class Brief:
     facts: list[Fact] = field(default_factory=list)
     guarded: list[Fact] = field(default_factory=list)
     conceals: list[Fact] = field(default_factory=list)
+    # Held back until the player produced the object it is gated behind, and
+    # now coming out (D-087). A fourth state, not a fourth mood: `guarded` is
+    # "if you earn it", this is "you did, and the only question is how it lands".
+    yielding: list[Fact] = field(default_factory=list)
+    # Somebody else's business, which this character happens to know and has no
+    # reason at all to protect (D-088). Filed apart from `facts` because `facts`
+    # is introduced as the whitelist of things you may say about where people
+    # were, and a model reads that heading and treats the whole block as
+    # whereabouts. Two witnesses sat on the reference-letter forgery for a
+    # hundred questions because it was in the wrong box.
+    hearsay: list[Fact] = field(default_factory=list)
     impressions: list[str] = field(default_factory=list)
     common: list[str] = field(default_factory=list)
+    # Who everybody is. Public, uncontroversial, and the same for all five
+    # briefs: the roster the page has always printed under each portrait and
+    # the prompt never had (D-086).
+    roster: list[str] = field(default_factory=list)
     # Behaviour this character has that no fact can express, put here by the
     # shape of the case rather than by the timeline (D-067). The false
     # confession is the first one: it is a thing they will do, not a thing they
@@ -91,7 +106,12 @@ class Brief:
         retraction the notebook never hears, and the player watches a suspect
         come clean while the timeline goes on showing the lie.
         """
-        return {fact.id for fact in self.facts} | {fact.id for fact in self.guarded}
+        return (
+            {fact.id for fact in self.facts}
+            | {fact.id for fact in self.guarded}
+            | {fact.id for fact in self.yielding}
+            | {fact.id for fact in self.hearsay}
+        )
 
 
 @dataclass
@@ -101,8 +121,18 @@ class Reply:
     refused: bool = False
 
 
+def _object_of(secret) -> str:
+    """What the player is holding, named the way a person would name it."""
+    if secret and secret.evidence:
+        return secret.evidence
+    return "what they are holding"
+
+
 def build_brief(
-    mystery: Mystery, knowledge: dict[CharacterId, Knowledge], character: CharacterId
+    mystery: Mystery,
+    knowledge: dict[CharacterId, Knowledge],
+    character: CharacterId,
+    shown: set[str] | None = None,
 ) -> Brief:
     """Assemble the licensed facts for one character.
 
@@ -126,15 +156,24 @@ def build_brief(
     countable, and the killer's motive is the one thing that never surfaces.
     A killer under pressure gives up the smaller true thing instead, which is
     the shield, and the shield is now a guarded fact rather than a hope.
+
+    `shown` is the set of secret ids whose objects the player has put in front
+    of *this* character, in this conversation (D-087). Anything gated behind one
+    of them stops being held back and becomes a thing they are going to say. It
+    is scoped per character on purpose: what the player knows is not what this
+    person knows the player knows, and the brief must never leak the difference.
     """
     names = {c.id: c.name for c in mystery.characters}
     places = {p.id: p.name for p in mystery.places}
     times = {s.id: s.label for s in mystery.slots}
     know = knowledge[character]
+    presented = shown or set()
 
     facts: list[Fact] = []
     guarded: list[Fact] = []
     conceals: list[Fact] = []
+    yielding: list[Fact] = []
+    hearsay: list[Fact] = []
 
     claim = mystery.lie_by(character)
     lying_about = claim.slot if claim else None
@@ -239,6 +278,22 @@ def build_brief(
             )
             continue
 
+        # The player has put the thing itself in front of them. It is out now,
+        # and the only choice left is how they say it (D-087).
+        gate = by_id.get(secret.revealed_by) if secret.revealed_by else None
+        if gate and gate.evidence and gate.id in presented:
+            yielding.append(
+                Fact(
+                    id=f"secret:{secret_id}",
+                    text=(
+                        f"{secret.summary} They have put "
+                        f"{_object_of(gate)} in front of you. "
+                        f"There is no version of this where you go on denying it."
+                    ),
+                )
+            )
+            continue
+
         breaks = (
             f" You will say it only if: {secret.breaks_when}"
             if secret.breaks_when
@@ -248,13 +303,60 @@ def build_brief(
 
     for secret_id in know.aware_of:
         secret = by_id.get(secret_id)
-        if secret:
-            facts.append(
+        if not secret:
+            continue
+
+        # Somebody else's secret, and it is gated. Until the gate is met this
+        # character does not have it at all, rather than having it and being
+        # asked not to mention it. A brief cannot leak what it does not contain,
+        # and until D-087 this was the whole gate: `revealed_by` was honoured by
+        # the solvability check and by nothing that ran during play, so the
+        # killer's motive sat in a witness's plain facts from question one.
+        gate = by_id.get(secret.revealed_by) if secret.revealed_by else None
+        if gate and gate.evidence and gate.id not in presented:
+            continue
+
+        # Gated, but with nothing to produce. It cannot be checked, only argued
+        # with, so it stays held back under the old soft condition rather than
+        # going into the block that says say it freely (D-087, D-088). Cases
+        # generated before objects existed keep the difficulty they had.
+        if gate and not gate.evidence:
+            guarded.append(
                 Fact(
                     id=f"heard:{secret_id}",
-                    text=f"You know, but it is not your secret: {secret.summary}",
+                    text=(
+                        f"About {names.get(secret.holder, secret.holder)}: "
+                        f"{secret.summary} Not yours to tell, and you will only "
+                        f"raise it with somebody who already knows about "
+                        f"{gate.summary[:120]}"
+                    ),
                 )
             )
+            continue
+
+        if gate and gate.evidence:
+            yielding.append(
+                Fact(
+                    id=f"heard:{secret_id}",
+                    text=(
+                        f"Not yours, and you know it: {secret.summary} They have put "
+                        f"{_object_of(gate)} in front of you, "
+                        f"so there is no point pretending you do not know."
+                    ),
+                )
+            )
+            continue
+
+        hearsay.append(
+            Fact(
+                id=f"heard:{secret_id}",
+                text=(
+                    f"About {names.get(secret.holder, secret.holder)}: "
+                    f"{secret.summary}"
+                ),
+                subject=secret.holder,
+            )
+        )
 
     person = next((c for c in mystery.characters if c.id == character), None)
 
@@ -284,6 +386,19 @@ def build_brief(
         )
         common.append("Everybody here knows that much. It is not a secret.")
 
+    # Nobody was being told who anybody else was, so five models each invented a
+    # relationship for the same person and the player was told the same woman was
+    # the victim's niece, his daughter and his wife (D-086). `role` is public by
+    # construction: it is printed under the portrait on the page.
+    roster = []
+    for other in mystery.characters:
+        if other.id == character:
+            continue
+        label = other.role or "at the gathering"
+        if other.id == mystery.victim:
+            label = f"{label}. Dead." if other.role else "The dead."
+        roster.append(f"{other.name}: {label}")
+
     return Brief(
         character=character,
         name=names.get(character, character),
@@ -293,8 +408,11 @@ def build_brief(
         facts=facts,
         guarded=guarded,
         conceals=conceals,
+        yielding=yielding,
+        hearsay=hearsay,
         impressions=impressions,
         common=common,
+        roster=roster,
         instructions=instructions,
     )
 
@@ -305,6 +423,12 @@ is asking you about it.
 
 WHO YOU ARE
 {person}
+
+WHO THE OTHERS ARE
+These are public. Their job, and what they are to the dead. You may say any of \
+it freely and you must not contradict it: if you are asked how somebody is \
+related to anyone, this is the answer.
+{roster}
 
 WHAT EVERYONE KNOWS
 {common}
@@ -337,6 +461,9 @@ notice, and if you are changing your story do it deliberately rather than by \
 accident.
 {history}
 
+HOW LONG THIS HAS BEEN GOING ON
+{pressure}
+
 CONCEALED
 These are true, you know them, and you will not volunteer them. Deflect, answer \
 a narrower question than the one asked, change the subject. Never mention that \
@@ -345,12 +472,32 @@ you would give it up: if the questioner has met that condition, you may. Nothing
 else opens you.
 {conceals}
 
+PUT TO YOU
+They have produced the thing itself and it is on the table between you. These \
+are coming out in this answer. You do not get to deny them, stall them, or \
+promise them later. What is yours is *how*: grudgingly, in pieces, with \
+something else buried in it, angry at being caught, relieved to stop carrying \
+it, or by telling them to go and ask the person it really belongs to and then \
+saying it anyway. Cite each one you say.
+{yielding}
+
 HELD BACK
-True, and yours to give if the questioner earns it. Each one says what would \
-make you say it. Until then you stay with the story you told. If you do decide \
-to come clean, say so plainly rather than hinting, and cite it like any other \
-fact.
+True, and yours to give if the questioner earns it. Each one names the thing \
+that would open you fastest. Read that as a description of you and not as a \
+lock: it is the easiest way in, not the only one. Somebody who has worn you \
+down, caught you in something, or simply been decent with you for long enough \
+can get there too, and whether they have is yours to judge. If you do come \
+clean, say so plainly rather than hinting, and cite it like any other fact.
 {guarded}
+
+WHAT YOU KNOW ABOUT THE OTHERS
+Not yours, and you are not protecting it. You know these things about these \
+people and you have no stake in keeping any of them quiet. If somebody asks you \
+about that person, or about who had a reason to want the dead man gone, this is \
+what you have and you should say it. How readily is up to your manner: some \
+people volunteer other people's business happily and some need to be asked \
+twice. Nobody here needs to be asked ten times. Cite it when you use it.
+{hearsay}
 
 FACTS
 Only these may be stated as fact about where anyone was.
@@ -380,14 +527,60 @@ def render_history(history: Sequence[tuple[str, str]]) -> str:
     return "\n".join(f'  They asked: {q}\n  You said: {a}' for q, a in history)
 
 
+def render_pressure(asked: int, brief: Brief) -> str:
+    """How worked over this person is, said out loud (D-089).
+
+    `under_pressure` has been authored per character since D-044 and printed in
+    every brief, and nothing has ever told the character that pressure was high.
+    It described a state that never arrived. So a suspect on their ninth
+    consecutive question answered as though it were the first, which is not a
+    person being difficult, it is a person with no memory of the last half hour.
+
+    Deliberately a temperature and not a threshold. Nothing here opens anything.
+    It is the one input a person actually has that this program was not giving
+    them, and what they do with it is theirs.
+    """
+    if asked == 0:
+        return (
+            "  They have just come to you. You have no idea yet what this is "
+            "going to be like."
+        )
+
+    holding = len(brief.guarded)
+    lines = [f"  This is question {asked + 1}. They keep coming back to you."]
+    if asked >= 6:
+        lines.append(
+            "  You are being worked on and you know it. The first few questions "
+            "were a conversation. This is not that any more."
+        )
+    if holding and asked >= 3:
+        lines.append(
+            f"  You have carried {'something' if holding == 1 else 'these things'} "
+            f"through {asked} answers now, and it is getting heavier rather than "
+            f"lighter."
+        )
+    lines.append(
+        "  None of this obliges you to give anything up and none of it stops "
+        "you. People hold out all night and people crack on the sixth question. "
+        "Which one you are is written under Under pressure, and it is yours."
+    )
+    return "\n".join(lines)
+
+
 def render_system(brief: Brief, history: Sequence[tuple[str, str]] = ()) -> str:
     return SYSTEM.format(
         name=brief.name,
         person=render_person(brief),
         common="\n".join(f"  {c}" for c in brief.common) or "  (nothing beyond the death)",
+        yielding="\n".join(f"  [{f.id}] {f.text}" for f in brief.yielding)
+        or "  (nothing has been put to you)",
+        hearsay="\n".join(f"  [{f.id}] {f.text}" for f in brief.hearsay)
+        or "  (nothing about anybody else)",
+        roster="\n".join(f"  {r}" for r in brief.roster) or "  (nobody else)",
         impressions="\n".join(f"  {i}" for i in brief.impressions)
         or "  (no strong feelings about any of them)",
         history=render_history(history),
+        pressure=render_pressure(len(history), brief),
         guarded="\n".join(f"  [{f.id}] {f.text}" for f in brief.guarded)
         or "  (nothing, you have been straight about where you were)",
         facts="\n".join(f"  [{f.id}] {f.text}" for f in brief.facts) or "  (nothing)",

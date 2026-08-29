@@ -244,9 +244,26 @@ told that someone else has already said it. Concealment that never breaks is a \
 wall rather than a mystery, and the conditions should differ from character to \
 character.
 
+**A secret that gates another one must be a thing, not just a fact.** Whenever \
+you put `revealed_by` on a secret, the secret it points at has to carry \
+`evidence`: the object that proves it and that the player can pick up and put \
+in front of somebody. The ledger pages. The letter of reference. The photograph \
+of the loan documents. Name it in four or five words, the way a person would \
+say it. This is not decoration: producing that object is how the player opens \
+the gate, and a gate with nothing behind it can only be argued at, which means \
+in practice it never opens at all.
+
+Everything else can be `evidence`-free. Most secrets are things people know, \
+not things people keep in a drawer, and a case where every secret comes with a \
+document reads like an audit.
+
+Do not write a `breaks_when` for the killer's own motive that involves being \
+shown anything. They never give that up, to anybody, under any circumstances. \
+It reaches the player through somebody else or not at all.
+
 Put all of this in `secrets`, with `holder`, `about`, `summary`, `known_by` for \
-anyone else who knows, `revealed_by` where one secret gates another, and \
-`breaks_when` on every one.
+anyone else who knows, `revealed_by` where one secret gates another, `evidence` \
+on any secret that gates another, and `breaks_when` on every one.
 
 4. The constraints: the things that must be true of the evening. A constraint \
 names people who share a place at a moment. Mark it `exclusive` when they must \

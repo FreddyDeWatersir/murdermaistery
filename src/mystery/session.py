@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import structlog
+
 from mystery.interrogation import Assertion, Statement, Transcript
 
 log = structlog.get_logger()
@@ -64,6 +65,19 @@ class Session:
     expires: int = field(
         default_factory=lambda: int((datetime.now(UTC) + KEEP).timestamp())
     )
+    # What has been put in front of whom (D-087). Per character on purpose: a
+    # suspect's story changes because of what happened in *their* conversation,
+    # never because the player learned something in another room. Showing
+    # Teodora the ledger tells Teodora nothing about what Nicanor knows.
+    shown: dict[str, list[str]] = field(default_factory=dict)
+
+    def show(self, to: str, secret_id: str) -> None:
+        held = self.shown.setdefault(to, [])
+        if secret_id not in held:
+            held.append(secret_id)
+
+    def seen_by(self, who: str) -> set[str]:
+        return set(self.shown.get(who, ()))
 
     def to_record(self) -> dict[str, Any]:
         """Plain data, ready for a file, a table, or anything else.
@@ -80,6 +94,7 @@ class Session:
             "solved": self.solved,
             "started": self.started,
             "expires": self.expires,
+            "shown": {who: list(ids) for who, ids in self.shown.items()},
             "statements": [asdict(s) for s in self.transcript.statements],
         }
 
@@ -106,6 +121,7 @@ class Session:
             solved=raw.get("solved", False),
             started=raw.get("started", ""),
             expires=raw.get("expires", 0),
+            shown={who: list(ids) for who, ids in raw.get("shown", {}).items()},
         )
 
     @property

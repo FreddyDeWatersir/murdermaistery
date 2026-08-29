@@ -18,9 +18,13 @@ import argparse
 import sys
 from pathlib import Path
 
+import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
-from mystery.agent import Responder, ask, build_brief
+from pydantic import BaseModel
+
+from mystery.agent import Brief, Responder, ask, build_brief
+from mystery.daily import todays_case, waiting
 from mystery.generator import (
     DRAFT_MODEL,
     VOICE_MODEL,
@@ -30,19 +34,19 @@ from mystery.generator import (
     generate,
 )
 from mystery.interrogation import Statement, Transcript, assertions_from
-from mystery.daily import todays_case, waiting
 from mystery.knowledge import analyse_alibi, derive
 from mystery.library import ART, catalogue
-from mystery.models import Mystery
 from mystery.library import load as load_case
 from mystery.library import save as save_case
+from mystery.models import Mystery
 from mystery.session import FileSessions, InMemorySessions, Session, Sessions
 from mystery.solvable import analyse, report
 from mystery.solver import solve
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import LIBRARY, assess
 from mystery.validator import validate
-from pydantic import BaseModel
+
+log = structlog.get_logger()
 
 CACHE = Path("var/mysteries")
 
@@ -176,8 +180,55 @@ class Game:
             (s.question, s.speech) for s in self.transcript.statements if s.speaker == who
         ]
 
+    @property
+    def held(self) -> list[dict]:
+        """What the player is carrying (D-087).
+
+        Derived, never stored. An object exists because the secret it belongs to
+        has surfaced, so the inventory is a view over the transcript and cannot
+        drift out of step with it the way a second list would.
+        """
+        found = self.transcript.surfaced_secrets()
+        names = self.names
+        return [
+            {
+                "id": secret.id,
+                "name": secret.evidence,
+                "from": names.get(secret.holder, secret.holder),
+            }
+            for secret in self.mystery.secrets
+            if secret.evidence and secret.id in found
+        ]
+
+    def brief_for(self, who: str) -> "Brief":
+        """This character's brief, as it stands for this player.
+
+        The shared one on the `Case` is the baseline, built as though nothing has
+        been produced to anybody. It stays shared, because that is true for
+        almost every character in almost every session. Somebody who has been
+        shown something gets theirs rebuilt, which is pure computation over data
+        already in memory and costs nothing worth caching.
+        """
+        seen = self.session.seen_by(who)
+        if not seen:
+            return self.case.briefs[who]
+        return build_brief(self.mystery, self.knowledge, who, shown=seen)
+
+    def show(self, who: str, secret_id: str) -> bool:
+        """Put an object in front of somebody. Returns whether they have now seen it.
+
+        Refuses anything the player is not actually holding, because the page is
+        not the authority on what the player has found: a crafted request must
+        not be able to open a gate the transcript never opened.
+        """
+        if secret_id not in {item["id"] for item in self.held}:
+            return False
+        self.session.show(who, secret_id)
+        log.info("game.shown", to=who, evidence=secret_id)
+        return True
+
     def ask(self, who: str, question: str) -> str:
-        brief = self.briefs[who]
+        brief = self.brief_for(who)
         reply = ask(brief, question, self.responder, history=self.history(who))
         self.transcript.record(
             Statement(
@@ -306,6 +357,11 @@ class Game:
             "unasked": unasked,
             "questions": self.transcript.rounds,
             "logs": logs,
+            # What the player is carrying, and who has already been made to look
+            # at it (D-087). Both live here rather than in /state because both
+            # change as the evening goes and /state is fetched once.
+            "held": self.held,
+            "shown": {who: list(ids) for who, ids in self.session.shown.items()},
             # Everything that has actually come out, which is what the
             # accusation offers as possible motives (D-065).
             "found": [
@@ -404,6 +460,11 @@ class Game:
 class Question(BaseModel):
     who: str
     text: str
+
+
+class Produced(BaseModel):
+    who: str
+    evidence: str
 
 
 class Accusation(BaseModel):
@@ -548,6 +609,19 @@ def build_app(
         store.save(game.session)
         return {"speech": speech, "notebook": game.notebook()}
 
+    @app.post("/show")
+    def show_endpoint(produced: Produced, request: Request, response: Response) -> dict:
+        """Put an object in front of somebody (D-087).
+
+        A turn in its own right, not a question: nothing is said, nothing is
+        recorded in the transcript, and no model is called, so it costs nothing.
+        What changes is the brief this character is handed from here on.
+        """
+        game = player(request, response)
+        opened = game.show(produced.who, produced.evidence)
+        store.save(game.session)
+        return {"opened": opened, "notebook": game.notebook()}
+
     @app.post("/accuse")
     def accuse_endpoint(
         accusation: Accusation, request: Request, response: Response
@@ -629,6 +703,12 @@ letter-spacing:.01em;margin-bottom:2px}
 #nameplate small{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
 text-transform:uppercase;color:var(--muted);font-weight:400;margin-left:10px}
 #said{font-size:16.5px;line-height:1.62;min-height:3.2em;max-width:70ch}
+/* The player's own voice, so it reads as neither the role label above it (mono,
+   uppercase) nor the answer below it (plain). Italic display face, quietly. */
+#said .asked{display:block;font-family:var(--display);font-style:italic;
+font-size:13.5px;color:var(--muted);margin:7px 0 9px;max-width:60ch}
+#said .asked em{font-style:normal;font-family:var(--mono);font-size:10px;
+letter-spacing:.1em;text-transform:uppercase;opacity:.7;margin-left:8px}
 #said .cursor{display:inline-block;width:.5em;height:1em;background:var(--cool);
 vertical-align:-.12em;animation:blink .8s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}
@@ -707,6 +787,22 @@ user-select:text}
 #reveal .card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;
 padding:32px;max-width:640px;width:100%}
 #reveal h3{font-family:var(--display);font-size:34px;margin:0 0 4px;font-weight:400}
+/* The things you are carrying (D-087). A row under the cast, empty until the
+   first secret with an object behind it surfaces, so it costs nothing visually
+   in a case that has none. */
+#hand{display:flex;gap:7px;flex-wrap:wrap;width:100%;align-items:center;
+padding-top:10px;border-top:1px solid var(--rule);margin-top:2px}
+#hand.gone{display:none}
+#hand .label{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+text-transform:uppercase;color:var(--muted)}
+.thing{background:var(--panel2);border:1px solid var(--rule);border-radius:7px;
+padding:5px 10px;font-size:12px;cursor:pointer;color:var(--ink);
+font-family:var(--display);display:flex;align-items:center;gap:8px}
+.thing:hover{border-color:var(--cool)}
+.thing small{font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+text-transform:uppercase;color:var(--muted)}
+.thing.spent{opacity:.45;cursor:default}
+.thing.spent:hover{border-color:var(--rule)}
 </style></head><body>
 <div id="scene">
   <div id="backdrop"></div><div id="backdrop2"></div><div id="shade"></div>
@@ -729,6 +825,7 @@ padding:32px;max-width:640px;width:100%}
     <div id="cast"></div>
     <input id="q" placeholder="Ask a question" autocomplete="off">
     <button class="accuse" id="accusebtn">Accuse</button>
+    <div id="hand" class="gone"></div>
   </div>
 </div>
 <aside id="book"></aside>
@@ -737,7 +834,7 @@ padding:32px;max-width:640px;width:100%}
 const $=i=>document.getElementById(i);
 let S=null,who=null,busy=false,typer=null,sound=true,lastConflicts=0;
 let tab='book',NB={grid:[],conflicts:[],holes:[],unasked:[],logs:{},timeline:{},
-  missing:{},tags:[],found:[]};
+  missing:{},tags:[],found:[],held:[],shown:{}};
 
 /* ---------- procedural portraits -------------------------------------- */
 function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);
@@ -823,12 +920,15 @@ function chime(){
 }
 
 /* ---------- typewriter ------------------------------------------------- */
-function say(text,pitch){
+function say(text,pitch,asked){
   const el=$('said');el.className='';
   if(typer)clearInterval(typer);
   let i=0;
   const mouth=document.getElementById('mouth');
-  el.innerHTML='<span class="body"></span><span class="cursor"></span>';
+  // Same shape a recall will have (see `recall`), so the box does not jump when
+  // the player leaves this person and comes back to them.
+  el.innerHTML=(asked?'<span class="asked">“'+esc(asked)+'”</span>':'')+
+    '<span class="body"></span><span class="cursor"></span>';
   const body=el.querySelector('.body');
   typer=setInterval(()=>{
     if(i>=text.length){finish();return}
@@ -868,12 +968,80 @@ function showPortrait(id){
   },60);
 }
 
+/* The box under the portrait belongs to whoever is in the portrait. Recall
+   what *this* person last said, not whatever was on screen a moment ago: the
+   whole game is who said what, and leaving one suspect's words under another
+   one's face is the game lying to the player. */
+function recall(id){
+  const el=$('said');
+  if(typer){clearInterval(typer);typer=null}
+  const log=(NB.logs||{})[id]||[];
+  if(!log.length){
+    el.className='empty';
+    el.textContent='You have not asked '+nameOf(id).split(' ')[0]+' anything yet.';
+    return;
+  }
+  const last=log[log.length-1];
+  el.className='';
+  // Said before, not being said now, so no typewriter. The question comes with
+  // it, because an answer read cold an hour later needs to know what it answers.
+  // The count points at the Transcript tab, which holds the rest of it.
+  const earlier=log.length>1
+    ?'<em>'+(log.length-1)+' earlier</em>':'';
+  el.innerHTML='<span class="asked">“'+esc(last.q)+'”'+earlier+'</span>'+
+    '<span class="body">'+esc(last.a)+'</span>';
+}
+
+/* The things you are carrying, and whether the person in front of you has
+   already been made to look at each one (D-087). Redrawn on every answer and on
+   every switch, because both change what this row should say. */
+function paintHand(){
+  const row=$('hand'),held=(NB.held||[]);
+  if(!held.length){row.className='gone';row.innerHTML='';return}
+  row.className='';
+  const seen=new Set(((NB.shown||{})[who])||[]);
+  const to=who?nameOf(who).split(' ')[0]:'';
+  row.innerHTML='<span class="label">You have</span>'+held.map(h=>{
+    const done=seen.has(h.id);
+    return '<button class="thing'+(done?' spent':'')+'" data-ev="'+esc(h.id)+'"'+
+      (done?' disabled':'')+'>'+esc(h.name)+
+      '<small>'+(done?to+' has seen it':'show '+to)+'</small></button>';
+  }).join('');
+  row.querySelectorAll('.thing:not(.spent)').forEach(b=>{
+    b.onclick=()=>produce(b.dataset.ev);
+  });
+}
+
+async function produce(evidence){
+  if(busy||!who)return;
+  busy=true;
+  const name=(NB.held||[]).find(h=>h.id===evidence);
+  try{
+    const r=await (await fetch('/show',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({who:who,evidence:evidence})})).json();
+    paintBook(r.notebook);
+    if(r.opened){
+      // Not a line of dialogue: nobody has said anything yet. It is the table
+      // state changing, and the next question is the one that lands.
+      $('said').className='';
+      $('said').innerHTML='<span class="asked">You put '+esc(name?name.name:'it')+
+        ' in front of '+esc(nameOf(who))+'.</span>'+
+        '<span class="body">They look at it. Ask them.</span>';
+      $('q').focus();
+    }
+  }catch(e){}
+  busy=false;
+}
+
 function select(id){
   who=id;
   document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.dataset.id===id));
   showPortrait(id);
   const s=S.suspects.find(x=>x.id===id);
   $('nameplate').innerHTML=esc(s.name)+(s.role?'<small>'+esc(s.role)+'</small>':'');
+  recall(id);
+  paintHand();
   $('q').focus();
 }
 
@@ -912,12 +1080,16 @@ async function send(){
   const inp=$('q'),text=inp.value.trim();
   if(!text||busy||!who)return;
   busy=true;inp.value='';
-  $('said').className='empty';$('said').textContent='…';
+  // The question lands before the answer does, so the box is already this
+  // person's while they think about it.
+  $('said').className='';
+  $('said').innerHTML='<span class="asked">“'+esc(text)+'”</span>'+
+    '<span class="body">…</span>';
   try{
     const r=await (await fetch('/ask',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({who:who,text:text})})).json();
-    say(r.speech,pitchOf(who));
+    say(r.speech,pitchOf(who),text);
     const before=lastConflicts;
     paintBook(r.notebook);
     if(r.notebook.conflicts.length>before){
@@ -934,6 +1106,7 @@ function paintBook(n){
   $('count').innerHTML=n.questions+(n.questions===1?' question':' questions')+
     (n.conflicts.length?' \u00b7 <b>'+n.conflicts.length+' contradiction'+
       (n.conflicts.length>1?'s':'')+'</b>':'');
+  paintHand();
   render();
 }
 
@@ -1313,6 +1486,7 @@ def _serve(mystery, case_id: str, setting: str, title: str, args) -> int:
     that a saved case is played by exactly the same code that played it new.
     """
     import uvicorn
+
     from mystery.agent import anthropic_responder
 
     quality = getattr(args, "art_quality", "low")

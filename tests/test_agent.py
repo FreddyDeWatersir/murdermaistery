@@ -63,6 +63,7 @@ CASE = Mystery(
             about="otto",
             summary="Vera and Otto are involved.",
             breaks_when="the questioner already knows Otto was not where he says",
+            evidence="the letters",
         ),
         Secret(
             id="motive",
@@ -105,12 +106,41 @@ def test_a_character_is_not_given_someone_elses_secret_to_keep() -> None:
     assert any("Vera and Otto" in f.text for f in vera.guarded)
 
 
-def test_knowing_a_secret_is_licensed_but_holding_one_is_not() -> None:
-    """Clara knows Otto's motive without it being hers. She may say it."""
+def test_a_gated_secret_is_not_in_the_witness_brief_at_all() -> None:
+    """Clara knows Otto's motive, and until the gate is met she does not have it.
+
+    Withheld by omission rather than by instruction (D-087). Before this, a
+    secret gated behind another sat in Clara's plain facts from question one:
+    `revealed_by` was read by the solvability check and by nothing that ran
+    during play, so the gate the whole case was built around did not exist.
+    """
     clara = build_brief(CASE, KNOW, "clara")
 
-    assert "heard:motive" in clara.licensed
+    assert "heard:motive" not in clara.licensed
+    assert not any("threatened to expose" in f.text for f in clara.facts)
     assert "secret:motive" not in clara.licensed
+
+
+def test_producing_the_object_opens_the_gate_for_that_person_only() -> None:
+    """Otto's motive is gated behind the affair, whose object is the letters."""
+    opened = build_brief(CASE, KNOW, "clara", shown={"affair"})
+
+    assert "heard:motive" in opened.licensed
+    assert any(f.id == "heard:motive" for f in opened.yielding), (
+        "shown the thing itself, it is coming out, not merely permitted"
+    )
+    assert "the letters" in next(f.text for f in opened.yielding)
+
+    # And nobody else moved. Showing Clara something tells Vera nothing.
+    assert "heard:motive" not in build_brief(CASE, KNOW, "vera").licensed
+
+
+def test_the_killer_keeps_their_motive_even_when_shown_everything() -> None:
+    """D-066 outranks the object. Otto never says why he did it, full stop."""
+    otto = build_brief(CASE, KNOW, "otto", shown={"affair", "motive"})
+
+    assert "secret:motive" not in otto.licensed
+    assert any(f.id == "secret:motive" for f in otto.conceals)
 
 
 def test_the_killer_is_handed_the_lie_and_not_the_truth() -> None:
@@ -439,3 +469,122 @@ def test_a_liar_reports_nothing_from_the_moment_they_are_lying_about() -> None:
 
     assert not [f for f in vera.facts if f.id.startswith("saw:") and f.slot == "s1"]
     assert [f for f in vera.facts if f.id.startswith("saw:") and f.slot == "s2"]
+
+
+def test_everybody_is_told_who_everybody_else_is() -> None:
+    """Five models inventing the same relationship five ways is not a style issue.
+
+    In a real playtest the same woman was called the victim's niece, his
+    daughter and his wife by three different suspects, because no brief said
+    who anyone was. `role` is public by construction, so it goes to all of them.
+    """
+    brief = build_brief(CASE, derive(CASE), "otto")
+    rendered = render_system(brief)
+
+    listed = {line.split(":")[0].strip() for line in brief.roster}
+    assert listed == {c.name for c in CASE.characters if c.id != "otto"}
+    assert "WHO THE OTHERS ARE" in rendered
+    for line in brief.roster:
+        assert line in rendered
+
+
+def test_the_roster_says_which_one_is_dead() -> None:
+    """A suspect who talks about the victim in the present tense should be doing
+    it as a character choice, not because nobody told them."""
+    brief = build_brief(CASE, derive(CASE), "otto")
+    victim = next(c for c in CASE.characters if c.id == CASE.victim)
+
+    said = next(line for line in brief.roster if line.startswith(victim.name))
+    assert "dead" in said.lower()
+
+
+def test_nobody_is_on_their_own_roster() -> None:
+    for character in CASE.characters:
+        if character.id == CASE.victim:
+            continue
+        brief = build_brief(CASE, derive(CASE), character.id)
+        assert not any(line.startswith(character.name) for line in brief.roster)
+
+
+def test_somebody_elses_secret_is_not_filed_under_where_people_were() -> None:
+    """Two witnesses sat on a forgery for a hundred questions (D-088).
+
+    Not because they were told to protect it. Because it was in `facts`, which
+    the prompt introduces as the whitelist of things you may state about where
+    anyone was, so a model reads the heading and treats the block as whereabouts.
+    """
+    clara = build_brief(CASE, KNOW, "clara", shown={"affair"})
+
+    assert not any(f.id.startswith("heard:") for f in clara.facts)
+    assert all(f.id.startswith(("self:", "saw:")) for f in clara.facts)
+
+
+def test_an_ungated_secret_you_merely_know_is_yours_to_say() -> None:
+    vera = build_brief(CASE, KNOW, "vera")
+    heard = [f.id for f in vera.hearsay]
+
+    assert "heard:the_debt" in heard or heard == [], heard
+    for fact in vera.hearsay:
+        assert fact.id in vera.licensed
+        assert fact.text.startswith("About "), "the prompt has to say who it is about"
+
+
+def test_a_gate_with_nothing_to_produce_stays_held_back() -> None:
+    """Cases made before objects existed keep the difficulty they had.
+
+    The alternative was putting a gated secret into the block that says say this
+    freely, which would make every old case solvable in one question.
+    """
+    soft = CASE.model_copy(
+        update={
+            "secrets": [
+                s.model_copy(update={"evidence": ""}) if s.id == "affair" else s
+                for s in CASE.secrets
+            ]
+        }
+    )
+    clara = build_brief(soft, derive(soft), "clara")
+
+    assert not any(f.id == "heard:motive" for f in clara.hearsay)
+    assert any(f.id == "heard:motive" for f in clara.guarded)
+
+
+def test_a_first_question_carries_no_pressure() -> None:
+    brief = build_brief(CASE, KNOW, "vera")
+    opening = render_system(brief, [])
+
+    assert "just come to you" in opening
+    assert "being worked on" not in opening
+
+
+def test_pressure_rises_with_the_number_of_questions() -> None:
+    """`under_pressure` has been authored per character since D-044 and nothing
+    ever told the character that pressure was high (D-089)."""
+    brief = build_brief(CASE, KNOW, "vera")
+
+    early = render_system(brief, [("q", "a")] * 2)
+    late = render_system(brief, [("q", "a")] * 9)
+
+    assert "question 3" in early
+    assert "being worked on" not in early
+    assert "question 10" in late
+    assert "being worked on" in late
+
+
+def test_pressure_never_obliges_anybody_to_talk() -> None:
+    """A temperature, not a threshold. Nothing here opens anything, which is the
+    whole point: the floor is objects (D-087), this is only the weather."""
+    late = render_system(build_brief(CASE, KNOW, "vera"), [("q", "a")] * 30)
+
+    assert "obliges you to give anything up" in late
+    assert "Which one you are" in late
+
+
+def test_a_held_back_condition_is_the_fastest_way_in_not_the_only_one() -> None:
+    """The old wording made one sentence the sole key and told the character to
+    stay put regardless, which is how a player asked about a forged reference a
+    dozen times and never got it."""
+    rendered = render_system(build_brief(CASE, KNOW, "vera"), [])
+
+    assert "easiest way in, not the only one" in rendered
+    assert "you stay with the story you told" not in rendered

@@ -224,6 +224,7 @@ OPENING_NIGHT: dict[str, Any] = {
             "about": "bram",
             "summary": "Bram was moving money out of the company and Renske found the transfers.",
             "breaks_when": "she is told somebody already knows about the money",
+            "evidence": "the transfer printouts",
             "known_by": ["tomas"],
         },
         {
