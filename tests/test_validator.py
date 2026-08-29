@@ -5,7 +5,9 @@ accept. A rule with only the rejecting test can be satisfied by a validator that
 rejects everything, which passes the suite and is useless.
 """
 
-from mystery.models import Mystery
+from conftest import CHARACTERS, COHERENT_GRID, MURDER, PLACES, SLOTS
+
+from mystery.models import Constraint, Mystery
 from mystery.validator import validate
 
 # V1: bound constraints must agree with the timeline
@@ -401,3 +403,80 @@ def test_the_victim_may_meet_people_before_the_murder() -> None:
 
     for order in ("threat first", "killing first"):
         assert "V7" not in validate(_two_scenes(order)).failed_rules, order
+
+
+# V9: one room, one moment, one private scene
+
+
+def _scenes(*constraints: Constraint) -> Mystery:
+    return Mystery(
+        title="collision",
+        characters=CHARACTERS,
+        places=PLACES,
+        slots=SLOTS,
+        placements=COHERENT_GRID,
+        constraints=list(constraints),
+    )
+
+
+def test_two_private_scenes_cannot_share_a_room_and_a_moment() -> None:
+    """From a real generation (D-090).
+
+    A conversation overheard from the corridor, with the listener placed *in*
+    the office, because the place had been written "the office and the corridor
+    outside it". Both exclusive, one room, one slot. Unsatisfiable, and it
+    surfaced as five complaints about a timeline that was never the problem.
+    """
+    result = validate(
+        _scenes(
+            MURDER,
+            Constraint(
+                id="overheard",
+                people=["nadia"],
+                place="prop_store",
+                slot="s2",
+                exclusive=True,
+            ),
+        ),
+        phase="proposed",
+    )
+
+    assert "V9" in result.failed_rules
+    message = next(v.message for v in result.violations if v.rule == "V9")
+    assert "murder" in message and "overheard" in message
+    assert "overhearing" in message, "the message has to say how to fix it"
+
+
+def test_the_same_scene_written_twice_is_not_a_collision() -> None:
+    """Same room, same moment, same people. Redundant, not contradictory."""
+    twice = _scenes(
+        MURDER,
+        Constraint(
+            id="again",
+            people=["bram", "wouter"],
+            place="prop_store",
+            slot="s2",
+            exclusive=True,
+        ),
+    )
+
+    assert "V9" not in validate(twice, phase="proposed").failed_rules
+
+
+def test_two_scenes_in_one_room_are_fine_if_neither_is_private() -> None:
+    """Only `exclusive` promises the room is empty, so only `exclusive` collides."""
+    shared = _scenes(
+        Constraint(id="a", people=["bram"], place="prop_store", slot="s2"),
+        Constraint(id="b", people=["wouter"], place="prop_store", slot="s2"),
+    )
+
+    assert "V9" not in validate(shared, phase="proposed").failed_rules
+
+
+def test_the_drafting_loop_hears_about_collisions_not_only_the_solver() -> None:
+    """At the proposed phase the model is handed its own violations back as
+    complaints, so it repairs this in the same run for the price of one more
+    call rather than costing a whole draft."""
+    from mystery.validator import PROPOSED_RULES, check_exclusive_scenes_do_not_collide
+
+    assert check_exclusive_scenes_do_not_collide in PROPOSED_RULES

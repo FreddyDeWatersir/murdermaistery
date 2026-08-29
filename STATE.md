@@ -50,7 +50,7 @@ timeline answered the case on its own (D-063).
 - `generator.py` — schema-forced Anthropic call, UTF-8 disk cache, fakeable
   boundary, and the two model tiers
 - `solver.py` — repairs the model's grid, or builds one from nothing as fallback
-- `validator.py` — V1 to V8, phased into proposed and final. Correctness only
+- `validator.py` — V1 to V9, phased into proposed and final. Correctness only
 - `critique.py` — A1 to A14. Quality advisories that report and never fail
 - `knowledge.py` — co-location arithmetic, no model involved
 - `agent.py` — briefs, citation-checked replies, five knowledge states
@@ -65,9 +65,9 @@ timeline answered the case on its own (D-063).
 - `session.py` — a play-through, as a record, and what has been shown to whom
 - `daily.py` — the rota: claim a day, and the buffer behind it
 - `portraits.py` — optional generated faces, never load-bearing
-- Two hundred and forty one tests green, ruff clean, no test calls an API
+- Two hundred and forty five tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- Eighty nine decisions in `docs/decisions.md`
+- Ninety decisions in `docs/decisions.md`
 
 **Which model does what**
 
@@ -103,6 +103,7 @@ D-084.
 | V6 | No character required in two rooms at once | fails, final phase only |
 | V7 | The victim stays dead and the body stays put | fails |
 | V8 | A lie is actually a lie, one per person | fails |
+| V9 | One room, one moment, one private scene | fails, from the proposed phase |
 | V0 | No holes in the grid | unwritten |
 | A1 | Nobody wanders more than twice | reports |
 | A2 | Two to four people lack an alibi at the murder | reports |
@@ -158,7 +159,7 @@ All invented. All at least visible. See D-025 and D-031.
 **How to check the state of things, cheapest first**
 
     uv sync                                   # httpx is new
-    uv run pytest                             # 241 tests, no network, no spend
+    uv run pytest                             # 245 tests, no network, no spend
     uv run ruff check .
     uv run python -m mystery.cli --topologies
     uv run python -m mystery.cli --material 3 --setting "..."  # what 3 seeds get dealt

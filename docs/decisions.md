@@ -1590,3 +1590,39 @@ almost impossible. `agent.folded` already logs `after=N`, so the number of
 questions a fold took is measurable rather than felt. Folding on question two,
 repeatedly, is the signal that this went too far.
 **Status:** active
+
+## D-090 Two private scenes in one room at one moment
+**Date:** 2026-08-29
+**The generation that found it.** A robotics lab, the night before a demo. The
+best cast the generator has produced, and the validator threw it out with five
+complaints about the timeline. None of the five was the problem.
+**What actually happened.** Two constraints, both `exclusive`, both in `office`
+at `s3`: the murder, with the killer and the victim, and a witness overhearing it
+through the door. Exclusive means nobody else is present, so the pair cannot both
+be true. The set was unsatisfiable, the solver produced a grid satisfying
+neither, and V1 and V7 dutifully reported the wreckage.
+**The prose was right and the data was wrong.** The scene says the witness is
+"alone outside the door", in the corridor, hearing a pitch of voice through it.
+She was placed *in the office* because the place had been written "Aldert's
+office and the corridor outside it": one place id covering two spaces, which is
+fine until somebody stands in one and listens to the other. The prompt asks for
+"one exchange overheard by exactly one person who was not part of it", which is
+exactly the scene that invites this.
+**V9:** two exclusive constraints may not share a place and a slot with
+different casts. Same room, same moment, same people is redundant rather than
+contradictory and passes. Neither being exclusive passes: only `exclusive`
+promises the room is empty, so only `exclusive` can collide.
+**It runs at the proposed phase,** which is the point. The drafting loop hands
+violations back to the model as complaints (D-035), so a model that books two
+scenes into one room is told so and moves one, in the same run, for one more
+call. Catching it after the solver costs a whole draft and reports the symptom
+rather than the cause.
+**And the prompt was corrected at the source:** `exclusive` is literal and is
+about the room rather than the scene, the overhearer goes in a different place
+and hears through a door, and a place is one room, not a room and the corridor
+outside it.
+**The dual of V6, and it took longer to find.** V6 is one person in two rooms at
+once. V9 is one room holding two private scenes at once. The first is obvious
+when you write the rule and the second only shows up when a model writes a good
+enough scene to make you look at the prose instead of the data.
+**Status:** active

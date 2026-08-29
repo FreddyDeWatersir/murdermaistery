@@ -21,7 +21,7 @@ boundary, plain dataclasses inside it.
 from dataclasses import dataclass, field
 from typing import Literal
 
-from mystery.models import Mystery
+from mystery.models import Constraint, Mystery
 
 Phase = Literal["proposed", "final"]
 
@@ -329,6 +329,63 @@ def check_constraints_do_not_contradict(mystery: Mystery) -> list[Violation]:
     return violations
 
 
+def check_exclusive_scenes_do_not_collide(mystery: Mystery) -> list[Violation]:
+    """V9: one room, one moment, one private scene.
+
+    Guards: the language model. V6 catches the same person in two rooms at once.
+    This is its dual and it went unnoticed for longer: two *different* private
+    scenes booked into the same room at the same moment. Exclusive means nobody
+    else is present, so two exclusive constraints on one place and slot with
+    different casts cannot both be true, whatever the prose around them says.
+
+    It came out of a real generation (D-090). A conversation was overheard from
+    the corridor, and because the place was written "the office and the corridor
+    outside it", the model put the listener *in the office*, exclusively, in the
+    same slot as the murder. Both scenes read beautifully and the set was
+    unsatisfiable. The solver did what an over-constrained solver does, which is
+    produce something that satisfies neither, and the failure surfaced as five
+    downstream complaints about a timeline that was never the problem.
+
+    Caught at the proposed phase on purpose. The drafting loop feeds violations
+    back as complaints, so a model that books two scenes into one room is told
+    exactly that and can move one of them, in the same run, for the price of one
+    more call. That is much cheaper than a rejected draft and far clearer than
+    watching the solver flail.
+    """
+    violations: list[Violation] = []
+    booked: dict[tuple[str, str], Constraint] = {}
+
+    for constraint in mystery.constraints:
+        if not constraint.exclusive or not constraint.is_bound:
+            continue
+
+        key = (constraint.place, constraint.slot)
+        first = booked.get(key)
+        if first is None:
+            booked[key] = constraint
+            continue
+        if set(first.people) == set(constraint.people):
+            continue
+
+        violations.append(
+            Violation(
+                rule="V9",
+                message=(
+                    f"{first.id!r} and {constraint.id!r} are both private scenes in "
+                    f"{constraint.place!r} at {constraint.slot!r}, with different "
+                    f"people in them: {sorted(first.people)} and "
+                    f"{sorted(constraint.people)}. Exclusive means nobody else is "
+                    f"there, so only one of these can happen. Move one to another "
+                    f"place or another moment. If somebody is meant to overhear "
+                    f"from outside, put them in a different place: a listener in "
+                    f"the room is not overhearing, they are present"
+                ),
+            )
+        )
+
+    return violations
+
+
 def murder_slot(mystery: Mystery) -> str | None:
     """When the killing happens. One definition, on the model (D-071)."""
     scene = mystery.murder_scene
@@ -401,6 +458,8 @@ def check_the_victim_stays_dead(mystery: Mystery) -> list[Violation]:
 # one of them (D-033), and only a clash that survives that is a real failure.
 PROPOSED_RULES = [
     check_references_exist,
+    check_constraints_do_not_contradict,
+    check_exclusive_scenes_do_not_collide,
 ]
 
 # After the solver. Everything must hold.
@@ -412,6 +471,7 @@ FINAL_RULES = [
     check_constraints_match_timeline,
     check_exclusive_constraints_are_private,
     check_every_constraint_was_placed,
+    check_exclusive_scenes_do_not_collide,
 ]
 
 

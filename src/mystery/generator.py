@@ -273,6 +273,22 @@ be alone with nobody else present. You need, at minimum:
 missing alibi proves nothing on its own
    - one exchange overheard by exactly one person who was not part of it
 
+**`exclusive` is literal and it is about the room, not the scene.** It means \
+nobody else is in that place at that moment, full stop. Two exclusive \
+constraints cannot share a place and a slot: only one private scene fits in one \
+room at one time, however well both of them read.
+
+The overheard exchange is where this goes wrong. The listener is **not in the \
+room**. Put them in a different place for that slot, one they could plausibly \
+hear from, and say in the prose that they heard it through a door or from the \
+next room. A witness placed inside the room is not overhearing, they are \
+present, and the two scenes then contradict each other and the case is thrown \
+away.
+
+Relatedly, **a place is one room**. Do not write a place called "the office and \
+the corridor outside it": that is two places and you will need both of them \
+precisely when somebody is standing in one listening to the other.
+
 5. The grid. For every character and every slot, the place they were. Put it in \
 `placements` as character id, then slot id, then place id. Fill in every cell.
 
