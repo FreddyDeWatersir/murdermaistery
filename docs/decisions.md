@@ -1626,3 +1626,877 @@ once. V9 is one room holding two private scenes at once. The first is obvious
 when you write the rule and the second only shows up when a model writes a good
 enough scene to make you look at the prose instead of the data.
 **Status:** active
+
+## D-091 Two things the player should never have had to see
+**Date:** 2026-08-29
+**Citations were being spoken out loud.** "I was in the workshop all evening
+[self:s4]." The whole leakage design (D-038) is that a reply carries its
+citations in `used`, where checking them is set membership rather than reading
+prose. The model is asked for them there and sometimes writes them into the
+speech as well. `strip_citations` takes them back out on the way through `ask`,
+matching only the citation shape, a prefix and a colon and an id, so a character
+using square brackets for their own reasons is left alone. The fix is a strip
+rather than more prompt: this is a formatting habit, and the answer to a
+formatting habit that survives instructions is to handle it. `agent.cited_aloud`
+counts it, so whether it is common is measurable rather than felt.
+**Reading size.** Three steps, on a button in the top bar, kept in browser
+storage so it survives a reload. It scales the text people read for an hour, the
+answers, the notebook and the timeline, and deliberately not the whole page: the
+complaint was legibility rather than zoom, and scaling everything moves the
+portrait and the layout with it. The page is served from the player's own
+machine, so browser storage is the right home for a per-person preference, and
+every read and write is wrapped because a browser set to refuse site data throws.
+**Status:** active
+
+## D-092 The reason is written, and nobody marks it
+**Date:** 2026-08-29
+**Twice now.** A player worked out exactly why the killer did it and was told
+they had the reason wrong, because the secret they named was not the one
+`is_motive` pointed at. In the wine case the reason was split between the
+erasure of her work and the conversation in the cellar. In the lab case it was
+split between the sabotage itself and the printout that proves it. Both times
+the player understood the case and lost on a technicality of the bookkeeping.
+**Grading needed the case to agree with itself about which sentence is the
+reason, and it does not.** A good motive is a thread, not a row. Marking it
+would mean asking the generator to say which secrets belong to that thread, and
+then trusting it, which is another judgement in the place where a judgement just
+failed twice.
+**Decision:** the charge is written in the player's own words in a text box, and
+the verdict grades only the name. The reveal puts what you wrote beside what it
+was, adds "nobody is marking this, read the two and decide whether you had it",
+and lists everything that came out next to everything that never did. Right
+person and wrong person are still two different endings; right reason is now a
+thing the player judges, which is the only judge who knows what they meant.
+**What is lost:** a machine-readable record of whether the reason was right. If
+that is ever wanted, for statistics on a public deployment, it comes back as
+something the player marks themselves after seeing the answer, not as string
+equality against an id.
+**Sessions are kept by default,** and `--forget` turns it off. The transcript is
+the most useful thing a playtest produces and it was being thrown away unless
+somebody remembered a flag. A playtest that cannot be read afterwards is an
+anecdote.
+**Status:** active
+
+## D-093 The building has a floor plan
+**Date:** 2026-08-29
+**Decision:** every `Place` carries `adjacent`, the rooms you can walk to or
+hear through from it. The Map tab draws it: rooms as nodes, doors as lines,
+filled where somebody has been placed, clickable to stand in the room.
+**Why this and not coordinates.** A drawn plan with x and y looks better and
+means nothing. Adjacency is the thing the case actually depends on: an
+overheard conversation needs the listener next door, and D-090 was a case thrown
+away because a listener was put *in* the room. With `adjacent` in the data, "put
+them somewhere they could hear from" is a statement about the plan rather than a
+hope about prose.
+**Doors are opened from both sides in the solver rather than checked.** A model
+says the corridor opens onto the office and then describes the office without
+mentioning the corridor. Both halves are the same door, the repair has exactly
+one right answer, and bookkeeping with one right answer should be done rather
+than complained about. Self-adjacency and doors to rooms that do not exist are
+dropped in the same pass.
+**A15 reports what cannot be repaired:** a room with no doors at all, and a plan
+that splits into two disconnected halves. An advisory rather than a rule,
+because nothing mechanical breaks. The case plays, the timeline holds, and only
+the map lies, which is not worth throwing a case away for.
+**Cases drafted before today have no plan** and A15 says so once rather than
+five times. The map falls back to the timeline table it has always drawn.
+**Not finished.** A ring of nodes is the first version, not the right one. It
+reads at five rooms and will not at ten, it says nothing about which rooms are
+upstairs, and the timeline still lives underneath it as a separate table when
+the two are the same information. Worth returning to once there is a case with a
+plan worth drawing.
+**Status:** active
+
+## D-094 When did he die
+**Date:** 2026-08-29
+**The report,** and it is the best bug report the project has had: "it didn't
+become clear when Tarik killed Gerhard. They were together in the room at 22:00
+but then Gerhard was alive at 23:00 too. Did he kill him after everyone left?
+But then why lie about 22:00?" Three separate defects, and the player felt all
+three as one confusion.
+**1. The murder hour was computed twice and the two disagreed.** D-071 removed
+exactly this bug from four modules and missed `knowledge.py`, where
+`murder_slot_index` still took the first constraint holding both the killer and
+the victim. The prompt asks for an earlier private confrontation between those
+two, so that is usually the argument rather than the killing. In this case it
+put the murder at `s1` instead of `s4`, three slots early, and every downstream
+question about who saw what was answered against the wrong hour. It now defers
+to `Mystery.murder_scene` like everything else.
+**2. Witnesses reported seeing the victim after he was dead.** `derive` stopped
+the victim *observing* at the murder and let everyone go on *seeing* them. The
+comment said so on purpose: the body is still in the room. But the brief renders
+it as "at 23:00 you saw Gerhard Vlaanderen in the high bay", which is a sentence
+about a living man, and the timeline drew it as an ordinary sighting. Two
+witnesses placed the victim in the murder room an hour after he was killed, so
+the evening read as though he had been alive throughout and the killer's lie
+about that hour made no sense.
+**3. Three people were working in the room with the body.** V10: after the
+killing, nobody but the victim is in that room. The discovery says the body was
+found after the evening was over, which means nobody found it during the
+evening, which means nobody was in there. This case had the killer back at the
+bench and two others recutting a bracket, next to a corpse, at 23:00. It fires
+at the proposed phase so the model moves the scene rather than the draft being
+thrown away, and the prompt now says it directly.
+**The pattern, for the sixth time:** the same fact derived independently in two
+places, disagreeing silently. It is worth saying plainly that finding it once
+and fixing it in four modules did not make it stop. A grep for the derivation is
+now part of finishing any change that touches the murder.
+**And the queue's flaky ordering, killed properly.** `_stamp` is monotonic
+within the process: if the clock has not moved, it returns one millisecond past
+the last stamp rather than repeating it. Seconds tied first (D-078), then
+milliseconds tied on a faster machine (D-081), which is the lesson: an ordering
+that depends on the clock being finer than the loop above it is a race, and
+chasing resolution loses it twice. The stamp is still a real instant, because it
+is printed and because it sits in a filename that has to sort.
+**Status:** active
+
+## D-095 The picture is told who it is a picture of
+**Date:** 2026-08-29
+**What was wrong:** generated portraits came back with the wrong gender.
+`_prompt` was built from `look` and `manner` and never read `character.gender`.
+**Which is the seventh time.** `gender` exists *because of this bug*. D-074
+added it after the drawn SVG faces were caught inferring gender from the `look`
+sentence and getting it wrong whenever the sentence did not say. That fix
+reached the drawings and the page payload and did not reach this prompt, so the
+same inference was still being made from the same sentence by a different model.
+**Decision:** the gender leads the prompt and is stated as a requirement rather
+than mentioned in passing, before the appearance sentence it used to be buried
+in. `role` goes in too: a foreman of forty years and a wine journalist should
+not be interchangeable, and the role is public by construction.
+**The running list, worth reading as one thing.** A field written with care,
+carried through the schema, and never wired to the place that needed it:
+`role` in the prompt (D-086), the per-person transcript in the page (D-085),
+`revealed_by` at runtime (D-087), heard secrets in the right block (D-088),
+`under_pressure` (D-089), the murder hour in `knowledge.py` (D-094), and now
+`gender` in the portrait. Every one of them was found by a person playing the
+game, never by a test, because in each case both halves were individually
+correct.
+**Status:** active
+
+## D-096 The map is the evening, not the building
+**Date:** 2026-08-30
+**Decision:** the Map tab leads with the floor plan, with an hour picker above
+it. Choose a moment and the rooms fill with whoever has been placed in them,
+using the same conventions as the table: red where two people put somebody in
+different rooms, underlined where the claim was confirmed by somebody other than
+themselves.
+**Why, in the player's words:** "a timeline that we can advance through, which
+would be the map with location, and we see where the people would be at that
+time." The plan on its own answered a question nobody asks. Nobody wants to know
+the shape of the building. They want to know whether she could have got from the
+seminar room to the high bay between the dry run and the repair, and that needs
+the plan and the hour in one picture.
+**Rooms are drawn as rooms.** A labelled box you can put people in, rather than
+a dot with a caption. A dot is a graph node; the player is standing in a
+building.
+**The table stays underneath.** The two answer different questions and neither
+subsumes the other: the plan is the best view of one moment and the table is the
+only view of a whole evening at once, which is how an alibi is actually read.
+This may turn out to be one panel too many, and if so the table goes, not the
+plan. Not yet: the table is currently the most useful thing in the game.
+**The dead man is left off the "nobody has placed" line** on the plan. It is
+true, useless, and after the murder it is true of every remaining hour.
+**Routes were considered and skipped.** Drawing the path somebody must have
+taken between two non-adjacent rooms, and asking who was in the rooms they
+passed through, is a real new deduction and a great deal of machinery. Deferred
+deliberately rather than forgotten.
+**Status:** active
+
+## D-097 Variety by instruction rather than by machinery
+**Date:** 2026-08-30
+**The finding:** four cases on one setting produced four different motives and
+four different sets of manners, which is `palette.py` working, and the same six
+jobs, near-identical room names and three titles of the form "The Last X at Y",
+which is nothing pushing back on the model's median reading of a one-sentence
+setting.
+**The obvious fix was rejected.** Dealing roles the way manners are dealt is how
+the palette was built and it would probably work, and the instruction was: do
+not force it, prompt and influence well. That is the right instinct here. A
+manner is a behaviour and survives being dealt; a role is bound to the occasion
+and the building, and a dealt list of job shapes would produce casts assembled
+from parts rather than casts that belong to an evening.
+**So the prompt does three things it did not.** It asks for the **occasion**
+first, before the cast, on the grounds that a setting names a place and a place
+with nothing happening in it produces the same evening every time. It names the
+default staffing out loud, the six jobs that arrive unbidden, and requires half
+the cast to be people that list would not have produced. And it forbids the
+title template.
+**The seed is told what it is for.** "A different occasion is what makes a
+different case, and the same place on two different nights should not produce
+the same six people."
+**No check, deliberately.** Whether a case used the material it was dealt cannot
+be tested without comparing prose to a dealt line, which is a judgement, and the
+project already has enough places where a private judgement decides something.
+The measurement stays what it has been: generate several on one setting and read
+the casts side by side.
+**Status:** active
+
+## D-098 The panel edge is draggable
+**Date:** 2026-08-30
+**Decision:** the notebook panel has a handle on its left edge. Drag to resize,
+double-click to reset, and the width is remembered in browser storage. Clamped
+between 300 and 880 pixels: narrower and the timeline columns wrap into
+nonsense, wider and there is no game left to look at.
+**One variable, everything follows.** The width is a CSS custom property, so the
+drag sets one property and both the things that have to agree with it, the panel
+and the shift that keeps the portrait out from under it, read the same value.
+It used to be the literal `min(430px,92vw)` written out in two places, which is
+the same disagreeing-derivation shape as everything else this week, just small
+enough not to have bitten yet.
+**The handle is a sibling of the panel, not a child, and fixed rather than
+absolute.** Inside a panel that scrolls, an absolutely positioned full-height
+handle covers the first screenful and then scrolls away with the content, so it
+would be missing at exactly the moment the notebook is long enough to want
+widening. Found by scrolling to the bottom in a real browser and looking for it.
+**Nothing animates during a drag.** The panel and the stage both carry a
+transition, and a panel easing towards the pointer a third of a second behind
+reads as broken. Selection is off too, because a drag that highlights the
+transcript is worse than no drag.
+**Status:** active
+
+## D-099 The house talks
+**Date:** 2026-08-30
+**The problem it is for.** Asked what would make an evening a game rather than a
+grind, the answer was that the house should talk. It is the right answer. Five
+people stood in a frozen moment in five separate booths, never mentioning to
+each other that they were being questioned, while half the break conditions in
+every generated case read "she folds if told that someone has already mentioned
+it". That sentence describes a world where people talk. The world did not exist.
+**Decision:** every brief carries `WHAT HAS GOT BACK TO YOU`, derived from the
+transcript. No model call, no stored state, no new data.
+**Two tiers, and the split is the entire safety argument.**
+*Everyone hears who has been questioned* and roughly how much, which is visible
+from a corridor and gives nothing away. *Only somebody who already knows a
+secret hears that it has come up.* You cannot be told about a thing you do not
+know, so gossip can never put a secret into a brief that did not already have
+it, and the closure that decides whether a case is winnable (D-068) is
+untouched. What changes is that a person guarding something can now learn it is
+already out, which is exactly the condition they are written to break on.
+**What travels is that a thing came up, not the thing itself.** Derived from
+citations, which the transcript already records, so "which topics have been
+discussed" is set membership rather than a judgement about prose. Same trick as
+the leak detector, for the same reason.
+**Ordering matters now, which is the point.** Ask Sander about the repository
+before you go to Tarik and Tarik knows the evidence of his motive is out.
+**Recomputed per question, never stored.** A saved copy would be a second
+version of a fact the transcript already holds, and this project's
+characteristic bug is two derivations of one fact disagreeing quietly. The
+shared brief on the `Case` is never mutated either: two people playing the same
+case are not in the same building.
+**Capped.** Your own exposed secrets first, then at most six other lines, so a
+long evening does not arrive as a wall of recap.
+**Nothing is compelled.** The block ends by saying so, and it is not citable,
+because none of it is a fact about where anybody was. Same discipline as D-089:
+state the situation, leave the decision to the character.
+**Status:** active
+
+## D-100 Who is asking, and why anybody answers
+**Date:** 2026-08-30
+**Why it stopped being flavour.** The prompt said "somebody is asking you about
+it" and never said who, which was survivable while the world was frozen. The
+moment the house talks (D-099) it is not: **police separate witnesses**, so a
+game where five suspects gossip between questions is a game where the player
+cannot be the police, and the fiction now has to say so or the mechanics
+contradict it.
+**The frame:** an outsider, in the hour after the body was found and before
+anybody official arrives. Not police, not one of the cast, no power to arrest,
+charge, compel, or record anything anybody must act on. They started asking and
+nobody has stopped them.
+**Considered and rejected: the player as one of the cast.** Dramatically the
+strongest, and rejected for a good reason: the player has no context on who they
+are supposed to be, and being handed an identity they know nothing about makes
+the evening messier rather than richer.
+**It answers three questions the mechanics were already asking.** Why anyone
+answers somebody with no authority: refusing in front of everybody looks like
+something, and what is said in this hour is what the police are told when they
+arrive. Why nobody is separated: there is nobody to separate them. Why it ends
+when you accuse: that is what gets said.
+**And the player is watched, which was the other half of the ask.** With no
+authority, the only thing the player can spend is how they are seen. The house
+now reads how the questioning has been distributed, which the transcript already
+knows: somebody taken apart for an hour, somebody never approached at all,
+whether you keep leaving this person for the others. No score, no meter, nothing
+that unlocks. A suspect with an opinion of you is a person, and their `manner`
+decides what they do with it.
+**Stated to the player too,** in the line under the title, because a position
+the player cannot see is not a position they can play.
+**Status:** active
+
+## D-101 The player has a job
+**Date:** 2026-08-30
+**The objection, and it was right:** "would they actually answer any of my
+questions though if I have no authority?" D-100 said the player was somebody who
+turned up and started asking, which explains why nobody is separated and does
+not explain why anybody opens their mouth.
+**The mistake was making the frame generic.** The only frame that fits every
+setting is a vague one, and a vague one is exactly what cannot answer "why would
+they talk to me". So the frame is generated per case, like everything else that
+has to belong to its setting.
+**`Mystery.investigator`:** `role`, `why_here`, `standing`. Never police, never
+able to arrest or compel. What they have instead is a professional reason to be
+in the building and somebody's authority behind them that is not legal
+authority: the underwriters who decide the claim, the funding body, the family,
+the institution, or the dead person themselves, who engaged them last month
+about something else entirely. The prompt says "a detective" is wrong and gives
+a worked example of what specific looks like.
+**The compliance model is not authority anyway.** It is that the police are an
+hour away, that whatever is said now is what reaches them, and that it is better
+to be in that conversation than to be its subject. That was already the strongest
+part of D-100 and it survives intact: what the job adds is a reason to be
+standing there holding the inventory at midnight.
+**And it explains the objects.** An assessor who has been on site since Monday
+about an equipment claim has a bag with the inventory in it. That is why the
+player can pick up the ledger pages tonight and could not tomorrow.
+**Shown to the player** in the subtitle and kept in the notebook, because it is
+the answer to "why is anybody telling me anything" and they are entitled to
+reread it.
+**Old cases still work** and get the generic line, which is the frame D-100
+shipped with.
+**Status:** active
+
+## D-102 A default argument that looked like a biased generator
+**Date:** 2026-08-30
+**The report:** "I would like it to be random if killer and victim are man or
+woman even if I don't change the seed." The generator was not biased. `--seed`
+defaulted to **zero** in both entry points, so every run of the same command
+returned the same evening out of the cache, and casting is two bits of the seed,
+so seed zero is a man killing a man. Every case generated without thinking about
+the seed was the same case with the same casting. Both lab cases were seed zero.
+The four wine cases came through `--fill`, which walks seeds, and those did vary
+their casting, which is exactly the evidence that the mechanism worked and the
+default did not.
+**Decision:** no default. The seed is drawn when the command runs and printed
+first thing:
+
+    Seed 483102. Pass --seed 483102 for this case again.
+
+**Reproducibility was the property worth keeping, not determinism.** A fixed
+default gives you the same evening forever, which is not reproducibility, it is
+a single case. A number you can read off the terminal and hand back is. Tests
+and the solver still pass explicit seeds and are unaffected.
+**And the room backdrops are gone.** Scenery is one establishing shot. The
+argument for a picture per room was that a room you can look at while deciding
+whether somebody was really in it is doing work; in practice nobody looked, and
+they were five sixths of the scenery bill and the least noticed thing in the
+game. The map earns its keep by showing who is where, not what the wallpaper is
+like. `--art` drops from eleven images to six, and from about fifteen cents a
+case to about seven.
+**Status:** active
+
+## D-103 Four more shapes, and the shape comes from the seed
+**Date:** 2026-08-30
+**The test a new shape has to pass:** does it change what the *player has to do*,
+or only what the prose says? "The killer lies, but it is a hotel" is a setting.
+The three existing shapes pass: catch a false location, break a person, disprove
+an answer you were handed. All four new ones pass too.
+**`the_frame`.** The killer lies about nothing, because they do not need to:
+somebody else looks guiltier, every piece of evidence against them is true and
+innocent, and each has an explanation nobody has asked for. Solved by noticing
+the case is too complete. Real guilt is ragged.
+**`the_finder`.** Whoever found the body put it there. The one piece of
+testimony the game hands the player as common knowledge, before they have asked
+anybody anything, is the lie.
+**`the_conspiracy`.** All of them lie about the same thing and it is not the
+murder. You break the group lie, feel you have solved it, and find you solved
+the wrong crime.
+**`the_wrong_hour`.** Nobody lies about where. The house is wrong about when.
+**Two objections were raised and both were right.**
+*How is the wrong hour different from the finder, other than a number?* In the
+finder, one person lies and you break them: the answer is a person. In the wrong
+hour **nobody is lying at all**, and the player's opponent is an inference the
+whole house made in good faith. It is the only shape that does not end with "who
+was lying". H1 and H3 are what stop it collapsing into the plain shape: the
+killer must tell no lie, and their alibi for the believed hour must be real and
+witnessed, because a killer who is alone at the suspected hour is suspected
+immediately and nobody ever thinks about time.
+*In a conspiracy, who is left to tell you about it?* The real hole in that shape,
+and it has two answers, both now enforced. C3: everyone still has a **private
+secret of their own**, ungated, unconnected to the conspiracy, and pulling one
+gives leverage on the person who then lets the shared story go. And the shared
+account has a **seam**, written deliberately, because five people who agreed a
+story do not agree on the details, and the contradiction tracker already catches
+two people placing a third person differently.
+**Every shape carries its own checks,** eleven new ones, because a shape without
+them is a paragraph and the model will drift back to the plain shape while
+reporting that it did what was asked. Verified by judging a real `mutual_alibi`
+case against each new shape: F1, W1, W2, C1, C2 and H1 all fire, and the shape it
+actually is stays quiet.
+**The shape is drawn from the seed,** not from a fresh coin, so a seed reproduces
+the whole case rather than most of it. Sorted rather than insertion-ordered, so
+adding a shape later does not silently repoint every existing seed.
+**Status:** active
+
+## D-104 Two of the new shapes could never have been generated
+**Date:** 2026-08-30
+**Found by the first real batch.** Five cases generated, one discarded as "valid
+but not winnable" at a cost of about fifty cents, and the discarded one was the
+only `the_frame` draft in the run. Not a coincidence.
+**The collision.** `winnable` was `alibi_is_breakable and motive_is_reachable`,
+and `alibi_is_breakable` began by returning "the alibi holds" whenever the killer
+told no lie. Both `the_frame` and `the_wrong_hour` are *built* on the killer
+telling no lie: in a frame they have no need to, and in the wrong hour their
+alibi for the hour everybody believes is completely real. So every draft of
+either shape came back valid, was thrown away as unwinnable, and the money was
+spent. Two of the four shapes shipped yesterday were impossible.
+**My error, and the shape of it is familiar.** The gate was written when every
+case had a lying killer, and it encoded that assumption in a field named for the
+mechanism rather than the meaning. `alibi_is_breakable` is a fact about a lie.
+What the gate is actually for is: can the killer be got at.
+**Decision:** `killer_is_assailable`, with two branches. If the killer lied, the
+lie must be breakable, which is the original definition unchanged. If they told
+the truth, nothing must exonerate them, which for an honest killer means being
+unwitnessed at the moment it happened.
+**The route stays the topology's business.** How the player actually gets there
+in a frame (clear the framed suspect) or in the wrong hour (establish the real
+time) is enforced by F2 and H2, which already existed. This gate only refuses
+cases where the killer is out of reach however well the player plays, which is
+what it was always supposed to mean.
+**Also from the same batch, two content regressions.** Five investigators, five
+insurance assessors, because the prompt gave one worked example and the model
+took it as the answer: the same failure as the six obvious jobs. The prompt now
+lists eight kinds and says not to reach for the adjuster. And one setting on
+three seeds produced *What the Fog Owes Us*, *What the Fog Keeps* and *What the
+Fog Owes*: the title template beaten in one form came back as the setting's own
+noun used as a stem. Both failure modes are now named in the prompt with the
+actual titles quoted.
+**What the batch got right,** and it is most of it: five of five had a gated
+motive with an object on the gate, five of five had connected floor plans with
+A15 quiet, both `the_finder` cases put the killer at the discovery, V9 fired on a
+real draft for the first time and the model repaired it in one more call, and the
+casts stopped being the same six jobs.
+**Status:** active
+
+## D-105 The player's standing is dealt, not asked for
+**Date:** 2026-08-30
+**The report:** "maybe remove the investigator thing if it's so samey, idk if we
+need it." Five cases, five insurance assessors.
+**Removing it would put back the hole it was built to fill.** D-101 exists
+because "why would anybody answer somebody with no authority" had no answer, and
+a generic frame is exactly what could not answer it. The problem is not that the
+player has a job, it is that the job was being invented freely from one worked
+example.
+**Which is D-075 exactly, a second time.** The manners repeated because the
+prompt listed four as examples and a model copies examples. The fix then was not
+a longer list, because a model handed forty options picks its three favourites
+and picks them again; the fix was to deal one from the seed and never show the
+rest. The investigator now comes out of the same file, the same way.
+**Twelve standings, structural rather than written.** "Halfway through an
+unrelated professional job here" belongs to a lighthouse and to a law firm.
+"The loss adjuster from Utrecht" belongs to one case and would end up in all of
+them. The model is handed one and works out who that is in *this* building.
+**And an end-to-end pass on a real generated case**, in a browser, through every
+verb: ask, recall on switching, the object entering the hand, showing it,
+the panel and its drag handle, the notebook, the hour picker on the plan, the
+transcript, the reading size, and the written accusation. Twenty-two checks, all
+green.
+**Two of the three failures in the first run of that pass were the test being
+wrong**, which is worth writing down: an assertion that compared against "You"
+when the CSS uppercases the heading, and one that demanded people on the plan at
+an hour nobody had said anything about. The third was this sandbox having no
+route to Google Fonts. Nothing was wrong with the game, and a test that is wrong
+in a way that looks like a bug costs the same as a bug until it is read.
+**Status:** active
+
+## D-106 Only one of them looked guilty
+**Date:** 2026-08-30
+**The playtest, in one sentence:** "the case was cool and everything functioned
+well but it was a bit too easy, as only one person had a legit motive. Fun and
+smooth but not the most engaging." Every advisory had passed.
+**Why they all passed.** A4 asks whether the victim is a hub, measured as the
+share of suspects holding a secret *about* the victim, and three of five did.
+But two of those three were grievances: a man who lost money in a shipyard, a
+woman who wanted a word. Neither reads as a reason to kill. And the remaining
+two suspects were hiding an affair with each other, which has nothing to do with
+the dead man at all. "Has a secret about the victim" and "would be written down
+as a suspect" are different properties, and the checks only knew the first.
+**`Secret.damning`.** Stated by the writer, not inferred, because only the
+writer knows which one this is. **A16** wants at least three suspects holding
+one, and reports if the killer holds none, which is the opposite failure: three
+people in the frame and the answer is the name the evidence never touches.
+**The prompt says it plainly:** the killer's motive is damning by definition, at
+least two other people need one as well, and theirs must be false, a dead end,
+or about somebody who could not have been there. Grievances are named as not
+enough, with the playtest quoted.
+**The shipped case was rewritten to demonstrate it.** Wouter's theft was marked
+damning and should not have been: quietly selling equipment is a reason to be
+evasive, not a reason to kill. It now runs on Tomas inflating costs and Ilse
+overhearing that she was finished, so three people are worth writing down and
+one of them did it.
+**Four interface fixes from the same session.**
+*The verdict card lost its top edge* on a short window. A centred flex child
+taller than its container overflows in both directions and the top cannot be
+scrolled back to. `margin:auto` centres it when it fits and leaves it alone when
+it does not.
+*The map drew its scaffolding before anybody spoke.* The empty room-by-hour grid
+is worth showing, because it is the shape of the evening and the player can see
+the building. The "unaccounted for" row listing the whole cast at all five hours
+is not, and it is now held back until there is a claim to be unaccounted against.
+*The transcript is searchable*, and searching crosses the whole cast rather than
+one person, because forty answers in "who mentioned the gearbox" is a real
+question and five separate logs is not an answer to it. Matches are highlighted.
+With the box empty it stays what it was: this person, in order.
+*Notes, per suspect*, kept in the browser. The notebook records what was said;
+this is what the player made of it, which nothing was keeping.
+**Third time in two days a browser check failed and the test was wrong, not the
+game.** This one tracked the wrong suspect. Worth the note: a test that is wrong
+in a way that looks like a bug costs exactly what a bug costs, right up until
+somebody reads it.
+**Status:** active
+
+## D-107 A session followed the player into a different case
+**Date:** 2026-08-30
+**Found in a real session record.** The file said `case_id:
+opening-night-7533`, and ninety seven of its hundred and one questions were
+addressed to the cast of a ferry. Four were not: a poke at the shipped case
+through `--dry-run` earlier the same evening.
+**The cookie did not know which case it belonged to.** `player()` looked the
+session up by cookie and served it whatever case was running. Serve a dry run,
+ask a question, stop the server, serve a different case on the same port in the
+same browser, and the old evening came back: one transcript holding two casts, a
+notebook mixing two evenings, a Map with claims about rooms in another building,
+and gossip carrying news about people who are not here.
+**Decision:** a session whose `case_id` is not the case being served is not this
+player's session. A new one is created and the old one is left on disk, because
+it is somebody's evening and the fix for a mix-up is not to delete the record.
+Logged as `session.new_case` so it is visible rather than silent.
+**Why it appeared now.** Sessions became persistent by default two decisions ago
+(D-092), which was the right call and is what made this reachable. Before that
+the process died and took the mix-up with it.
+**Status:** active
+
+## D-108 A rule that asks for a minimum gets the minimum
+**Date:** 2026-08-30
+**The measurement, and it is the clearest one this project has produced.** Five
+cases, two settings, three different topologies:
+
+| case | secrets | cold | gated | depth |
+|---|---|---|---|---|
+| the-ninth-name-on-the-licence | 8 | 7 | 1 | 1 |
+| the-long-shot-of-the-orchard-wall | 6 | 5 | 1 | 1 |
+| what-the-fog-owes-us | 7 | 6 | 1 | 1 |
+| what-the-fog-keeps | 7 | 6 | 1 | 1 |
+| what-the-fog-owes | 7 | 6 | 1 | 1 |
+
+Identical. A5 requires the killer's motive to be gated behind another secret,
+and the model gates exactly that and leaves everything else on the surface,
+every single time.
+**What that feels like to play.** A hundred and one questions. Everything the
+killer had came out in the first nine. The next twenty-eight to that person
+produced nothing: no refusals, no shortening, no change. Reported back as "too
+easy and not satisfying", which is what a case with no middle feels like from
+the inside. Six of seven secrets were reachable before the player had learned
+anything, so there was nothing left to earn.
+**A17:** at least four in ten secrets behind something else, and at least one
+chain two deep. Both numbers are invented and both are now in the list of
+invented numbers rather than in somebody's head. It fires on all five existing
+cases, twice each.
+**The prompt asks for the shape rather than the count.** A first thing anybody
+would let slip; a second the first gives you leverage to ask about; a third
+nobody says to a stranger who does not already half know it. With the failure
+quoted, because a prompt that says "add more gates" gets gates on a box, and
+what is wanted is an order of discovery.
+**And part of this was mine to undo.** D-088 fixed the opposite problem, two
+witnesses sitting on a secret for a hundred questions because it was filed in
+the wrong block, and it overcorrected: "if somebody asks you about that person
+this is what you have and you should say it, nobody needs to be asked ten
+times." Three of the four secret citations in the playtest came out of that
+block inside the opening minutes. It now asks for the person by name, or
+something that plainly touches them, and says outright not to empty it into an
+answer to "walk me through your evening".
+**A18, from the same conversation: a reason and the chance.** "Maybe not a
+motive but multiple possible motives." A16 counts who has a reason, which is
+half a theory; the other half is opportunity, and a suspect with a motive and a
+room full of witnesses is scenery rather than a suspect. A18 wants three people
+who have both, so the player can build three whole explanations and has to knock
+two down. Run against the five existing cases with every victim-facing secret
+treated as damning, four of the five still fail it: the reasons and the
+opportunities are on different people.
+
+**What is not the problem: the writing.** The report was "I actually enjoyed
+talking to the people". Ninety-seven answers, a median of four hundred and sixty
+characters, no repetition worth the name. Giving the cast more freedom would
+have made this worse, because the complaint is not that they say too little, it
+is that after question nine they have nothing left to say.
+**Status:** active
+
+## D-109 A wheel has five spokes and no rim
+**Date:** 2026-08-30
+**The measurement that explains the last playtest better than anything else.**
+Who are the secrets *about*?
+
+| case | about the victim | about a suspect | about nobody |
+|---|---|---|---|
+| the-ninth-name-on-the-licence | 2 | 4 | 2 |
+| the-long-shot-of-the-orchard-wall | 3 | 1 | 2 |
+| what-the-fog-owes-us | 4 | 1 | 2 |
+| what-the-fog-keeps | 3 | 1 | 3 |
+| **what-the-fog-owes** (the one played) | **4** | **0** | **3** |
+
+Not one secret in the played case was about another suspect. Every person was a
+spoke: question them, take their one thing, move on. Nothing anybody said gave
+the player a reason to go from this person to that one, so there was no route
+from the first suspect to the third and the case ended when the spokes ran out.
+**A4 caused this by getting what it asked for.** It wants the victim to be a hub
+and it measures the share of suspects with a secret about the victim, so the
+model draws a hub and nothing else. The tradition's houses are webs: the
+bookkeeper is protecting the son, the son is covering for the wife, she knows
+about the solicitor, and the middle of the book is the reader walking that
+chain.
+**A19:** at least three in ten secrets about another suspect, and no suspect
+connected to nobody. It passes the one case in five that is already a web and
+fails the four that are not.
+**And the thing that makes a web plausible is a shared past.** `OLD_BUSINESS` is
+dealt from the seed like everything else in `palette.py`: a death recorded as an
+accident, money quietly replaced, somebody who left suddenly and whose name is
+not used, a promise made at a funeral that only half of them kept. Most of the
+cast was there for it and nobody has raised it since, each for a different
+reason. It is the Sciascia move, and it is here for a structural reason rather
+than an atmospheric one: it is what gives them things to know about each other.
+It also changes the question the player is answering from "who wanted him dead
+this week" to "what happened in this place".
+**The victim should have been working on all of them tonight,** not carrying
+five old grievances. Five things happening this evening, each damaging a
+different person. A busy victim produces suspects without being asked to.
+**A standing invariant, written down so it stops coming back:** the player
+always arrives *after* the body has been found. They saw nothing, they witnessed
+nothing, everything they know they were told. A design that turns on something
+the questioner personally saw was proposed, liked as an idea, and rejected, and
+the prompt now forbids it rather than the rejection living in a conversation.
+**Status:** active
+
+## D-110 The ceiling the prompt grew into
+**Date:** 2026-08-30
+**Three drafts, no case, seventy four cents.** The first fully random run, with
+nothing pinned, failed all three attempts and reported schema errors: `title:
+Field required`, `characters: Field required`. Read literally that says the model
+ignored a forced tool call, which it does not do. Two of the three drafts had
+returned **exactly** 8000 output tokens, which is not a number a model chooses.
+They were cut off at `max_tokens` mid-object, and the JSON that arrived was a
+fragment. Every field after the truncation point is "required" because it was
+never written.
+**The ceiling was set when the prompt was half its current size.** Every
+structural rule added since D-104 (the second half, three who look guilty, the
+web, old business, the investigator, the floor plan) asks for more material in
+the output, not just more instruction in the input. Input went from about ten
+thousand tokens to thirteen; output went from comfortably under eight thousand
+to over it. Nothing announced the crossing. `max_tokens` is now 16000 and
+`TYPICAL_DRAFT` is re-measured at `(13000, 7500)`, which moves the printed
+estimate from about nineteen cents to about twenty five.
+**The diagnostic was worse than the bug.** The failure printed a list of schema
+errors, which sends you to the schema, the prompt and the parser, in that order,
+and none of them is the problem. `anthropic_drafter` now reads `stop_reason` and
+logs `mystery.truncated` before the validation errors, saying in words that the
+draft was cut off and that the fix is the ceiling rather than the errors below.
+The general shape: **when a boundary can fail in a way that produces valid-looking
+garbage, the boundary has to say so itself,** because everything downstream will
+confidently misattribute it.
+**And a second, unrelated thing the same run printed:** `SyntaxWarning: invalid
+escape sequence '\.'` at `web.py:689`. The page is a non-raw triple-quoted
+string, so a JavaScript regex `/\.$/` written literally is Python trying and
+failing to interpret `\.`. It happened to survive, because Python leaves an
+unrecognised escape alone, but it is one interpreter version from becoming an
+error. Escaped in the Python source so the emitted JavaScript is unchanged.
+**Two tests, both cheap, both about the class rather than the instance.** One
+compiles `PAGE` with `SyntaxWarning` promoted to an error, so any future escape
+written into the embedded page fails in CI rather than in his terminal. The
+other parses the source for `max_tokens` and asserts it is at least half again
+what a draft actually writes, so the next time the prompt grows the headroom is
+checked by something other than a failed run.
+**The other half of that run, which no code change fixes:** the setting passed
+was the literal string `"..."`. That is the placeholder from the command in
+`STATE.md`, pasted through. The model was asked to write a murder in nothing, and
+did, three times. The estimate line and the truncation warning both print before
+the spend; the setting did not.
+**So `complaint_about_setting` now refuses it, and both entry points echo the
+setting before they start.** The guard has exactly one job and no opinions about
+prose: strip the punctuation, and if no words are left, or fewer than six letters
+of them, refuse and exit 2. It is checked on the command lines rather than only
+on the function, because a command line is what failed. `--dry-run` and `--case`
+skip it, since neither spends anything. And the example commands in `STATE.md`
+now carry a real setting rather than the ellipsis, so the trap is gone from the
+place it was copied out of.
+**Status:** active
+
+## D-111 Four of the five suspects were me
+**Date:** 2026-08-30
+**Source: the played session for `the-sixth-name-on-the-board`, 132 questions,
+solved.** The best case so far, and it had four separate faults in it, three of
+which the player noticed and one of which he did not.
+
+**The one nobody noticed, and the worst.** The player was a structural surveyor
+sent by the fund's insurers. So, at various points, were Hilde, Margit, Sanne and
+Pim. Round 1, Hilde: "My part is separate from all that, I'm here for the
+insurers, taking damp readings, going through the 2019 flood repairs. Was meant
+to hand my report to Eefje at breakfast tomorrow." Round 19, Margit: "The fund
+brought me in specifically because of the flood." Round 33, Sanne, asked to
+reconcile it: "Both are true, and I don't see why you say it as though I've been
+caught out. I have been a resident of this house since January. The surveying is
+separate." Four of five, and the case was still enjoyed, which is its own
+warning.
+
+The cause is a seam, not a model failure. `Investigator.why_here` and `standing`
+are written **to the player, in the second person**: "You were to hand your
+report to Eefje at breakfast." `build_brief` dropped all three fields raw into a
+system prompt whose first line is "You are Hilde." Two "you"s, one prompt, and
+nothing anywhere saying they were different people. Given that prompt the model
+is not hallucinating; it is reading.
+
+**The fix is a fence and a subtraction.** A character now gets `role` only, in
+the third person, labelled "They are:", under a paragraph that says outright that
+this is somebody else and that if their work sounds like yours it is a
+coincidence. `why_here` and `standing` were never for a character anyway: they
+are the player's briefing, they answer *why would anybody talk to me*, and the
+generic compliance paragraph in the system prompt already says that to the cast.
+The player's own page keeps all three. **The general rule: text written in the
+second person for one audience cannot be handed unlabelled to another audience
+that is also addressed in the second person.** This is the ninth instance of the
+project's characteristic failure, and the first where the field reached the right
+place and was still wrong, because of what was around it.
+
+**Six names or nine.** Sanne, three times: "The six names go forward in the
+morning." Margit, round 23: "Six, nine, you're counting on your fingers like it
+matters. There are nine residents in this house, so nine names on any given
+list." Margit is the one who decides the list, and she contradicted the title of
+the case. Nobody was lying. The only shared block in a brief was the death
+itself, so every character re-derived the arithmetic of the house from their own
+role text, and five improvisers do not converge. `Mystery.common_ground` is now
+four to six sentences everybody is given verbatim, it is where every number about
+the house has to come from, and the brief carries a flat prohibition on inventing
+a figure that is not written down. **A world fact stated by one character is a
+lie waiting to happen unless every character has it.**
+
+**A lie with nothing under it.** His note: lies about where people were "should
+always have slight bit of motive at least, never be random". A11 has reported
+this since it was written, and reporting was the wrong strength. `covers` was
+optional, so a case with an unmotivated lie was valid. It is not merely a worse
+case, it is a trap in the middle of the board: catching somebody out is the
+strongest signal the game has, and the player spends ten questions on it and
+finds an empty room, learning that pressing does not pay. **V11 fails on any
+false claim with no `covers`, from the proposed phase,** so the model repairs it
+while it still costs a repair rather than a draft.
+
+**Everybody was Dutch again.** Four settings in a row, four Dutch casts, because
+"an old house", "fog" and "a ferry" all point the model at the North Sea and
+nothing was pulling the other way. Fixed where every other piece of material is
+already fixed: `WHERE`, sixteen regions in `palette.py`, dealt from the seed
+**alone** rather than from the seed and the setting, precisely because the
+setting phrase is what was doing the dragging. A region, not a nationality: it
+buys the names, the food, the weather, the money and the shape of the building. A
+setting that names a country outright overrides it.
+
+**And one thing that worked, recorded because it was designed and then confirmed
+by somebody who did not know it was there.** His note: "one character sort of
+gave out stuff from another (margit on sanne) only slightly prompted, cause she
+saw me talking to her a lot and i pressed a bit." That is `word_got_back` doing
+exactly what it was built to do, felt as character rather than as mechanism. The
+gossip tier is the first feature in this project a player has described from the
+outside in the terms it was designed in.
+**Status:** active
+
+## D-112 An object nobody was told about
+**Date:** 2026-08-30
+**From play: "it feels weird when you show them to somebody but then they act as
+they didn't see it."** It was weirder than that. `shown` was read in exactly two
+places, both inside the gate logic, so if the object did not open something for
+*that specific person* the fact that it had been produced never entered the
+prompt at all. Measured against his own session:
+
+| shown | to | prompt changed |
+|---|---|---|
+| the letters | sanne | **no** |
+| the condition report | pim | **no** |
+| the condition report | margit | yes |
+
+Two shows in three were invisible. The characters were not acting oblivious;
+they were oblivious. **The lesson is the one this project keeps relearning from
+the other side: a mechanic implemented only where it has a designed consequence
+is not implemented.** The gate was the reason the feature existed, so the gate
+was the only place it was wired, and the ordinary case — put a thing in front of
+somebody and watch them — was the case with no code behind it.
+
+**`Brief.on_the_table`, always rendered,** whether or not it unlocks anything.
+The character's relation to each object is computed from data that was already
+there rather than authored: it came from you, it is about you, you already knew
+and what is new is that its owner has let them have it, or you have not seen it
+before tonight. Four different scenes. Handing Sanne back her own letters is not
+the event that showing them to the woman who has been steaming them open is.
+
+**And the objects now do more than the gates the generator wrote.** Asked
+whether producing a thing should be able to move somebody the design did not
+anticipate, the answer was yes. The connection that matters is usually semantic
+and lives in prose: Pim's `breaks_when` is "told that Joost's inventory already
+dates the canvases by their stretcher stamps", and no id links that to the
+condition report. Only something reading both at once can judge it, so the brief
+now joins them and says why paper is different: a denial that works against a
+question does not work against a thing that is already true whether you agree or
+not. Pressure gained a line for the same reason. **The fence is two sentences and
+it is the whole safety of the idea:** an object never produces a fact about who
+was where that is not in FACTS, and never touches a secret written as theirs
+forever. The killer's motive is exactly as unreachable as it was.
+
+**The hand stopped telling the player what to do with it.** For about an hour
+every card was footed "SHOW MARGIT", and the one you were holding for its own
+owner read "GIVE IT BACK TO SANNE". His note: not too visually obvious what one
+needs to do, provenance and a good description are enough, "i could have figured
+it out tbh". He is right, and the two things are different in kind. **Where a
+thing came from is a clue. An imperative on every card is a walkthrough.** What
+stays is the object, "from Sanne", and whether this person has already seen it,
+which is memory rather than hint.
+
+`from` had been in the `held` payload since the day the hand existed and the
+page had never drawn it: the tenth instance of the signature failure, and the
+one that cost him the case. Without it there is no cue that showing a thing to
+somebody *other than its owner* is a move at all, and that is where the second
+half of a case lives. He never showed Sanne's letters to Margit, which was one
+click from two more secrets.
+
+**And the generator is now told to name an object as an object.** "A bone
+paperknife and a drawer of slit-and-regummed envelopes" is a thing you can see
+and does not say what it proves. "Proof that Margit read the post" would be the
+answer printed on the front of the question, and the decision about who to put
+it in front of is only interesting while the object is still a thing rather than
+a label.
+**Status:** active
+
+## D-113 The header said not a lock and the line said only if
+**Date:** 2026-08-30
+**"The way I need to relay the information seems pretty specific."** Correct, and
+the cause was two lines of prompt contradicting each other about six hundred
+characters apart.
+
+`HELD BACK` opens: "Each one names the thing that would open you fastest. Read
+that as a description of you and not as a lock: it is the easiest way in, not the
+only one." Then every fact under that header rendered as: **"You will say it only
+if: <breaks_when>."** The header is a general instruction about a section; the
+line sits on the fact itself and repeats for every secret. The specific one wins,
+as it always does, and the framing D-089 was written to establish was cancelled
+in the same prompt by the field it was written to reframe.
+
+**The second half is what the generator wrote into the field.** Some conditions
+are states — "when she is told the letters have already been found and read". But
+some are stage directions: *"Shown the letters and asked, without preamble, who
+resealed them."* Read as a lock, that is a password with a required gesture and a
+required tone, and a player who does exactly the right thing in slightly the
+wrong words gets nothing. What that reads as, from the chair, is not a difficult
+character. It is a broken game.
+
+**Both ends fixed.** The rendering is now "What gets past you: <condition>. That
+is the shape of it rather than a password, and somebody who arrives at the same
+place by another road has still arrived." And the generator is told to write a
+state of affairs rather than a script, with those two examples side by side as
+the right and wrong version of the same secret. **Never a required gesture, a
+required order of words, or a particular phrasing.**
+
+**The general lesson, which is worth more than the fix.** When a prompt frames a
+field in a section header and then renders the field with wording of its own, the
+rendering is the real instruction. The header is read once and the line is read
+once per item, and every gap between them resolves in favour of the line. Grep
+for the gap rather than trusting the paragraph: this is the second time a
+carefully written framing has been quietly undone by the sentence that actually
+carries the data.
+
+**Kept, on the report that it is working:** the web of secrets, the topology
+library and the different shapes of lie. He asked to keep the vibe going. Noted
+here so that a later decision that would flatten any of them has to argue with a
+playtest rather than with a preference.
+**Status:** active

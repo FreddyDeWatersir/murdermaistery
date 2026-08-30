@@ -179,8 +179,8 @@ class InMemorySessions:
 class FileSessions:
     """Sessions on disk, one JSON file each.
 
-    Two jobs. It is what `--remember` uses, so restarting the server on your own
-    machine does not throw away everybody's notebook mid-interrogation. And it
+    Two jobs. It is the default for local play (D-092), so restarting the
+    server does not throw away everybody's notebook mid-interrogation. And it
     is the second implementation of the boundary, which is the part that
     matters: a boundary with one implementation behind it is a guess about what
     the interface should be, and a boundary with two is an interface.

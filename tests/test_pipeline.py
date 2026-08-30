@@ -118,8 +118,11 @@ def test_the_case_can_be_won_and_can_be_lost() -> None:
 
     # Cold, she does not have it, and pressing her cannot produce it.
     game.ask("renske", "Why would anybody want him dead?")
-    early = game.accuse("wouter", "the_reckoning")
-    assert early["correct"] and not early["right_reason"]
+    early = game.accuse("wouter", "no idea")
+    assert early["correct"]
+    assert not any("going to the police" in x for x in early["surfaced"]), (
+        "gated, so it cannot have surfaced from a cold question"
+    )
 
     # Her own secret surfaces, which is what puts the printouts in your hand.
     game = Game(case, _cites_everything)
@@ -130,9 +133,12 @@ def test_the_case_can_be_won_and_can_be_lost() -> None:
     # Produce them, and the reason comes out.
     assert game.show("renske", "the_books")
     game.ask("renske", "Then why would anybody want him dead?")
-    won = game.accuse("wouter", "the_reckoning")
+    won = game.accuse("wouter", "Bram had traced the thefts and was going to the police")
 
-    assert won["correct"] and won["right_reason"]
+    assert won["correct"]
+    assert any("going to the police" in x for x in won["surfaced"]), (
+        "the object opened the gate, so the reason is now in the player's hands"
+    )
 
     lost = Game(case, _cites_everything).accuse("tomas", None)
     assert not lost["correct"]

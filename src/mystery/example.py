@@ -19,6 +19,19 @@ OPENING_NIGHT: dict[str, Any] = {
     "title": "Opening Night",
     "killer": "wouter",
     "victim": "bram",
+    "investigator": {
+        "role": "An assessor for the theatre's underwriters.",
+        "why_here": (
+            "Here since Monday about a claim on missing equipment, which is why "
+            "you were in the building tonight and why you already have half the "
+            "inventory in your bag."
+        ),
+        "standing": (
+            "You can recommend the policy is voided and you can do nothing else. "
+            "You cannot arrest anybody, you cannot hold anybody, and everyone in "
+            "this building knows it."
+        ),
+    },
     "murder": "murder",
     "characters": [
         {
@@ -101,12 +114,22 @@ OPENING_NIGHT: dict[str, Any] = {
             "look": "a man of fifty five in an expensive coat, dead since the interval",
         },
     ],
+    # A floor plan, not a list (D-093). Written once from each side; the solver
+    # opens every door both ways.
     "places": [
-        {"id": "green_room", "name": "Green Room"},
-        {"id": "dressing_corridor", "name": "Dressing Corridor"},
-        {"id": "prop_store", "name": "Prop Store"},
-        {"id": "lighting_box", "name": "Lighting Box"},
-        {"id": "stage_door", "name": "Stage Door"},
+        {
+            "id": "green_room",
+            "name": "Green Room",
+            "adjacent": ["dressing_corridor"],
+        },
+        {
+            "id": "dressing_corridor",
+            "name": "Dressing Corridor",
+            "adjacent": ["prop_store", "stage_door", "lighting_box"],
+        },
+        {"id": "prop_store", "name": "Prop Store", "adjacent": []},
+        {"id": "lighting_box", "name": "Lighting Box", "adjacent": []},
+        {"id": "stage_door", "name": "Stage Door", "adjacent": []},
     ],
     "slots": [
         {"id": "s0", "label": "19:40", "index": 0},
@@ -194,6 +217,7 @@ OPENING_NIGHT: dict[str, Any] = {
         },
         {
             "id": "the_sacking",
+            "damning": True,
             "people": ["tomas", "bram"],
             "place": "green_room",
             "slot": "s2",
@@ -211,6 +235,7 @@ OPENING_NIGHT: dict[str, Any] = {
         },
         {
             "id": "the_reckoning",
+            "damning": True,
             "holder": "wouter",
             "about": "bram",
             "summary": "Bram had traced the thefts and was going to the police after the run.",
@@ -237,6 +262,7 @@ OPENING_NIGHT: dict[str, Any] = {
         },
         {
             "id": "the_padding",
+            "damning": True,
             "holder": "tomas",
             "about": "bram",
             "summary": "Tomas has been inflating production costs and pocketing the difference.",
@@ -245,6 +271,7 @@ OPENING_NIGHT: dict[str, Any] = {
         },
         {
             "id": "the_replacement",
+            "damning": True,
             "holder": "ilse",
             "about": "bram",
             "summary": "Ilse overheard Bram say she was finished after this run.",

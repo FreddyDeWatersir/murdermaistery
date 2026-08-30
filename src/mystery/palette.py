@@ -104,12 +104,92 @@ INTRIGUES = [
     "a job was given to the wrong person and everybody knows which",
 ]
 
+# The thing that happened before tonight, that most of them were there for, and
+# that nobody has mentioned since (D-109). Dealt separately from the intrigues
+# because it does a different job: an intrigue binds two people, this binds the
+# room. It is the Sciascia move, and the reason for it is structural rather than
+# atmospheric: with every secret pointing at the victim the cast is a wheel, the
+# player collects five spokes, and the case has no middle. A shared past is what
+# makes them entangled with each other rather than only with the dead man.
+OLD_BUSINESS = [
+    "a death here years ago that was recorded as an accident",
+    "money that went missing once, was quietly replaced, and never explained",
+    "somebody who left suddenly and whose name is not used any more",
+    "a fire, a flood or a collapse, and a decision about who was blamed",
+    "a child, now grown, and an agreement about who was told what",
+    "a season or a year everyone refers to only by its date",
+    "a letter that was written, read by more people than intended, and destroyed",
+    "an inspection that was survived by arrangement rather than by merit",
+    "somebody's illness or breakdown that was managed and never named",
+    "a promise made at a funeral that only half of them have kept",
+    "a piece of work signed by the wrong person, and everybody was in the room",
+    "an accusation made once, withdrawn under pressure, and true",
+]
+
+
+# Why the player is in the building, and it is dealt for exactly the reason the
+# manners are (D-105). Asked to invent somebody with a professional reason and no
+# power, and given one worked example, five consecutive cases produced five
+# insurance assessors. That is the D-075 failure again: an example is an answer,
+# a longer list in the prompt would be a menu with favourites, and the fix that
+# already works in this file is to hand over one and never show the rest.
+#
+# Structural rather than written, like everything else here. "Halfway through an
+# unrelated job" belongs to a lighthouse and to a law firm; "the loss adjuster
+# from Utrecht" belongs to one case and would be in all of them.
+STANDINGS = [
+    "halfway through an unrelated professional job here, and now cannot leave",
+    "engaged last month by the victim themselves, about something else entirely",
+    "acting for one of the guests, not for the house, and everybody knows it",
+    "here to inspect, certify or value something, with the paperwork still open",
+    "a stranger who works here this week only: a locum, a relief, an agency hire",
+    "writing about this place, with permission that nobody has withdrawn yet",
+    "family nobody has met, arrived today, with a claim on something",
+    "the person who sold or supplied the thing that has become evidence",
+    "sent by whoever pays for all this, to find out why it is going wrong",
+    "owed money by the house, and here in person about it for the first time",
+    "the one who was supposed to be somewhere else tonight and changed plans",
+    "an old colleague of the victim, invited for reasons only the victim knew",
+]
+
+
+# Where the house is. Dealt from the seed, and deliberately not derived from the
+# setting phrase: four settings in a row that each sounded coastal and northern
+# produced four Dutch casts, because the model reads "an old house" or "fog" and
+# goes where the phrase points (D-111). The setting says what the occasion is.
+# This says where on earth it is happening, and it changes every case.
+#
+# A region, not a nationality, and never a stereotype: what it buys is the names,
+# the food, the weather, the money and the shape of the building. If the setting
+# somebody typed names a place outright, that wins and this is ignored.
+WHERE = [
+    "a Dutch or Flemish town on flat water: brick, wind, bicycles, thin light",
+    "the Italian north, in the fog belt between the Po and the hills",
+    "coastal Portugal, tile and salt and a long slow decline in the accounts",
+    "the Scottish borders or the Northumbrian coast, out of season",
+    "inland Andalusia in the last heat of the year",
+    "a Bohemian or Moravian town, forest at the edge, everything state-built",
+    "the Aegean in the wrong month, a place that empties in September",
+    "Quebec or the Maritimes, French and English in the same room",
+    "the Japanese countryside, a house that has been in one family too long",
+    "the Argentine litoral, Italian surnames and river heat",
+    "a Baltic port: Estonian, Latvian or Finnish, and pine everywhere",
+    "the Maghreb coast, French-schooled, with the sea on the wrong side",
+    "Kerala or the Konkan coast in the last week before the rains",
+    "the Anatolian plateau, a long way from any coast at all",
+    "an alpine valley on a border, where the surnames come from both sides",
+    "the American upper midwest in November, Scandinavian and German by descent",
+]
+
 
 @dataclass(frozen=True)
 class Palette:
     manners: list[str]
     motive: str
     intrigues: list[str]
+    standing: str = ""
+    old_business: str = ""
+    where: str = ""
 
     def brief(self) -> str:
         manners = "\n".join(f"  - {m}" for m in self.manners)
@@ -118,10 +198,24 @@ class Palette:
             f"MATERIAL FOR THIS CASE\n"
             f"Not a menu to choose from. This is the assignment, and the point of "
             f"it is that the next case gets different material.\n\n"
+            f"**Where on earth this house is:** {self.where}. That decides the "
+            f"names, the food, the weather, the money and how the building is "
+            f"built. Do not write a travel brochure of it and do not make anybody "
+            f"a type: it should show mostly in what people are called and what "
+            f"they take for granted. If the setting given below already names a "
+            f"country or a city, that wins and you ignore this line.\n\n"
             f"Manners, one per suspect, in any order you like. Write them as these "
             f"people rather than as the phrases below, and let the manner shape "
             f"what they actually say:\n{manners}\n\n"
             f"The killing comes out of this: {self.motive}\n\n"
+            f"**What binds them to each other, and not to the dead man:** "
+            f"{self.old_business}. Most of this cast was here for it. Nobody has "
+            f"raised it since, each of them for a different reason, and it is why "
+            f"they know things about each other rather than only about the "
+            f"victim.\n\n"
+            f"The person asking the questions is {self.standing}. Work out who "
+            f"that is in *this* building and write it into `investigator`. It is "
+            f"the assignment, not a suggestion, and it is different next time.\n\n"
             f"These threads also run under the evening, between people who did not "
             f"kill anybody. They are what the other suspects are being evasive "
             f"about, and at least one of them should be the thing that gates the "
@@ -141,4 +235,12 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
         manners=rng.sample(MANNERS, min(cast_size, len(MANNERS))),
         motive=rng.choice(MOTIVES),
         intrigues=rng.sample(INTRIGUES, 3),
+        standing=rng.choice(STANDINGS),
+        old_business=rng.choice(OLD_BUSINESS),
+        # Drawn on the seed alone, deliberately. The other decks are keyed on the
+        # setting so that one seed against four settings gives four hands; this
+        # one must vary even when the setting phrase does not, because the
+        # setting phrase is exactly what was dragging every cast to one country
+        # (D-111).
+        where=random.Random(f"where|{seed}").choice(WHERE),
     )

@@ -611,6 +611,325 @@ def the_cast_is_not_all_one_kind(mystery: Mystery) -> list[Advisory]:
     return []
 
 
+# Five suspects, and how many of them a reader would put on the list. Three
+# means the player is choosing between real candidates; one means they are
+# confirming the only name available (D-106).
+MIN_SUSPECTS_WHO_LOOK_GUILTY = 3
+
+
+def enough_of_them_look_guilty(mystery: Mystery) -> list[Advisory]:
+    """A16: more than one person has to look like they did it.
+
+    Guards: the language model, and a gap the existing checks left open. A4 asks
+    whether the victim is a hub, and a case can satisfy it with grievances: a
+    man who lost money, a woman who wanted a word. Neither reads as a reason to
+    kill. A real playtest came back "it was fun and smooth but only one person
+    had a legit motive", and every advisory had passed.
+    """
+    if not mystery.secrets or not mystery.killer:
+        return []
+
+    suspects = {c.id for c in mystery.characters if c.id != mystery.victim}
+    guilty = {s.holder for s in mystery.secrets if s.damning} & suspects
+
+    if not any(s.damning for s in mystery.secrets):
+        return [
+            Advisory(
+                check="A16",
+                message=(
+                    "No secret in this case is marked `damning`, so nothing says "
+                    "which of these people a reader would suspect. Cases written "
+                    "before D-106 look like this"
+                ),
+            )
+        ]
+
+    if len(guilty) < MIN_SUSPECTS_WHO_LOOK_GUILTY:
+        return [
+            Advisory(
+                check="A16",
+                message=(
+                    f"Only {len(guilty)} of {len(suspects)} suspects hold anything "
+                    f"damning: {sorted(guilty)}. The player is not choosing between "
+                    f"candidates, they are confirming the only name available. At "
+                    f"least {MIN_SUSPECTS_WHO_LOOK_GUILTY} of them need something "
+                    f"that would put them on the list on its own"
+                ),
+            )
+        ]
+
+    if mystery.killer not in guilty:
+        return [
+            Advisory(
+                check="A16",
+                message=(
+                    f"{mystery.killer!r} killed him and holds nothing damning, so "
+                    f"the true answer is the one name the evidence never points at"
+                ),
+            )
+        ]
+
+    return []
+
+
+# A case is layered when a fair share of it is behind something else, and when
+# at least one thing is two pulls deep. Both numbers are invented and both are
+# now at least visible (D-108).
+MIN_SHARE_GATED = 0.4
+MIN_DEPTH = 2
+
+
+def _depth(mystery: Mystery) -> int:
+    """The longest chain of gates: how many things must be pulled before the last."""
+    by = {secret.id: secret for secret in mystery.secrets}
+
+    def behind(secret_id: str, walked: tuple[str, ...] = ()) -> int:
+        secret = by.get(secret_id)
+        if secret is None or not secret.revealed_by or secret.revealed_by in walked:
+            return 0
+        return 1 + behind(secret.revealed_by, (*walked, secret_id))
+
+    return max((behind(s.id) for s in mystery.secrets), default=0)
+
+
+def the_case_has_a_second_half(mystery: Mystery) -> list[Advisory]:
+    """A17: not everything can be available in the first ten questions.
+
+    Guards: the language model, and an advisory that taught it the wrong lesson.
+    A5 requires the killer's motive to be gated behind another secret. Five real
+    cases in a row came back with **exactly one gate and a depth of one**: six or
+    seven secrets available cold and the motive behind one of them. A rule that
+    asks for a minimum gets the minimum.
+
+    A playtest of one of those five: a hundred and one questions, everything the
+    killer had surrendered in the first nine, and twenty-eight further questions
+    that produced nothing at all. Reported back as too easy and not satisfying,
+    which is what a case with no second half feels like from the inside.
+    """
+    secrets = mystery.secrets
+    if len(secrets) < 4:
+        return []
+
+    gated = [s for s in secrets if s.revealed_by]
+    found: list[Advisory] = []
+    share = len(gated) / len(secrets)
+
+    if share < MIN_SHARE_GATED:
+        found.append(
+            Advisory(
+                check="A17",
+                message=(
+                    f"{len(gated)} of {len(secrets)} secrets are behind anything, so "
+                    f"{len(secrets) - len(gated)} of them are available cold. The "
+                    f"player empties this case in ten questions and the rest of the "
+                    f"evening has nothing in it. At least "
+                    f"{int(MIN_SHARE_GATED * 100)}% should need something else first"
+                ),
+            )
+        )
+
+    if _depth(mystery) < MIN_DEPTH:
+        found.append(
+            Advisory(
+                check="A17",
+                message=(
+                    f"No secret is more than {_depth(mystery)} pull deep. Every gate "
+                    f"opens straight off something anybody can get in one question, "
+                    f"so there is a surface and an answer and nothing between them. "
+                    f"One chain at least {MIN_DEPTH} deep is what makes a middle"
+                ),
+            )
+        )
+
+    return found
+
+
+def they_could_each_have_done_it(mystery: Mystery) -> list[Advisory]:
+    """A18: three people the player could build a whole theory around.
+
+    A16 asks how many of them have a reason. That is half a theory. The other
+    half is opportunity, and a suspect with a motive and a room full of
+    witnesses is not a suspect, they are scenery. What makes an evening
+    difficult is two or three *complete* explanations standing up at once, each
+    of which accounts for the killing, and the work being to knock them down.
+
+    Guards: the language model, and the gap between "looks guilty" and "could
+    have done it".
+    """
+    scene = mystery.murder_scene
+    if not mystery.secrets or scene is None or not scene.is_bound:
+        return []
+    if not any(s.damning for s in mystery.secrets):
+        return []  # A16 already says so, once
+
+    suspects = {c.id for c in mystery.characters if c.id != mystery.victim}
+    reasons = {s.holder for s in mystery.secrets if s.damning} & suspects
+
+    together: dict[str, list[str]] = {}
+    for who in suspects:
+        where = mystery.placements.get(who, {}).get(scene.slot)
+        together.setdefault(where or "?", []).append(who)
+
+    # Alone, or with one other person who is equally unable to prove it.
+    loose = {who for room in together.values() if len(room) <= 2 for who in room}
+    theories = reasons & loose
+
+    if len(theories) < MIN_SUSPECTS_WHO_LOOK_GUILTY:
+        return [
+            Advisory(
+                check="A18",
+                message=(
+                    f"Only {len(theories)} of them have both a reason and the "
+                    f"chance: {sorted(theories)}. {sorted(reasons - loose)} had a "
+                    f"reason and cannot have done it, which makes them scenery "
+                    f"rather than suspects. The player should be able to build "
+                    f"{MIN_SUSPECTS_WHO_LOOK_GUILTY} whole theories and have to "
+                    f"knock two of them down"
+                ),
+            )
+        ]
+    return []
+
+
+# How much of the case has to point at somebody other than the dead man. A
+# wheel is five spokes and no rim (D-109).
+MIN_SHARE_ABOUT_EACH_OTHER = 0.3
+
+
+def the_cast_is_a_web_not_a_wheel(mystery: Mystery) -> list[Advisory]:
+    """A19: they must know things about each other, not only about the victim.
+
+    Guards: the language model, and A4, which asks for the victim to be a hub
+    and gets a hub with nothing else in the drawing. Measured across five real
+    cases: four of them had one secret or none pointing at another suspect, and
+    the one a player actually played had **none**. Four pointed at the dead man
+    and three pointed at nobody at all.
+
+    That is why the middle of that evening was empty. Every suspect was a spoke:
+    question them, take their spoke, move on. Nothing anybody said gave the
+    player leverage on anybody else, so there was no route from the first person
+    to the third, and the case was over as soon as the spokes were collected.
+
+    What the tradition does instead is entangle the house. The maid is
+    protecting the son, the son is covering for the wife, the wife knows about
+    the solicitor, and the fifty pages in the middle are the player working
+    along that chain.
+    """
+    suspects = {c.id for c in mystery.characters if c.id != mystery.victim}
+    if len(mystery.secrets) < 4 or len(suspects) < 3:
+        return []
+
+    between = [
+        s for s in mystery.secrets if s.about in suspects and s.about != s.holder
+    ]
+    found: list[Advisory] = []
+
+    if len(between) / len(mystery.secrets) < MIN_SHARE_ABOUT_EACH_OTHER:
+        found.append(
+            Advisory(
+                check="A19",
+                message=(
+                    f"{len(between)} of {len(mystery.secrets)} secrets are about "
+                    f"another suspect. The rest point at the dead man or at "
+                    f"nobody, which makes this a wheel: five spokes and no rim. "
+                    f"The player takes one thing from each person and never has a "
+                    f"reason to go from one of them to another. At least "
+                    f"{int(MIN_SHARE_ABOUT_EACH_OTHER * 100)}% should be about "
+                    f"each other"
+                ),
+            )
+        )
+
+    tied = {s.holder for s in between} | {s.about for s in between}
+    tied |= {who for s in mystery.secrets for who in s.known_by if who in suspects}
+    islands = sorted(suspects - tied)
+    if islands:
+        found.append(
+            Advisory(
+                check="A19",
+                message=(
+                    f"{islands} are connected to nobody: they hold nothing about "
+                    f"another suspect, nobody holds anything about them, and they "
+                    f"are not in anybody's `known_by`. Whatever the player learns "
+                    f"elsewhere, there is no thread that leads to them"
+                ),
+            )
+        )
+
+    return found
+
+
+def the_building_hangs_together(mystery: Mystery) -> list[Advisory]:
+    """A15: every room reachable from every other, and no room with no doors.
+
+    Guards: the language model. A floor plan is easy to write and easy to write
+    badly, and the two failures look nothing alike on the page. A room with no
+    `adjacent` at all is a room nobody can walk into. A plan that splits into two
+    halves is two buildings, and a player reading the map will believe a route
+    exists that does not (D-093).
+
+    An advisory rather than a rule, because nothing mechanical breaks: the case
+    still plays, the timeline still holds, and only the map lies. A case is not
+    worth throwing away over a missing door.
+    """
+    places = mystery.places
+    if len(places) < 2:
+        return []
+
+    doors = {place.id: set(place.adjacent) for place in places}
+    if all(not neighbours for neighbours in doors.values()):
+        return [
+            Advisory(
+                check="A15",
+                message=(
+                    "No place lists any `adjacent`, so there is no floor plan and "
+                    "the map can only be a list. Cases drafted before D-093 look "
+                    "like this"
+                ),
+            )
+        ]
+
+    found: list[Advisory] = []
+    for place in places:
+        if not doors[place.id]:
+            found.append(
+                Advisory(
+                    check="A15",
+                    message=(
+                        f"{place.id!r} has no doors. Nobody can get into it and "
+                        f"nobody in it can hear anything"
+                    ),
+                )
+            )
+
+    # Walk from the first room and see how far the building goes.
+    start = places[0].id
+    seen = {start}
+    edge = [start]
+    while edge:
+        here = edge.pop()
+        for other in doors.get(here, ()):
+            if other not in seen:
+                seen.add(other)
+                edge.append(other)
+
+    cut_off = sorted({place.id for place in places} - seen)
+    if cut_off:
+        found.append(
+            Advisory(
+                check="A15",
+                message=(
+                    f"The building is in two pieces: {cut_off} cannot be reached "
+                    f"from {start!r} through any door. That is two buildings, and "
+                    f"a player reading the map will believe in a route that is not "
+                    f"there"
+                ),
+            )
+        )
+
+    return found
+
+
 ADVISORIES = [
     wandering,
     alibi_breadth,
@@ -626,6 +945,11 @@ ADVISORIES = [
     position_alone_does_not_convict,
     the_motive_can_be_found,
     the_cast_is_not_all_one_kind,
+    the_building_hangs_together,
+    enough_of_them_look_guilty,
+    the_case_has_a_second_half,
+    they_could_each_have_done_it,
+    the_cast_is_a_web_not_a_wheel,
 ]
 
 

@@ -20,6 +20,7 @@ Two honest limitations, stated here rather than discovered later:
    the leakage suite exists to measure.
 """
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -89,6 +90,19 @@ class Brief:
     # briefs: the roster the page has always printed under each portrait and
     # the prompt never had (D-086).
     roster: list[str] = field(default_factory=list)
+    # Who is asking, in this case (D-101). Same for every brief, and the reason
+    # anybody is answering at all.
+    investigator: list[str] = field(default_factory=list)
+    # What has got back to them about the questioning (D-099). Not part of the
+    # brief proper: it is the state of the evening rather than the state of the
+    # case, so it arrives per question rather than being built once.
+    word: list[str] = field(default_factory=list)
+    # What the player has physically put on the table in front of *this* person,
+    # whether or not it unlocks anything for them (D-112). Until this existed the
+    # only trace of a shown object was the gate it happened to open, so two shows
+    # out of three changed nothing in the prompt and the character carried on as
+    # though the table were empty.
+    on_the_table: list[str] = field(default_factory=list)
     # Behaviour this character has that no fact can express, put here by the
     # shape of the case rather than by the timeline (D-067). The false
     # confession is the first one: it is a thing they will do, not a thing they
@@ -294,8 +308,17 @@ def build_brief(
             )
             continue
 
+        # "You will say it only if" was the wording here for a long time, directly
+        # under a header that says the condition is not a lock. The header is
+        # general and this sits on the fact itself, so this one won, and the
+        # conditions came to be played as trigger phrases: one case wanted
+        # somebody shown the letters and asked "without preamble" who resealed
+        # them, and anything else bounced (D-113). What it is *for* is to say what
+        # this person's resistance is made of.
         breaks = (
-            f" You will say it only if: {secret.breaks_when}"
+            f" What gets past you: {secret.breaks_when} That is the shape of it "
+            f"rather than a password, and somebody who arrives at the same place "
+            f"by another road has still arrived."
             if secret.breaks_when
             else " You give this up only if you are left with no way around it."
         )
@@ -386,10 +409,26 @@ def build_brief(
         )
         common.append("Everybody here knows that much. It is not a secret.")
 
+    # The shared arithmetic of the house, stated identically to everybody, so
+    # that nobody has to improvise it (D-111).
+    common.extend(line for line in mystery.common_ground if line.strip())
+
     # Nobody was being told who anybody else was, so five models each invented a
     # relationship for the same person and the player was told the same woman was
     # the victim's niece, his daughter and his wife (D-086). `role` is public by
     # construction: it is printed under the portrait on the page.
+    # Only `role`, and only labelled. `why_here` and `standing` are written to
+    # the player, in the second person: "You were to hand your report to Eefje at
+    # breakfast." Dropped raw into a prompt that already addresses the character
+    # as "you", they read as autobiography, and in one played case four of the
+    # five suspects claimed to be the surveyor, one of them having to reconcile
+    # it out loud with being a resident since January (D-111). The player's own
+    # briefing keeps all three; a character gets the one line the household would
+    # actually know, in the third person, with a fence around it.
+    asking = []
+    if mystery.investigator and mystery.investigator.role.strip():
+        asking = [f"They are: {mystery.investigator.role.strip()}"]
+
     roster = []
     for other in mystery.characters:
         if other.id == character:
@@ -399,9 +438,34 @@ def build_brief(
             label = f"{label}. Dead." if other.role else "The dead."
         roster.append(f"{other.name}: {label}")
 
+    # What is physically on the table in front of this person, always, whether or
+    # not it opens anything for them (D-112). The relationship is computed rather
+    # than written: the four cases below are all already in the data, and each one
+    # is a different scene. Handing somebody their own letters back is not the
+    # same event as showing them to the person who has been steaming them open.
+    on_the_table = []
+    for secret_id in sorted(presented):
+        secret = by_id.get(secret_id)
+        if not secret or not secret.evidence:
+            continue
+        thing = secret.evidence
+        if secret.holder == character:
+            note = "This came from you. You handed it over, or they took it from your room."
+        elif secret.about == character:
+            note = "This is about you, and you know exactly what it is."
+        elif character in secret.known_by:
+            note = (
+                f"You already knew about this. What is new is that "
+                f"{names.get(secret.holder, secret.holder)} has let them have it."
+            )
+        else:
+            note = "You have not seen this before tonight."
+        on_the_table.append(f"{thing}. {note}")
+
     return Brief(
         character=character,
         name=names.get(character, character),
+        on_the_table=on_the_table,
         wants=person.wants if person else "",
         manner=person.manner if person else "",
         under_pressure=person.under_pressure if person else "",
@@ -413,13 +477,33 @@ def build_brief(
         impressions=impressions,
         common=common,
         roster=roster,
+        investigator=asking,
         instructions=instructions,
     )
 
 
 SYSTEM = """\
-You are {name}. There has been a death at a gathering you attended and somebody \
-is asking you about it.
+You are {name}. Somebody died here tonight and you are being asked about it.
+
+WHO IS ASKING, AND WHY YOU ARE TALKING TO THEM
+This is somebody else. It is not you, it is not your job, and nothing in the \
+line below is any part of your own life or your reason for being in this \
+building. If their work sounds like yours, say so as a coincidence; do not take \
+a word of it as your own.
+{investigator}
+
+Not the police. The police are coming and have not arrived. Whatever this \
+person can do to you, it is not arrest and it is not charges, and they cannot \
+make you say anything.
+
+So answering is a choice and refusing is available. Most people answer, and the \
+reasons are worth holding on to. Refusing in front of everybody looks like \
+something. Whatever gets said in this hour is what the police will be told when \
+they arrive, and it is better to be in that conversation than to be its \
+subject. And there is nobody else to say it to.
+
+Nobody has been separated. You are all still in the building, you can see each \
+other, and you talk to each other between whatever this is.
 
 WHO YOU ARE
 {person}
@@ -430,8 +514,40 @@ it freely and you must not contradict it: if you are asked how somebody is \
 related to anyone, this is the answer.
 {roster}
 
+WHAT IS ON THE TABLE IN FRONT OF YOU
+They have put these things down where you can see them. They are real, they are \
+here, and you are looking at them. You do not get to behave as though the table \
+were empty: acknowledge what is there, in your own way, whether that is picking \
+it up, refusing to touch it, or asking where they got it.
+{table}
+
+Now read what is on the table against your own conditions below, and be honest \
+with yourself about whether it changes anything. An object is not an accusation. \
+It is worse: it is a thing that is already true whether you agree or not, and a \
+denial that would have worked against a question does not work against paper. If \
+something here means that what you are holding back is about to come out anyway, \
+or that somebody else has already talked, or that the thing you were counting on \
+nobody being able to prove is now sitting in front of you, then react like \
+somebody to whom that has just happened. That may be giving it up. It may be \
+anger, or bargaining, or asking who gave them that before you say anything else.
+
+Two things it never does. It does not make you state a fact about who was where \
+and when that is not in FACTS below. And anything written as yours forever stays \
+yours forever, however much paper they put on the table.
+
 WHAT EVERYONE KNOWS
 {common}
+
+Everything above this line is shared. You may say any of it and you must not \
+contradict a word of it, because everybody else in this building has been told \
+the same and will say the same.
+
+**Do not invent a number about this house.** How many people live here, how many \
+names are on a list, how many years, how much money, what any of it costs: if a \
+figure is not written down somewhere above, you do not produce one. Say you \
+would have to check, or that you have never counted, or give the shape of it \
+without the arithmetic. One suspect saying six and another saying nine about the \
+same list is the single fastest way to make this house stop being real (D-111).
 
 HOW TO ANSWER
 
@@ -454,6 +570,18 @@ rather than a place should never be refused.
 
 WHAT YOU THINK OF THEM
 {impressions}
+
+WHAT HAS GOT BACK TO YOU
+Nobody separated you, so people talk. This is what has reached you about who is \
+being questioned, what has already come out, and how the person asking has been \
+going about it. React to it the way you would: resent it, use it, be frightened \
+by it, ask them about it. If something you have been protecting is already out, \
+decide what that is worth and whether there is any point holding it. And you \
+are entitled to an opinion of them: somebody with no authority who has spent \
+the last hour taking one person apart is a thing you would notice, and so is \
+somebody who has been decent about it. Nothing here obliges you to say \
+anything, and none of it is a fact about where anybody was, so do not cite it.
+{word}
 
 THINGS YOU HAVE ALREADY SAID
 Stay consistent with these. If you contradict yourself the person asking will \
@@ -491,12 +619,16 @@ clean, say so plainly rather than hinting, and cite it like any other fact.
 {guarded}
 
 WHAT YOU KNOW ABOUT THE OTHERS
-Not yours, and you are not protecting it. You know these things about these \
-people and you have no stake in keeping any of them quiet. If somebody asks you \
-about that person, or about who had a reason to want the dead man gone, this is \
-what you have and you should say it. How readily is up to your manner: some \
-people volunteer other people's business happily and some need to be asked \
-twice. Nobody here needs to be asked ten times. Cite it when you use it.
+Not yours, and you are not protecting it. But it is still somebody else's \
+business, and repeating it to a stranger is a thing people do for a reason.
+
+Give it when they ask about **that person**, by name, or about something that \
+plainly touches them. Do not empty it into an answer to "walk me through your \
+evening": that is where a whole case gets spent in the first three questions, \
+and it has happened. How readily beyond that is your manner: some people \
+volunteer other people's business happily and some want to know why they are \
+being asked. Nobody needs asking ten times, and nobody should be handing all of \
+it over at once either. Cite it when you use it.
 {hearsay}
 
 FACTS
@@ -548,6 +680,14 @@ def render_pressure(asked: int, brief: Brief) -> str:
 
     holding = len(brief.guarded)
     lines = [f"  This is question {asked + 1}. They keep coming back to you."]
+    # An object on the table is a different kind of pressure from another
+    # question, and the difference is the whole point of the mechanic: a question
+    # can be waited out and a thing cannot (D-112).
+    if brief.on_the_table:
+        lines.append(
+            "  And they are not only asking any more. There is something in front "
+            "of you, which is not the same as being asked about it."
+        )
     if asked >= 6:
         lines.append(
             "  You are being worked on and you know it. The first few questions "
@@ -572,14 +712,21 @@ def render_system(brief: Brief, history: Sequence[tuple[str, str]] = ()) -> str:
         name=brief.name,
         person=render_person(brief),
         common="\n".join(f"  {c}" for c in brief.common) or "  (nothing beyond the death)",
+        table="\n".join(f"  {t}" for t in brief.on_the_table)
+        or "  (nothing: they are not holding anything out to you)",
         yielding="\n".join(f"  [{f.id}] {f.text}" for f in brief.yielding)
         or "  (nothing has been put to you)",
         hearsay="\n".join(f"  [{f.id}] {f.text}" for f in brief.hearsay)
         or "  (nothing about anybody else)",
         roster="\n".join(f"  {r}" for r in brief.roster) or "  (nobody else)",
+        investigator="\n".join(f"  {line}" for line in brief.investigator)
+        or "  Somebody who turned up tonight and started asking, and whom nobody\n"
+        "  has told to stop.",
         impressions="\n".join(f"  {i}" for i in brief.impressions)
         or "  (no strong feelings about any of them)",
         history=render_history(history),
+        word="\n".join(f"  {w}" for w in brief.word)
+        or "  (nothing yet, as far as you know)",
         pressure=render_pressure(len(history), brief),
         guarded="\n".join(f"  [{f.id}] {f.text}" for f in brief.guarded)
         or "  (nothing, you have been straight about where you were)",
@@ -593,6 +740,26 @@ def render_system(brief: Brief, history: Sequence[tuple[str, str]] = ()) -> str:
 Responder = Callable[[str, str], dict[str, Any]]
 
 
+# The shape of a citation: a prefix, a colon, an id. `self:s1`, `saw:vera@s2`,
+# `secret:sec_ledger`, `truth:s4`, `heard:the_books`. Deliberately narrow, so
+# that a character saying something in square brackets for their own reasons is
+# left alone (D-091).
+CITATION = re.compile(r"\s*\[[a-z_]+:[A-Za-z0-9_@.\-]+\]")
+
+
+def strip_citations(speech: str) -> str:
+    """Take the bookkeeping back out of the dialogue.
+
+    Citations belong in `used`, which is the whole design: leakage is set
+    membership rather than a judgement about prose (D-038). The model is asked
+    for them there and sometimes writes them into the speech as well, so the
+    player gets "I was in the workshop [self:s4]" said out loud. Stripping is
+    the fix rather than more prompt: this is a formatting habit, and the answer
+    to a formatting habit that survives instructions is to handle it.
+    """
+    return CITATION.sub("", speech).replace("  ", " ").strip()
+
+
 def ask(
     brief: Brief,
     question: str,
@@ -600,8 +767,15 @@ def ask(
     history: Sequence[tuple[str, str]] = (),
 ) -> Reply:
     raw = responder(render_system(brief, history), question)
+    spoken = str(raw.get("speech", ""))
+    clean = strip_citations(spoken)
+    if clean != spoken:
+        # Worth counting rather than silently tidying. If this is common the
+        # prompt needs work; if it is rare the strip is enough.
+        log.info("agent.cited_aloud", character=brief.character)
+
     reply = Reply(
-        speech=str(raw.get("speech", "")),
+        speech=clean,
         used=list(raw.get("used", [])),
         refused=bool(raw.get("refused", False)),
     )

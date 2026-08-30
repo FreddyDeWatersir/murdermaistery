@@ -7,11 +7,11 @@ probably have been missed. These tests pin down what it catches and, just as
 importantly, what it deliberately leaves to the player (D-019).
 """
 
+from test_agent import CASE, KNOW
+
 from mystery.agent import Reply, build_brief
 from mystery.interrogation import Assertion, Statement, Transcript, assertions_from
 from mystery.knowledge import derive
-
-from test_agent import CASE, KNOW
 
 
 def _said(round_: int, speaker: str, *assertions, refused: bool = False) -> Statement:
@@ -175,3 +175,130 @@ def test_a_retraction_reaches_the_notebook() -> None:
     assertions = assertions_from(brief, Reply(speech="All right. The study.", used=["truth:s1"]))
 
     assert assertions == [Assertion(subject="vera", slot="s1", place="study")]
+
+
+# What the house has been saying (D-099)
+
+
+def _house():
+    from mystery.models import Character, Mystery, Place, Secret, Slot
+
+    return Mystery(
+        title="the house",
+        killer="k",
+        victim="v",
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v", "a", "b")],
+        places=[Place(id="hall", name="Hall")],
+        slots=[Slot(id="s0", label="20:00", index=0)],
+        secrets=[
+            Secret(id="hers", holder="a", summary="A owes money.", known_by=["b"]),
+            Secret(id="his", holder="b", summary="B was dismissed.", known_by=[]),
+        ],
+    )
+
+
+def _cited(speaker: str, cited: list[str]) -> Statement:
+    return Statement(round=1, speaker=speaker, question="?", speech="", cited=cited)
+
+
+def test_everyone_hears_who_has_been_questioned() -> None:
+    """Visible from a corridor, and it gives nothing away."""
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    log.record(_cited("a", []))
+
+    heard = word_got_back(log, case, derive(case), "b")
+
+    assert any("questioning A" in line for line in heard)
+    assert not any("questioning B" in line for line in heard), "not your own questioning"
+
+
+def test_you_are_told_when_your_own_secret_is_already_out() -> None:
+    """The line half of every generated break condition is waiting for."""
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    log.record(_cited("b", ["heard:hers"]))
+
+    heard = word_got_back(log, case, derive(case), "a")
+
+    assert any("did not come from you" in line and "A owes money" in line for line in heard)
+
+
+def test_a_secret_you_do_not_know_never_reaches_you() -> None:
+    """The safety argument. Gossip can only carry what its listener already
+    holds, so nothing here can put a secret into a brief that did not have it,
+    and the closure that decides winnability is untouched."""
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    log.record(_cited("b", ["secret:his"]))
+
+    heard = word_got_back(log, case, derive(case), "a")
+
+    assert not any("dismissed" in line for line in heard), "A has never heard of it"
+
+
+def test_you_are_not_told_about_what_you_said_yourself() -> None:
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    log.record(_cited("a", ["secret:hers"]))
+
+    heard = word_got_back(log, case, derive(case), "a")
+
+    assert not any("owes money" in line for line in heard)
+
+
+def test_a_long_evening_does_not_arrive_as_a_wall_of_recap() -> None:
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    for _ in range(12):
+        log.record(_cited("b", ["heard:hers"]))
+
+    heard = word_got_back(log, case, derive(case), "a")
+
+    assert len(heard) <= 8, heard
+
+
+def test_the_house_notices_somebody_being_taken_apart() -> None:
+    """The player has no authority, so the only thing they spend is how they are
+    seen, and until now nobody saw them at all (D-100)."""
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    for _ in range(7):
+        log.record(_cited("a", []))
+
+    heard = word_got_back(log, case, derive(case), "b")
+
+    assert any("taken A apart" in line for line in heard)
+    assert any("not asked you anything" in line for line in heard)
+
+
+def test_a_short_evening_gets_no_character_reading() -> None:
+    """Two questions in, nobody has formed a view of anything."""
+    from mystery.interrogation import word_got_back
+    from mystery.knowledge import derive
+
+    case = _house()
+    log = Transcript()
+    log.record(_cited("a", []))
+
+    heard = word_got_back(log, case, derive(case), "b")
+
+    assert not any("apart" in line or "oversight" in line for line in heard)

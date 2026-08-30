@@ -486,3 +486,258 @@ def test_a14_says_so_when_nobody_states_a_gender() -> None:
     silent = _structured([MOTIVE, GATE])
 
     assert "A14" in {x.check for x in critique(silent)}
+
+
+# A16: more than one person has to look like they did it (D-106)
+
+
+def test_a_case_where_only_the_killer_looks_guilty_is_reported() -> None:
+    """From a playtest: "it was fun and smooth but only one person had a legit
+    motive". Every advisory passed, because A4 asks whether the victim is a hub
+    and a grievance satisfies it. A man who lost money is not a suspect."""
+    from mystery.critique import enough_of_them_look_guilty
+
+    thin = _structured(
+        [
+            Secret(id="why", holder="a", about="v", summary="ruin",
+                   is_motive=True, damning=True),
+            Secret(id="x", holder="b", about="v", summary="she was cross"),
+            Secret(id="y", holder="c", about="v", summary="he was owed"),
+        ]
+    )
+
+    said = [adv.message for adv in enough_of_them_look_guilty(thin)]
+
+    assert said and "1 of" in said[0]
+
+
+def test_three_plausible_suspects_passes() -> None:
+    from mystery.critique import enough_of_them_look_guilty
+
+    fair = _structured(
+        [
+            Secret(id="why", holder="a", about="v", summary="ruin",
+                   is_motive=True, damning=True),
+            Secret(id="x", holder="b", about="v", summary="threatened him", damning=True),
+            Secret(id="y", holder="c", about="v", summary="losing it all", damning=True),
+        ]
+    )
+
+    assert enough_of_them_look_guilty(fair) == []
+
+
+def test_a_killer_nothing_points_at_is_reported_too() -> None:
+    """The opposite failure: everybody else looks guilty and the true answer is
+    the one name the evidence never touches, which is not a twist.
+
+    Needs a wider cast than the other tests here, because three suspects have to
+    look guilty *besides* the killer.
+    """
+    from mystery.critique import enough_of_them_look_guilty
+
+    cast = ["k", "b", "c", "d", "v"]
+    unfair = Mystery(
+        title="Test",
+        killer="k",
+        victim="v",
+        characters=[Character(id=p, name=p.upper()) for p in cast],
+        places=PLACES,
+        slots=SLOTS,
+        placements={p: dict.fromkeys([s.id for s in SLOTS], "hall") for p in cast},
+        secrets=[
+            Secret(id="why", holder="k", about="v", summary="ruin", is_motive=True),
+            *(
+                Secret(id=x, holder=x, about="v", summary=x, damning=True)
+                for x in ("b", "c", "d")
+            ),
+        ],
+    )
+
+    said = [adv.message for adv in enough_of_them_look_guilty(unfair)]
+
+    assert said and "never points at" in said[0]
+
+
+def test_a_case_written_before_damning_existed_says_so_once() -> None:
+    from mystery.critique import enough_of_them_look_guilty
+
+    old = _structured([Secret(id="why", holder="a", about="v", summary="ruin",
+                              is_motive=True)])
+
+    said = [adv.message for adv in enough_of_them_look_guilty(old)]
+
+    assert len(said) == 1 and "before D-106" in said[0]
+
+
+# A17: the case must have a second half (D-108)
+
+
+def test_a_case_with_everything_on_the_surface_is_reported() -> None:
+    """Five real cases in a row came back with six or seven secrets available
+    cold and exactly one gate, because A5 asks for the motive to be gated and a
+    rule that asks for a minimum gets the minimum."""
+    from mystery.critique import the_case_has_a_second_half
+
+    flat = _structured(
+        [
+            Secret(id="why", holder="a", about="v", summary="ruin",
+                   is_motive=True, revealed_by="x"),
+            *(Secret(id=n, holder="b", about="v", summary=n) for n in ("x", "y", "z", "w")),
+        ]
+    )
+
+    said = [adv.message for adv in the_case_has_a_second_half(flat)]
+
+    assert any("available cold" in m for m in said)
+    assert any("1 pull deep" in m for m in said)
+
+
+def test_a_layered_case_passes() -> None:
+    """Four of eight gated, and one chain two deep: x opens y opens the motive."""
+    from mystery.critique import the_case_has_a_second_half
+
+    layered = _structured(
+        [
+            Secret(id="why", holder="a", about="v", summary="ruin",
+                   is_motive=True, revealed_by="y"),
+            Secret(id="y", holder="b", about="v", summary="y", revealed_by="x"),
+            Secret(id="p", holder="c", about="v", summary="p", revealed_by="x"),
+            Secret(id="q", holder="b", about="v", summary="q", revealed_by="x"),
+            *(Secret(id=n, holder="c", about="v", summary=n) for n in ("x", "r", "s", "t")),
+        ]
+    )
+
+    assert the_case_has_a_second_half(layered) == []
+
+
+def test_a_very_small_case_is_left_alone() -> None:
+    """Three secrets cannot be layered and complaining about it is noise."""
+    from mystery.critique import the_case_has_a_second_half
+
+    tiny = _structured([Secret(id="why", holder="a", about="v", summary="ruin",
+                               is_motive=True)])
+
+    assert the_case_has_a_second_half(tiny) == []
+
+
+# A18: a reason and the chance (D-108)
+
+
+def test_a_suspect_with_a_reason_and_witnesses_is_scenery() -> None:
+    """A16 asks how many have a reason. That is half a theory. A suspect with a
+    motive and a room full of people is not a suspect, they are scenery."""
+    from mystery.critique import they_could_each_have_done_it
+
+    crowd = ["a", "b", "c", "d", "v"]
+    crowded = Mystery(
+        title="Test",
+        killer="a",
+        victim="v",
+        characters=[Character(id=p, name=p.upper()) for p in crowd],
+        places=PLACES,
+        slots=SLOTS,
+        placements={
+            "a": {"s0": "hall", "s1": "hall", "s2": "study", "s3": "study"},
+            "v": {"s0": "hall", "s1": "hall", "s2": "study", "s3": "study"},
+            # b and c spend the murder hour in a crowded hall, so neither of
+            # them can have been in the study and neither is a whole theory.
+            **{p: dict.fromkeys([sl.id for sl in SLOTS], "hall") for p in ("b", "c", "d")},
+        },
+        constraints=[MURDER],
+        secrets=[
+            Secret(id="why", holder="a", about="v", summary="ruin",
+                   is_motive=True, damning=True),
+            Secret(id="x", holder="b", about="v", summary="x", damning=True),
+            Secret(id="y", holder="c", about="v", summary="y", damning=True),
+        ],
+    )
+
+    said = [adv.message for adv in they_could_each_have_done_it(crowded)]
+
+    assert said and "scenery" in said[0]
+
+
+def test_three_whole_theories_pass() -> None:
+    from mystery.critique import they_could_each_have_done_it
+
+    open_evening = _structured(
+        [
+            Secret(id="why", holder="a", about="v", summary="ruin",
+                   is_motive=True, damning=True),
+            Secret(id="x", holder="b", about="v", summary="x", damning=True),
+            Secret(id="y", holder="c", about="v", summary="y", damning=True),
+        ],
+        placements={
+            "a": {"s0": "hall", "s1": "hall", "s2": "study", "s3": "study"},
+            "v": {"s0": "hall", "s1": "hall", "s2": "study", "s3": "study"},
+            "b": {"s0": "hall", "s1": "hall", "s2": "cellar", "s3": "hall"},
+            "c": {"s0": "hall", "s1": "hall", "s2": "attic", "s3": "hall"},
+        },
+    )
+
+    assert they_could_each_have_done_it(open_evening) == []
+
+
+# A19: a web, not a wheel (D-109)
+
+
+def _web(secrets, **kw):
+    cast = ["a", "b", "c", "d", "v"]
+    return Mystery(
+        title="Test",
+        killer="a",
+        victim="v",
+        characters=[Character(id=p, name=p.upper()) for p in cast],
+        places=PLACES,
+        slots=SLOTS,
+        placements={p: dict.fromkeys([s.id for s in SLOTS], "hall") for p in cast},
+        secrets=secrets,
+        **kw,
+    )
+
+
+def test_a_cast_that_only_knows_about_the_victim_is_reported() -> None:
+    """Measured on five real cases: four had one such secret or none, and the
+    one somebody actually played had none at all. Five spokes and no rim."""
+    from mystery.critique import the_cast_is_a_web_not_a_wheel
+
+    wheel = _web(
+        [Secret(id=f"s{i}", holder=h, about="v", summary=h)
+         for i, h in enumerate(("a", "b", "c", "d"))]
+    )
+
+    said = [adv.message for adv in the_cast_is_a_web_not_a_wheel(wheel)]
+
+    assert any("wheel" in m for m in said)
+
+
+def test_a_suspect_nothing_leads_to_is_reported() -> None:
+    from mystery.critique import the_cast_is_a_web_not_a_wheel
+
+    islanded = _web(
+        [
+            Secret(id="s1", holder="a", about="b", summary="a knows about b"),
+            Secret(id="s2", holder="b", about="c", summary="b knows about c"),
+            Secret(id="s3", holder="c", about="a", summary="c knows about a"),
+            Secret(id="s4", holder="d", about="v", summary="d and the victim"),
+        ]
+    )
+
+    said = [adv.message for adv in the_cast_is_a_web_not_a_wheel(islanded)]
+
+    assert any("connected to nobody" in m and "'d'" in m for m in said)
+
+
+def test_a_web_passes() -> None:
+    from mystery.critique import the_cast_is_a_web_not_a_wheel
+
+    web = _web(
+        [
+            Secret(id="s1", holder="a", about="b", summary="x"),
+            Secret(id="s2", holder="b", about="c", summary="y"),
+            Secret(id="s3", holder="c", about="d", summary="z"),
+            Secret(id="s4", holder="d", about="v", summary="w", known_by=["a"]),
+        ]
+    )
+
+    assert the_cast_is_a_web_not_a_wheel(web) == []

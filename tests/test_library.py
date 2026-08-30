@@ -105,3 +105,28 @@ def test_art_already_on_disk_belongs_to_the_case(tmp_path) -> None:
 
 def test_no_art_is_not_an_error(tmp_path) -> None:
     assert _existing(tmp_path / "nothing-here") == {}
+
+
+def test_two_cases_saved_in_the_same_instant_still_have_an_order() -> None:
+    """The queue is ordered by stamp, so a tie is not an order (D-094).
+
+    Seconds tied first and milliseconds tied later on a faster machine, which is
+    the lesson: an ordering that depends on the clock being finer than the loop
+    above it is a race, and chasing resolution loses it twice.
+    """
+    from mystery.library import _stamp
+
+    stamps = [_stamp() for _ in range(50)]
+
+    assert stamps == sorted(stamps)
+    assert len(set(stamps)) == len(stamps)
+
+
+def test_a_stamp_is_still_a_real_instant() -> None:
+    """It sits in a filename that must sort lexicographically and in a field
+    that gets printed, so it cannot become an opaque counter."""
+    from datetime import datetime
+
+    from mystery.library import _stamp
+
+    assert datetime.fromisoformat(_stamp()).tzinfo is not None

@@ -6,11 +6,12 @@ whatever ends up behind the boundary has to pass exactly these.
 """
 
 from fastapi.testclient import TestClient
+
 from mystery.example import OPENING_NIGHT
 from mystery.models import Mystery
 from mystery.session import InMemorySessions, Session
-from mystery.web import Case, Game, build_app
 from mystery.solver import solve
+from mystery.web import Case, Game, build_app
 
 CASE = Case(solve(Mystery.model_validate(OPENING_NIGHT), seed=0), id="opening-night")
 
@@ -114,3 +115,44 @@ def test_a_game_still_works_and_means_together() -> None:
     TestClient(app).post("/ask", json={"who": "ilse", "text": "Where were you?"})
 
     assert game.transcript.rounds == 1
+
+
+def test_a_session_does_not_follow_you_into_a_different_case() -> None:
+    """From a real session record (D-107): `case_id` said one case and ninety
+    seven of its hundred and one questions belonged to another. Two cases served
+    on the same port in the same browser shared a cookie, and the transcript,
+    the notebook and the gossip all ran across both."""
+    from fastapi.testclient import TestClient
+
+    from mystery.session import InMemorySessions
+    from mystery.web import Case, build_app
+
+    store = InMemorySessions()
+    client = TestClient(build_app(CASE, _answers, sessions=store))
+    client.post("/ask", json={"who": "ilse", "text": "Where were you?"})
+    assert client.get("/state").json()["notebook"]["questions"] == 1
+
+    # Same browser, same cookie jar, a different case on the same port.
+    elsewhere = Case(CASE.mystery, id="the-ferry")
+    second = TestClient(build_app(elsewhere, _answers, sessions=store))
+    second.cookies = client.cookies
+    started_fresh = second.get("/state").json()["notebook"]["questions"]
+
+    assert started_fresh == 0, "the old evening followed the player into a new case"
+
+
+def test_the_same_case_still_remembers_you() -> None:
+    """The fix must not throw away a session on every page load."""
+    from fastapi.testclient import TestClient
+
+    from mystery.session import InMemorySessions
+    from mystery.web import build_app
+
+    store = InMemorySessions()
+    client = TestClient(build_app(CASE, _answers, sessions=store))
+    client.post("/ask", json={"who": "ilse", "text": "Where were you?"})
+
+    again = TestClient(build_app(CASE, _answers, sessions=store))
+    again.cookies = client.cookies
+
+    assert again.get("/state").json()["notebook"]["questions"] == 1

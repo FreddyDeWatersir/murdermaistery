@@ -41,12 +41,14 @@ class Solvability:
     sealed: list[str] = field(default_factory=list)
     motive: str | None = None
     motive_is_reachable: bool = False
-    alibi_is_breakable: bool = False
+    # Whether the killer's own account can be put in question. Named for what
+    # it means rather than for the one way it used to be achieved (D-104).
+    killer_is_assailable: bool = False
 
     @property
     def winnable(self) -> bool:
         """Both halves of the charge sheet: the person, and the reason."""
-        return self.alibi_is_breakable and self.motive_is_reachable
+        return self.killer_is_assailable and self.motive_is_reachable
 
 
 def _can_be_told(secret: Secret, mystery: Mystery) -> bool:
@@ -60,6 +62,44 @@ def _can_be_told(secret: Secret, mystery: Mystery) -> bool:
     if secret.known_by:
         return True
     return not (secret.holder == mystery.killer and secret.is_motive)
+
+
+def _assailable(mystery: Mystery, analysis) -> bool:
+    """Can the killer's account of the evening be put in question at all.
+
+    Two shapes of answer, and for a long time only the first existed (D-104).
+
+    **The killer lied.** Then the lie has to be breakable: somebody has to be
+    able to contradict it. This is the original definition and it is unchanged.
+
+    **The killer told the truth.** Two of the shapes are built on exactly that:
+    in a frame the killer has no need to lie because somebody else looks
+    guiltier, and in the wrong hour their alibi for the hour everybody believes
+    in is completely real. There is no lie to break, and requiring one made both
+    shapes impossible to generate: every draft came back valid, was thrown away
+    as unwinnable, and the money was spent. What is required instead is that
+    nothing *exonerates* them, which for an honest killer means being unwitnessed
+    at the moment it happened.
+
+    The route by which the player gets there is the topology's business, and each
+    of those shapes checks its own: the framed suspect must be clearable, the
+    real hour must be establishable. This function only refuses cases where the
+    killer is out of reach however well the player plays.
+    """
+    if mystery.false_claim is not None:
+        return not analysis.claim_holds and analysis.breakable
+
+    scene = mystery.murder_scene
+    if scene is None or not scene.is_bound or not mystery.killer:
+        return False
+
+    watched = [
+        c.id
+        for c in mystery.characters
+        if c.id not in (mystery.killer, mystery.victim)
+        and mystery.placements.get(c.id, {}).get(scene.slot) == scene.place
+    ]
+    return not watched
 
 
 def analyse(mystery: Mystery) -> Solvability:
@@ -92,7 +132,7 @@ def analyse(mystery: Mystery) -> Solvability:
         sealed=sorted(s.id for s in mystery.secrets if s.id not in known),
         motive=motive.id if motive else None,
         motive_is_reachable=bool(motive and motive.id in known),
-        alibi_is_breakable=not analysis.claim_holds and analysis.breakable,
+        killer_is_assailable=_assailable(mystery, analysis),
     )
 
 
@@ -190,7 +230,7 @@ def report(mystery: Mystery) -> str:
         f"Way in:      {', '.join(r.way_in) or 'NOTHING'}",
         f"Reachable:   {len(r.reachable)} of {len(mystery.secrets)} secrets",
         f"Sealed:      {', '.join(r.sealed) or 'none'}",
-        f"Alibi:       {'breakable' if r.alibi_is_breakable else 'NOT BREAKABLE'}",
+        f"The killer:  {'assailable' if r.killer_is_assailable else 'OUT OF REACH'}",
         f"Motive:      {'findable' if r.motive_is_reachable else 'NOT FINDABLE'}",
         f"Winnable:    {'yes' if r.winnable else 'NO'}",
     ]

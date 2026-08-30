@@ -38,6 +38,134 @@ from mystery.models import CharacterId, Mystery, PlaceId, SlotId
 log = structlog.get_logger()
 
 
+def _how_they_are_going_about_it(
+    spoken: dict[CharacterId, int], mystery: Mystery, listener: CharacterId
+) -> list[str]:
+    """What the house makes of the person asking (D-100).
+
+    The player has no authority here, so the only thing they can spend is how
+    they are seen, and until now nobody saw them at all. This is the cheapest
+    honest version: it reads how the questioning has actually been distributed,
+    which the transcript already knows, and hands each suspect an impression to
+    have about it. No score, no meter, nothing that unlocks. A person with an
+    opinion of you is a person, and their `manner` decides what they do with it.
+    """
+    total = sum(spoken.values())
+    if total < 3:
+        return []
+
+    names = {c.id: c.name for c in mystery.characters}
+    mine = spoken.get(listener, 0)
+    others = {who: n for who, n in spoken.items() if who != listener}
+    read: list[str] = []
+
+    hardest, most = max(others.items(), key=lambda kv: kv[1], default=(None, 0))
+    if hardest and most >= 6:
+        read.append(
+            f"They have taken {names.get(hardest, hardest)} apart. An hour of it, "
+            f"from somebody with no standing here at all. Make of that what you like."
+        )
+
+    untouched = [
+        c.name
+        for c in mystery.characters
+        if c.id not in (mystery.victim, listener) and not spoken.get(c.id)
+    ]
+    if untouched and total >= 6:
+        read.append(
+            f"They have not gone near {', '.join(untouched)} all evening, which is "
+            f"either an oversight or a decision."
+        )
+
+    if mine == 0 and total >= 6:
+        read.append(
+            "They have not asked you anything yet. Everybody else, and not you."
+        )
+    elif mine and mine * 3 <= total and total >= 9:
+        read.append("They keep leaving you and going back to the others.")
+
+    return read
+
+
+def word_got_back(
+    transcript: "Transcript",
+    mystery: Mystery,
+    knowledge: dict[CharacterId, Knowledge],
+    listener: CharacterId,
+) -> list[str]:
+    """What this person has heard about the questioning so far (D-099).
+
+    Five people in one building on one evening talk to each other. Until now
+    they did not, which made the house five separate booths and made half the
+    break conditions in every case unreachable: "she folds if told that someone
+    has already mentioned it" describes a world where people talk, and that
+    world did not exist.
+
+    Two tiers, and the split is the whole safety argument.
+
+    **Everyone hears who has been questioned**, and roughly how much. That is
+    visible from a corridor and gives away nothing.
+
+    **Only somebody who already knows a secret hears that it came up.** A person
+    cannot be told about a thing they do not know, so nothing here can put a
+    secret into a brief that did not already have it, and the closure that
+    decides whether a case is winnable is untouched. What changes is that a
+    person who has been protecting something can now learn it is already out,
+    which is precisely the condition half of them are written to break on.
+
+    No model call, no new state: this is a view over the transcript and the
+    knowledge that already exist.
+    """
+    names = {c.id: c.name for c in mystery.characters}
+    secrets = {s.id: s for s in mystery.secrets}
+    know = knowledge.get(listener)
+    mine = set(know.conceals) if know else set()
+    aware = set(know.aware_of) if know else set()
+
+    lines: list[str] = []
+    told: list[str] = []
+
+    spoken = transcript.spoken_to()
+    for who, count in sorted(spoken.items()):
+        if who == listener:
+            continue
+        lines.append(
+            f"They have been questioning {names.get(who, who)}"
+            + (" at length" if count >= 4 else "")
+            + "."
+        )
+
+    lines += _how_they_are_going_about_it(spoken, mystery, listener)
+
+    for secret_id, teller in sorted(transcript.who_gave_up().items()):
+        secret = secrets.get(secret_id)
+        if secret is None or teller == listener:
+            continue
+
+        if secret_id in mine:
+            # The one that matters: they are still guarding something the room
+            # already knows. Half the break conditions in every generated case
+            # describe exactly this moment.
+            told.append(
+                f"They already know this, and it did not come from you. "
+                f"{names.get(teller, teller)} told them. \u2014 {secret.summary}"
+            )
+        elif secret_id in aware:
+            teller_name = names.get(teller, teller)
+            told.append(
+                f"{teller_name} has admitted it to them. \u2014 {secret.summary}"
+                if teller == secret.holder
+                else f"{teller_name} has told them about "
+                f"{names.get(secret.holder, secret.holder)}. \u2014 {secret.summary}"
+            )
+
+    # A long evening would otherwise arrive as twenty lines of recap. What is
+    # yours comes first, because it is the part that changes what you do.
+    mine_first = [line for line in told if line.startswith("They already know")]
+    rest = [line for line in told if not line.startswith("They already know")]
+    return lines + mine_first + rest[: max(0, 6 - len(mine_first))]
+
+
 @dataclass(frozen=True)
 class Assertion:
     """A claim that somebody was somewhere at some time."""
@@ -157,6 +285,27 @@ class Transcript:
             for cited in statement.cited
             if cited.startswith(("secret:", "heard:"))
         }
+
+    def spoken_to(self) -> dict[CharacterId, int]:
+        """Who has been questioned, and how much. The cheapest thing that travels."""
+        counts: dict[CharacterId, int] = {}
+        for statement in self.statements:
+            counts[statement.speaker] = counts.get(statement.speaker, 0) + 1
+        return counts
+
+    def who_gave_up(self) -> dict[str, CharacterId]:
+        """Which secret came out of whose mouth, first time only.
+
+        The distinction the whole gossip layer turns on: a secret its holder
+        gave up themselves is a different event from a secret somebody else told
+        you about them, and only the second one is worth carrying back.
+        """
+        first: dict[str, CharacterId] = {}
+        for statement in self.statements:
+            for cited in statement.cited:
+                if cited.startswith(("secret:", "heard:")):
+                    first.setdefault(cited.split(":", 1)[1], statement.speaker)
+        return first
 
     def contradictions(self) -> list[Contradiction]:
         """Every pair of statements that cannot both be true.

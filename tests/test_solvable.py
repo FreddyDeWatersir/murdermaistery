@@ -54,7 +54,7 @@ def test_a_working_case_is_winnable() -> None:
 
     assert result.way_in == ["gate"]
     assert result.motive_is_reachable
-    assert result.alibi_is_breakable
+    assert result.killer_is_assailable
     assert result.winnable
 
 
@@ -121,7 +121,7 @@ def test_an_unbreakable_alibi_is_not_winnable_however_open_the_secrets_are() -> 
     result = analyse(empty_room)
 
     assert result.motive_is_reachable
-    assert not result.alibi_is_breakable
+    assert not result.killer_is_assailable
     assert not result.winnable
 
 
@@ -133,3 +133,38 @@ def test_the_report_is_readable() -> None:
     text = report(_case([GATE, MOTIVE.model_copy(update={"known_by": ["b"]})]))
 
     assert "Winnable:    yes" in text
+
+
+def test_a_killer_who_never_lied_is_still_reachable() -> None:
+    """Two shapes are built on the killer telling the truth (D-104).
+
+    In a frame they have no need to lie; in the wrong hour their alibi for the
+    hour everybody believes in is real. Requiring a breakable lie made both
+    impossible to generate: every draft came back valid, was discarded as
+    unwinnable, and the money was spent.
+    """
+    honest = _case(
+        [GATE, MOTIVE.model_copy(update={"known_by": ["b"]})], claims=()
+    )
+
+    report = analyse(honest)
+
+    assert report.killer_is_assailable
+    assert report.winnable
+
+
+def test_a_killer_seen_at_the_scene_by_somebody_is_not_the_shape_either() -> None:
+    """The honest branch still refuses a killer nothing can touch. If somebody
+    was standing there, the case is not about working out who did it."""
+    case = _case([GATE, MOTIVE.model_copy(update={"known_by": ["b"]})], claims=())
+    scene = case.murder_scene
+    watched = case.model_copy(
+        update={
+            "placements": {
+                **case.placements,
+                "a": {**case.placements.get("a", {}), scene.slot: scene.place},
+            }
+        }
+    )
+
+    assert not analyse(watched).killer_is_assailable

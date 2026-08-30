@@ -10,7 +10,7 @@ start, and it doubles as the instrument for choosing which model can play which
 role (D-004).
 """
 
-from mystery.agent import ask, build_brief, leaks, render_system
+from mystery.agent import ask, build_brief, leaks, render_system, strip_citations
 from mystery.knowledge import derive
 from mystery.models import Character, Constraint, FalseClaim, Mystery, Place, Secret, Slot
 
@@ -588,3 +588,283 @@ def test_a_held_back_condition_is_the_fastest_way_in_not_the_only_one() -> None:
 
     assert "easiest way in, not the only one" in rendered
     assert "you stay with the story you told" not in rendered
+
+
+def test_a_citation_spoken_aloud_is_taken_back_out() -> None:
+    """Citations belong in `used`, which is the entire leakage design (D-038).
+
+    A model asked for them there will sometimes write them into the speech as
+    well, and the player gets 'I was in the workshop [self:s4]' said out loud
+    (D-091).
+    """
+    said = strip_citations("I was in the workshop all evening [self:s4]. Ask Marijke.")
+
+    assert said == "I was in the workshop all evening. Ask Marijke."
+
+
+def test_every_shape_of_citation_is_recognised() -> None:
+    messy = (
+        "Fine. [secret:s_ledger] I took the pages. [truth:s4] I was in the office, "
+        "and [saw:priya@s2] I saw her by the door. [heard:the_books] She told me."
+    )
+
+    assert "[" not in strip_citations(messy)
+
+
+def test_a_character_may_still_use_square_brackets() -> None:
+    """The pattern is a prefix, a colon and an id. Anything else is dialogue."""
+    line = 'He wrote "[see attached]" and nothing else.'
+
+    assert strip_citations(line) == line
+
+
+def test_the_reply_the_player_sees_is_the_stripped_one() -> None:
+    def cites_aloud(system, question):
+        return {"speech": "The workshop [self:s1], all night.", "used": ["self:s1"]}
+
+    reply = ask(build_brief(CASE, KNOW, "vera"), "Where were you?", cites_aloud)
+
+    assert reply.speech == "The workshop, all night."
+    assert reply.used == ["self:s1"], "the citation still counts, it just stops showing"
+
+
+# --- the questioner is not one of them (D-111) -------------------------------
+
+
+def _house_with_investigator():
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Investigator
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    return mystery.model_copy(
+        update={
+            "investigator": Investigator(
+                role="A structural surveyor, engaged by the fund's insurers",
+                why_here=(
+                    "You were to hand your report to Eefje at breakfast; instead "
+                    "the police are ninety minutes away on the dijk road."
+                ),
+                standing="What you have is the insurers' authority over this building.",
+            )
+        }
+    )
+
+
+def test_the_questioners_own_briefing_never_reaches_a_suspect() -> None:
+    """From a played case: four of five suspects claimed to be the surveyor, and
+    one had to reconcile it aloud with being a resident since January. `why_here`
+    and `standing` are written to the player in the second person, and a prompt
+    that already says "you" to the character cannot hold both (D-111)."""
+    mystery = _house_with_investigator()
+    knowledge = derive(mystery)
+
+    for character in mystery.characters:
+        if character.id == mystery.victim:
+            continue
+        brief = build_brief(mystery, knowledge, character.id)
+        block = "\n".join(brief.investigator)
+
+        assert "your report" not in block.lower(), character.id
+        assert "what you have" not in block.lower(), character.id
+        assert "surveyor" in block, "they should still know what the visitor is"
+
+
+def test_a_suspect_is_told_the_visitor_is_not_them() -> None:
+    mystery = _house_with_investigator()
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, mystery.characters[0].id), [])
+
+    assert "It is not you" in system
+
+
+def test_the_shared_arithmetic_of_the_house_reaches_every_brief() -> None:
+    """Six names to one suspect and nine to another, about the same list, because
+    the only shared block was the death itself (D-111)."""
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT).model_copy(
+        update={"common_ground": ["There are nine residents, so nine names on the list."]}
+    )
+    knowledge = derive(mystery)
+
+    for character in mystery.characters:
+        if character.id == mystery.victim:
+            continue
+        brief = build_brief(mystery, knowledge, character.id)
+        assert any("nine names" in line for line in brief.common), character.id
+
+
+def test_nobody_is_allowed_to_invent_a_number_about_the_house() -> None:
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, mystery.characters[0].id), [])
+
+    assert "Do not invent a number" in system
+
+
+# --- what is actually on the table (D-112) -----------------------------------
+
+
+def _case_with_an_object():
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    secret = mystery.secrets[0]
+    return mystery.model_copy(
+        update={
+            "secrets": [
+                secret.model_copy(update={"evidence": "A bundle of letters in a ribbon"}),
+                *mystery.secrets[1:],
+            ]
+        }
+    ), secret
+
+
+def test_showing_a_thing_reaches_the_prompt_even_when_it_unlocks_nothing() -> None:
+    """Two of three shows in a played session changed the prompt by not one
+    character, because the only trace of an object was the gate it happened to
+    open. The player put something on the table and was answered by somebody
+    behaving as though the table were empty (D-112)."""
+    mystery, secret = _case_with_an_object()
+    knowledge = derive(mystery)
+    stranger = next(
+        c.id
+        for c in mystery.characters
+        if c.id not in (secret.holder, mystery.victim) and c.id not in secret.known_by
+    )
+
+    empty = render_system(build_brief(mystery, knowledge, stranger), [])
+    holding = render_system(build_brief(mystery, knowledge, stranger, shown={secret.id}), [])
+
+    assert empty != holding
+    assert "A bundle of letters in a ribbon" in holding
+    assert "A bundle of letters in a ribbon" not in empty
+
+
+def test_the_owner_of_a_thing_is_told_it_came_from_them() -> None:
+    """Handing somebody their own letters back is not the same scene as showing
+    them to the person who has been steaming them open."""
+    mystery, secret = _case_with_an_object()
+    knowledge = derive(mystery)
+
+    brief = build_brief(mystery, knowledge, secret.holder, shown={secret.id})
+
+    assert any("came from you" in line for line in brief.on_the_table)
+
+
+def test_somebody_who_already_knew_is_not_told_it_is_new_to_them() -> None:
+    mystery, secret = _case_with_an_object()
+    if not secret.known_by:
+        return
+    knowledge = derive(mystery)
+    who = secret.known_by[0]
+
+    brief = build_brief(mystery, knowledge, who, shown={secret.id})
+
+    assert any("already knew" in line for line in brief.on_the_table)
+    assert not any("not seen this before" in line for line in brief.on_the_table)
+
+
+def test_an_empty_table_says_so_rather_than_going_missing() -> None:
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, mystery.characters[0].id), [])
+
+    assert "not holding anything out to you" in system
+
+
+def test_a_secret_with_no_object_cannot_be_put_on_the_table() -> None:
+    """The hand is derived from secrets that have `evidence`. Anything else must
+    not become a nameless thing in front of somebody."""
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    bare = next(s for s in mystery.secrets if not s.evidence)
+    knowledge = derive(mystery)
+
+    brief = build_brief(mystery, knowledge, mystery.characters[0].id, shown={bare.id})
+
+    assert brief.on_the_table == []
+
+
+def test_an_object_is_weighed_against_what_they_are_holding_back() -> None:
+    """Showing a thing does more than open the gates the generator happened to
+    write. A person reacts to paper that makes their position untenable, and the
+    only thing that can judge that is the model reading both at once, so the
+    prompt has to join them (D-112)."""
+    mystery, secret = _case_with_an_object()
+    knowledge = derive(mystery)
+    stranger = next(
+        c.id
+        for c in mystery.characters
+        if c.id not in (secret.holder, mystery.victim) and c.id not in secret.known_by
+    )
+
+    system = render_system(build_brief(mystery, knowledge, stranger, shown={secret.id}), [])
+
+    assert "against your own conditions" in system
+    assert "does not work against paper" in system
+
+
+def test_an_object_never_buys_a_fact_or_the_thing_they_never_give_up() -> None:
+    """The fence. Reacting realistically must not become a way to move somebody
+    off the hard line about who was where, or off a secret written as theirs
+    forever."""
+    mystery, secret = _case_with_an_object()
+    knowledge = derive(mystery)
+
+    system = render_system(
+        build_brief(mystery, knowledge, mystery.killer, shown={secret.id}), []
+    )
+
+    assert "who was where and when that is not in FACTS" in system
+    assert "stays yours forever, however much paper" in system
+
+
+def test_a_thing_on_the_table_is_a_different_pressure_from_a_question() -> None:
+    from mystery.agent import render_pressure
+
+    mystery, secret = _case_with_an_object()
+    knowledge = derive(mystery)
+    who = mystery.characters[0].id
+
+    asked_only = render_pressure(5, build_brief(mystery, knowledge, who))
+    with_thing = render_pressure(5, build_brief(mystery, knowledge, who, shown={secret.id}))
+
+    assert "not the same as being asked" in with_thing
+    assert "not the same as being asked" not in asked_only
+
+
+def test_the_hand_does_not_tell_the_player_what_to_do_with_it() -> None:
+    """Provenance is a clue. "SHOW MARGIT" on every card was a walkthrough."""
+    from mystery.web import PAGE
+
+    assert "'show '+to" not in PAGE
+    assert "give it back to" not in PAGE
+    assert "from '+src" in PAGE, "where a thing came from is the part worth keeping"
+
+
+def test_a_breaking_point_is_not_worded_as_a_password() -> None:
+    """The block header said the condition is not a lock and the line under it
+    said "you will say it only if". The specific one won, and conditions written
+    as stage directions got played as trigger phrases (D-113)."""
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    who = next(
+        c.id
+        for c in mystery.characters
+        if c.id != mystery.victim
+        and any(s.breaks_when for s in mystery.secrets if s.holder == c.id)
+    )
+
+    system = render_system(build_brief(mystery, knowledge, who), [])
+
+    assert "only if:" not in system
+    assert "rather than a password" in system
+    assert "by another road has still arrived" in system

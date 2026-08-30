@@ -17,7 +17,9 @@ from mystery.generator import (
     GenerationFailed,
     GenerationRequest,
     anthropic_drafter,
+    complaint_about_setting,
     draft_estimate,
+    fresh_seed,
     generate,
 )
 from mystery.knowledge import analyse_alibi, derive
@@ -30,9 +32,9 @@ from mystery.models import Mystery
 from mystery.palette import draw as draw_palette
 from mystery.solvable import report
 from mystery.solver import solve
-from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
-from mystery.topology import LIBRARY, assess
+from mystery.topology import LIBRARY, assess, drawn
 from mystery.topology import catalogue as topologies
+from mystery.topology import get as get_topology
 from mystery.validator import validate
 
 CACHE = Path("var/mysteries")
@@ -73,6 +75,11 @@ def _fill(args, want: int) -> int:
     """
     from mystery.solvable import analyse
 
+    complaint = complaint_about_setting(args.setting)
+    if complaint:
+        print(f"  {complaint}")
+        return 2
+
     needed = shortfall(want=want)
     if not needed:
         print(f"  Buffer is full: {len(waiting())} cases waiting. Nothing to do.")
@@ -81,6 +88,7 @@ def _fill(args, want: int) -> int:
     # Said before it is spent (D-084). A draft is about nineteen cents at Opus
     # prices, and a retry costs the same again, so the honest number is a range.
     least = draft_estimate(drafts=needed)
+    print(f"  Setting: {args.setting}")
     print(f"  {len(waiting())} waiting, want {want}. Generating {needed}.")
     print(f"  About ${least:.2f}, up to ${least * ATTEMPTS:.2f} if every one needs retries.")
     made = 0
@@ -88,12 +96,15 @@ def _fill(args, want: int) -> int:
     for n in range(needed):
         for attempt in range(ATTEMPTS):
             seed = args.seed + n * ATTEMPTS + attempt
+            # A shape per case unless one was asked for. A buffer of four cases
+            # that are all the same shape is a buffer of one case (D-103).
+            shape = args.topology if getattr(args, "pinned", True) else drawn(seed)
             request = GenerationRequest(
                 setting=args.setting,
                 cast_size=args.cast,
                 slot_count=args.slots,
                 place_count=args.places,
-                topology=args.topology,
+                topology=shape,
                 seed=seed,
             )
             try:
@@ -116,8 +127,14 @@ def _fill(args, want: int) -> int:
                 print(f"  seed {seed}: valid but not winnable")
                 continue
 
-            kept = save_case(solved, args.setting, args.topology, seed)
-            print(f"  {kept.id}")
+            # The advisories the shape itself demands, said out loud, because a
+            # buffer filled unattended is a buffer nobody read (D-103).
+            complaints = [a.check for a in assess(solved, shape)]
+            if complaints:
+                print(f"  seed {seed}: advisories {sorted(set(complaints))}")
+
+            kept = save_case(solved, args.setting, shape, seed)
+            print(f"  {kept.id}   seed {seed}   {shape}")
             made += 1
             break
         else:
@@ -212,12 +229,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cast", type=int, default=5)
     parser.add_argument("--slots", type=int, default=5)
     parser.add_argument("--places", type=int, default=5)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="pin the case. Left off, a fresh one is drawn and printed, so an "
+        "evening you liked can be asked for again by number",
+    )
     parser.add_argument(
         "--topology",
-        default=DEFAULT_TOPOLOGY,
+        default=None,
         choices=sorted(LIBRARY),
-        help="the shape of the solution. Run --topologies to see what each one means",
+        help="the shape of the solution. Left off, one is drawn from the seed. "
+        "Run --topologies to see what each one means",
     )
     parser.add_argument(
         "--topologies", action="store_true", help="list the shapes a case can have and stop"
@@ -287,6 +311,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Drawn once here rather than defaulted to zero, so two runs of the same
+    # command are two different evenings (D-102). Printed, because a seed you
+    # cannot read is not reproducible.
+    if args.seed is None:
+        args.seed = fresh_seed()
+        print(f"  Seed {args.seed}. Pass --seed {args.seed} for this case again.")
+
+    # The shape comes from the seed too, so the number reproduces the whole
+    # case and not most of it (D-103). `pinned` is kept because --fill draws a
+    # shape per case rather than one for the batch, and it may only do that when
+    # the shape was left to us.
+    args.pinned = args.topology is not None
+    if args.topology is None:
+        args.topology = drawn(args.seed)
+        print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
+
     if args.topologies:
         print(topologies())
         return 0
@@ -320,6 +360,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n=== seed {seed} " + "=" * 52)
             print(draw_palette(seed, args.setting, args.topology, args.cast).brief())
         return 0
+
+    if not (args.case or args.dry_run):
+        complaint = complaint_about_setting(args.setting)
+        if complaint:
+            print(complaint)
+            return 2
 
     request = GenerationRequest(
         setting=args.setting,

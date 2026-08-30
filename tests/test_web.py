@@ -143,44 +143,37 @@ def test_hearing_a_secret_from_somebody_else_surfaces_it() -> None:
     assert [f["id"] for f in game.notebook()["found"]] == ["motive"]
 
 
-def test_the_right_person_for_the_right_reason() -> None:
+def test_the_reason_is_quoted_back_and_not_marked() -> None:
+    """D-092. Twice a player worked out exactly why the killer did it and named
+    a secret the code did not count, because the reason was spread across two of
+    them. Nothing grades it now: the charge is put beside the truth."""
     game = _played(CASE, [("clara", ["heard:motive"])])
 
-    verdict = game.accuse("otto", "motive")
-
-    assert verdict["correct"] and verdict["right_reason"]
-
-
-def test_the_right_person_for_no_reason_at_all() -> None:
-    """The ending the one-bit accusation could not express: you named him, and
-    you never found out why."""
-    game = _played(CASE, [])
-
-    verdict = game.accuse("otto", None)
+    verdict = game.accuse("otto", "  Magnus was going to tell everyone about Vera.  ")
 
     assert verdict["correct"]
-    assert not verdict["right_reason"]
-    assert verdict["offered"] is None
+    assert verdict["charged"] == "Magnus was going to tell everyone about Vera."
+    assert "threatened to expose" in verdict["motive"]
+    assert "right_reason" not in verdict, "nothing marks the reason any more"
 
 
-def test_a_motive_you_never_heard_does_not_count_even_if_it_is_right() -> None:
-    """Guessing the id is not knowing it."""
-    game = _played(CASE, [])
-
-    verdict = game.accuse("otto", "motive")
-
-    assert verdict["correct"]
-    assert not verdict["right_reason"], "you never got it out of anybody"
-
-
-def test_the_wrong_reason_is_reported_back() -> None:
-    game = _played(CASE, [("vera", ["secret:affair"]), ("clara", ["heard:motive"])])
-
-    verdict = game.accuse("otto", "affair")
+def test_charging_with_no_reason_at_all_is_allowed() -> None:
+    """You named him and you never worked out why. Still an ending."""
+    verdict = _played(CASE, []).accuse("otto", None)
 
     assert verdict["correct"]
-    assert not verdict["right_reason"]
-    assert "Vera and Otto" in verdict["offered"]
+    assert verdict["charged"] == ""
+
+
+def test_the_reveal_shows_what_came_out_as_well_as_what_did_not() -> None:
+    """Both halves, so the player can lay their own reasoning against the case."""
+    game = _played(CASE, [("clara", ["heard:motive"])])
+
+    verdict = game.accuse("otto", "he was being blackmailed")
+
+    assert any("threatened to expose" in x for x in verdict["surfaced"])
+    assert any("Vera and Otto" in m for m in verdict["missed"])
+    assert not set(verdict["surfaced"]) & set(verdict["missed"])
 
 
 def test_what_you_missed_is_measured_by_what_came_out() -> None:
@@ -347,3 +340,48 @@ def test_the_show_endpoint_refuses_evidence_the_player_never_found() -> None:
     assert sent.status_code == 200
     assert sent.json()["opened"] is False
     assert sent.json()["notebook"]["shown"] == {}
+
+
+def test_the_page_is_told_which_rooms_have_doors_between_them() -> None:
+    """The map can only draw a plan if the plan reaches the browser (D-093)."""
+    from mystery.models import Place
+
+    plan = CASE.model_copy(
+        update={
+            "places": [
+                Place(id="hall", name="Hall", adjacent=["study"]),
+                Place(id="study", name="Study", adjacent=["hall"]),
+            ]
+        }
+    )
+    sent = _app_for(Game(plan, responder_saying("", []))).get("/state").json()
+
+    doors = {p["id"]: p["adjacent"] for p in sent["places"]}
+    assert doors == {"hall": ["study"], "study": ["hall"]}
+
+
+def test_a_portrait_prompt_states_the_gender_rather_than_implying_it() -> None:
+    """`gender` was added (D-074) because the drawn faces were inferring it from
+    the `look` sentence and getting it wrong. The fix reached the drawings and
+    never reached the image prompt, so the same inference was still being made
+    by a different model (D-095)."""
+    from mystery.models import Character
+    from mystery.portraits import _prompt
+
+    her = Character(id="a", name="A", gender="woman", look="tall, in a grey coat")
+    asked = _prompt(CASE, her)
+
+    assert "a woman" in asked
+    assert asked.index("a woman") < asked.index("grey coat"), (
+        "the requirement comes before the description it used to be buried in"
+    )
+
+
+def test_a_portrait_prompt_survives_a_character_with_no_gender_written() -> None:
+    from mystery.models import Character
+    from mystery.portraits import _prompt
+
+    asked = _prompt(CASE, Character(id="a", name="A", look="in a grey coat"))
+
+    assert "The subject is a person." in asked
+    assert "a woman" not in asked and "a man" not in asked

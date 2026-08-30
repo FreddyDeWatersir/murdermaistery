@@ -21,7 +21,7 @@ import random
 
 import structlog
 
-from mystery.models import Constraint, FalseClaim, Mystery, PlaceId, SlotId
+from mystery.models import Constraint, FalseClaim, Mystery, PlaceId, SlotId, with_doors_both_ways
 
 Grid = dict[str, dict[str, PlaceId]]
 Cell = tuple[PlaceId, SlotId]
@@ -48,6 +48,13 @@ def solve(mystery: Mystery, seed: int = 0) -> Mystery:
     what will let a daily puzzle be stored as an integer rather than a document.
     """
     rng = random.Random(seed)
+
+    # Doors before anything else: the floor plan is not the solver's problem to
+    # reason about, but it is a shape every later reader assumes is consistent,
+    # and a one-sided door is a bookkeeping slip with one right answer (D-093).
+    mystery = mystery.model_copy(
+        update={"places": with_doors_both_ways(mystery.places)}
+    )
 
     if mystery.placements:
         return _repair(mystery, rng)

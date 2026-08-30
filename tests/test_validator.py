@@ -480,3 +480,184 @@ def test_the_drafting_loop_hears_about_collisions_not_only_the_solver() -> None:
     from mystery.validator import PROPOSED_RULES, check_exclusive_scenes_do_not_collide
 
     assert check_exclusive_scenes_do_not_collide in PROPOSED_RULES
+
+
+# The floor plan (D-093)
+
+
+def test_a_door_written_once_opens_from_both_sides() -> None:
+    """A model describes the corridor as opening onto the office and then
+    describes the office without mentioning the corridor. Same door."""
+    from mystery.models import Place, with_doors_both_ways
+
+    fixed = {
+        p.id: p.adjacent
+        for p in with_doors_both_ways(
+            [
+                Place(id="corridor", name="Corridor", adjacent=["office"]),
+                Place(id="office", name="Office"),
+            ]
+        )
+    }
+
+    assert fixed == {"corridor": ["office"], "office": ["corridor"]}
+
+
+def test_a_room_is_not_adjacent_to_itself_or_to_rooms_that_do_not_exist() -> None:
+    from mystery.models import Place, with_doors_both_ways
+
+    fixed = {
+        p.id: p.adjacent
+        for p in with_doors_both_ways(
+            [Place(id="hall", name="Hall", adjacent=["hall", "atlantis"])]
+        )
+    }
+
+    assert fixed == {"hall": []}
+
+
+def test_a15_reports_a_building_in_two_pieces() -> None:
+    """Nothing mechanical breaks, but a player reading the map believes in a
+    route that is not there, so it reports rather than failing."""
+    from mystery.critique import the_building_hangs_together
+    from mystery.models import Place
+
+    split = Mystery(
+        title="two buildings",
+        characters=CHARACTERS,
+        slots=SLOTS,
+        places=[
+            Place(id="a", name="A", adjacent=["b"]),
+            Place(id="b", name="B", adjacent=["a"]),
+            Place(id="c", name="C", adjacent=["d"]),
+            Place(id="d", name="D", adjacent=["c"]),
+        ],
+    )
+
+    said = [a.message for a in the_building_hangs_together(split)]
+
+    assert any("two pieces" in m for m in said)
+
+
+def test_a15_is_quiet_about_a_building_you_can_walk_around() -> None:
+    from mystery.critique import the_building_hangs_together
+    from mystery.models import Place
+
+    joined = Mystery(
+        title="one building",
+        characters=CHARACTERS,
+        slots=SLOTS,
+        places=[
+            Place(id="a", name="A", adjacent=["b"]),
+            Place(id="b", name="B", adjacent=["a", "c"]),
+            Place(id="c", name="C", adjacent=["b"]),
+        ],
+    )
+
+    assert the_building_hangs_together(joined) == []
+
+
+# V10: after the killing, nobody is in the room with the body
+
+
+def test_nobody_carries_on_working_next_to_the_body() -> None:
+    """From a playtest where the reader could not tell when the victim died.
+
+    The killer lied about the murder hour, and then the victim appeared in the
+    same room an hour later with two other people there, so the timeline read as
+    though he had been alive all along and the lie made no sense (D-094).
+    """
+    stepped_over = _murder_case(
+        {"s0": "hall", "s1": "vault", "s2": "vault"},
+    ).model_copy(
+        update={
+            "murder": "murder",
+            "placements": {
+                "k": {"s0": "hall", "s1": "vault", "s2": "vault"},
+                "b": {"s0": "hall", "s1": "hall", "s2": "vault"},
+                "v": {"s0": "hall", "s1": "vault", "s2": "vault"},
+            },
+        }
+    )
+
+    result = validate(stepped_over)
+
+    assert "V10" in result.failed_rules
+    message = next(v.message for v in result.violations if v.rule == "V10")
+    assert "'k'" in message and "'b'" in message
+    assert "'v'" not in message, "the victim is the body, not an intruder"
+
+
+def test_the_room_being_left_alone_afterwards_passes() -> None:
+    left_alone = _murder_case({"s0": "hall", "s1": "vault", "s2": "vault"})
+
+    assert "V10" not in validate(left_alone).failed_rules
+
+
+def test_v10_says_nothing_about_the_hours_before_the_murder() -> None:
+    """People are in that room all evening until it happens, which is the point."""
+    busy_first = _murder_case({"s0": "vault", "s1": "vault", "s2": "vault"}).model_copy(
+        update={
+            "placements": {
+                "k": {"s0": "vault", "s1": "vault", "s2": "hall"},
+                "b": {"s0": "vault", "s1": "hall", "s2": "hall"},
+                "v": {"s0": "vault", "s1": "vault", "s2": "vault"},
+            }
+        }
+    )
+
+    assert "V10" not in validate(busy_first).failed_rules
+
+
+# --- V11: a lie with nothing under it (D-111) --------------------------------
+
+
+def test_a_lie_that_covers_nothing_fails() -> None:
+    """Reported by A11 since it existed, which was the wrong strength. The player
+    cannot tell an unmotivated lie from a live one, so they spend the game's
+    strongest signal on an empty room."""
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Mystery
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    loose = mystery.model_copy(
+        update={
+            "false_claims": [
+                claim.model_copy(update={"covers": ""}) for claim in mystery.false_claims
+            ]
+        }
+    )
+
+    result = validate(loose)
+
+    assert not result.ok
+    assert any(v.rule == "V11" for v in result.violations)
+
+
+def test_it_fails_in_the_proposed_phase_too() -> None:
+    """Cheaper to tell the model while it can still repair than after a draft."""
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Mystery
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    loose = mystery.model_copy(
+        update={
+            "false_claims": [
+                claim.model_copy(update={"covers": "  "}) for claim in mystery.false_claims
+            ]
+        }
+    )
+
+    assert any(v.rule == "V11" for v in validate(loose, phase="proposed").violations)
+
+
+def test_the_shipped_case_gives_every_lie_a_reason() -> None:
+    """The example is the drafter's proposal, so it goes through the solver
+    first: what is being asserted is V11, not V1."""
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Mystery
+    from mystery.solver import solve
+
+    result = validate(solve(Mystery.model_validate(OPENING_NIGHT), seed=0))
+
+    assert not [v for v in result.violations if v.rule == "V11"]

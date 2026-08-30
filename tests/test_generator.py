@@ -9,6 +9,7 @@ stop being run.
 import json
 
 import pytest
+
 from mystery.generator import GenerationFailed, GenerationRequest, generate
 from mystery.models import Mystery
 from mystery.validator import validate
@@ -271,3 +272,74 @@ def test_the_casting_note_reaches_the_prompt() -> None:
 
     assert "the killer is a woman" in _user_prompt(GenerationRequest(setting="x", seed=1))
     assert "the killer is a man" in _user_prompt(GenerationRequest(setting="x", seed=0))
+
+
+def test_the_page_javascript_has_no_broken_escapes() -> None:
+    """The embedded page is a Python string holding JavaScript, so a regex like
+    /\\.$/ is an invalid Python escape: a warning today, an error on a later
+    Python (D-110). Cheap to assert, and it caught a real one."""
+    import warnings
+
+    from mystery.web import PAGE
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SyntaxWarning)
+        compile(f"x = {PAGE!r}", "<page>", "exec")
+
+    assert "/\\.$/" in PAGE, "the JavaScript should still contain the regex itself"
+
+
+def test_the_draft_ceiling_is_above_what_a_draft_actually_writes() -> None:
+    """Two drafts in one run came back at exactly the old ceiling, truncated,
+    and arrived as schema errors (D-110). The estimate is measured from the same
+    logs, so the two numbers have to stay in step."""
+    import inspect
+
+    import mystery.generator as gen
+    from mystery.generator import TYPICAL_DRAFT
+
+    source = inspect.getsource(gen.anthropic_drafter)
+    ceiling = int(source.split("max_tokens=")[1].split(",")[0])
+
+    assert ceiling > TYPICAL_DRAFT[1] * 1.5, (
+        f"a typical draft writes {TYPICAL_DRAFT[1]} tokens and the ceiling is "
+        f"{ceiling}: too little headroom, and truncation reads as a schema error"
+    )
+
+
+def test_the_placeholder_setting_is_refused_before_anything_is_spent() -> None:
+    """The literal `"..."` from the example commands, pasted through, bought
+    three Opus drafts of a murder set in nothing (D-110)."""
+    from mystery.generator import complaint_about_setting
+
+    for placeholder in ["...", "…", "", "   ", '"..."', "-"]:
+        complaint = complaint_about_setting(placeholder)
+        assert complaint, f"{placeholder!r} was accepted as a setting"
+        assert "placeholder" in complaint or "too thin" in complaint
+
+
+def test_a_real_setting_is_not_refused() -> None:
+    """The guard has one job and must not develop opinions about prose."""
+    from mystery.generator import complaint_about_setting
+
+    for setting in [
+        "a private view at a small art gallery",
+        "the last night of a residency at an old house",
+        "a robotics lab, the night before the demo",
+        "a ferry, fogbound",
+    ]:
+        assert complaint_about_setting(setting) is None, setting
+
+
+def test_the_setting_guard_stops_the_web_entry_point() -> None:
+    """A unit on the function is not the thing that failed. What failed was a
+    command line, so the assertion is about the command line."""
+    from mystery.web import main
+
+    assert main(["--setting", "..."]) == 2
+
+
+def test_the_setting_guard_stops_the_cli_entry_point() -> None:
+    from mystery.cli import main
+
+    assert main(["--setting", "..."]) == 2

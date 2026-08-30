@@ -178,3 +178,58 @@ def test_two_compromised_witnesses_is_the_shape_we_want() -> None:
 
     assert analysis.breakable
     assert not analysis.settled_by_one
+
+
+def test_nobody_reports_seeing_the_victim_after_he_is_dead() -> None:
+    """"At 23:00 you saw Gerhard in the high bay" is a sentence about a living
+    man, and it was being handed to witnesses about a corpse (D-094)."""
+    from mystery.models import Character, Constraint, Mystery, Place, Slot
+
+    case = Mystery(
+        title="after",
+        killer="k",
+        victim="v",
+        murder="murder",
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v", "w")],
+        places=[Place(id="vault", name="Vault")],
+        slots=[Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)],
+        placements={
+            "k": {"s0": "vault", "s1": "vault", "s2": "vault"},
+            "w": {"s0": "vault", "s1": "vault", "s2": "vault"},
+            "v": {"s0": "vault", "s1": "vault", "s2": "vault"},
+        },
+        constraints=[
+            Constraint(id="murder", people=["k", "v"], place="vault", slot="s1"),
+        ],
+    )
+
+    saw_victim = [
+        o.slot for o in derive(case)["w"].observations if o.subject == "v"
+    ]
+
+    assert saw_victim == ["s0"], "alive at s0, killed at s1, a body after that"
+
+
+def test_the_murder_hour_comes_from_the_one_definition() -> None:
+    """`murder_slot_index` used to take the first constraint holding both the
+    killer and the victim, which is the D-071 bug surviving in the one module
+    that fix did not reach. The prompt asks for an earlier confrontation between
+    exactly those two, so it was usually the argument, not the killing."""
+    from mystery.knowledge import murder_slot_index
+    from mystery.models import Character, Constraint, Mystery, Place, Slot
+
+    case = Mystery(
+        title="two scenes",
+        killer="k",
+        victim="v",
+        murder="killing",
+        characters=[Character(id=c, name=c.upper()) for c in ("k", "v")],
+        places=[Place(id="office", name="Office"), Place(id="vault", name="Vault")],
+        slots=[Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(3)],
+        constraints=[
+            Constraint(id="row", people=["k", "v"], place="office", slot="s0"),
+            Constraint(id="killing", people=["k", "v"], place="vault", slot="s2"),
+        ],
+    )
+
+    assert murder_slot_index(case) == 2, "the killing, not the argument before it"

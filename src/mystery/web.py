@@ -16,6 +16,7 @@ oversight to fix later.
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import structlog
@@ -31,9 +32,16 @@ from mystery.generator import (
     GenerationFailed,
     GenerationRequest,
     anthropic_drafter,
+    complaint_about_setting,
+    fresh_seed,
     generate,
 )
-from mystery.interrogation import Statement, Transcript, assertions_from
+from mystery.interrogation import (
+    Statement,
+    Transcript,
+    assertions_from,
+    word_got_back,
+)
 from mystery.knowledge import analyse_alibi, derive
 from mystery.library import ART, catalogue
 from mystery.library import load as load_case
@@ -43,7 +51,8 @@ from mystery.session import FileSessions, InMemorySessions, Session, Sessions
 from mystery.solvable import analyse, report
 from mystery.solver import solve
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
-from mystery.topology import LIBRARY, assess
+from mystery.topology import LIBRARY, assess, drawn
+from mystery.topology import get as get_topology
 from mystery.validator import validate
 
 log = structlog.get_logger()
@@ -210,9 +219,22 @@ class Game:
         already in memory and costs nothing worth caching.
         """
         seen = self.session.seen_by(who)
-        if not seen:
-            return self.case.briefs[who]
-        return build_brief(self.mystery, self.knowledge, who, shown=seen)
+        brief = (
+            self.case.briefs[who]
+            if not seen
+            else build_brief(self.mystery, self.knowledge, who, shown=seen)
+        )
+
+        # What the house has been saying (D-099). Recomputed per question rather
+        # than stored, because it is a view over the transcript and a stored
+        # copy is a second version of the same fact waiting to disagree with the
+        # first. The shared brief on the `Case` is never mutated: this is one
+        # player's evening, and two people playing the same case are not in the
+        # same building.
+        heard = word_got_back(self.transcript, self.mystery, self.knowledge, who)
+        if not heard:
+            return brief
+        return replace(brief, word=heard)
 
     def show(self, who: str, secret_id: str) -> bool:
         """Put an object in front of somebody. Returns whether they have now seen it.
@@ -405,17 +427,19 @@ class Game:
                 f"{places.get(truth, truth)}."
             )
 
-        # You may only offer a motive you actually surfaced. Guessing from a
-        # list of everything would make the list itself the answer.
+        # The reason is written in the player's own words and is not marked
+        # (D-092). Twice now a player worked out exactly why the killer did it
+        # and picked a secret the code did not consider the motive, because the
+        # reason was spread across two of them. Grading it needed the case to
+        # agree with itself about which sentence counted, which it does not, and
+        # a player who understands the case does not need to be told they are
+        # wrong on a technicality. So the charge is quoted back beside the truth
+        # and the player marks their own.
         found = self.transcript.surfaced_secrets()
-        right_reason = motive is not None and why == motive.id and why in found
 
         return {
             "correct": who == m.killer,
-            "right_reason": right_reason,
-            "offered": next(
-                (s.summary for s in m.secrets if s.id == why and s.id in found), None
-            ),
+            "charged": (why or "").strip(),
             "accused": names.get(who, who),
             "killer": names.get(m.killer, m.killer),
             "questions": self.transcript.rounds,
@@ -438,6 +462,11 @@ class Game:
                     "killer": c.character == m.killer,
                 }
                 for c in m.false_claims
+            ],
+            # Everything that did come out, next to everything that did not, so
+            # the player can see their own reasoning laid against the case.
+            "surfaced": [
+                s.summary for s in m.secrets if s.id in found
             ],
             "witnesses": [
                 {
@@ -516,6 +545,18 @@ def build_app(
             return Game(the_case, answer, session=shared)
 
         found = store.get(request.cookies.get(COOKIE, ""))
+
+        # A session belongs to a case, and the cookie did not know that (D-107).
+        # Serve a dry run, poke at it, stop the server, serve a different case on
+        # the same port in the same browser, and the old session came back: one
+        # transcript holding two casts, a notebook mixing two evenings, and
+        # gossip carrying news about people who are not in the building. Found in
+        # a real session record whose `case_id` named a case four of its hundred
+        # and one questions belonged to.
+        if found is not None and found.case_id and found.case_id != the_case.id:
+            log.info("session.new_case", was=found.case_id, now=the_case.id)
+            found = None
+
         if found is None:
             found = store.create(the_case.id)
             response.set_cookie(
@@ -558,11 +599,23 @@ def build_app(
                 {
                     "id": p.id,
                     "name": p.name,
+                    "adjacent": list(p.adjacent),
                     "scene": f"/scene/{p.id}.png" if p.id in game.scenery else None,
                 }
                 for p in game.mystery.places
             ],
             "scene": "/scene/setting.png" if "setting" in game.scenery else None,
+            # Who the player is tonight (D-101). Shown, because a position the
+            # player cannot see is not a position they can play.
+            "you": (
+                {
+                    "role": game.mystery.investigator.role,
+                    "why": game.mystery.investigator.why_here,
+                    "standing": game.mystery.investigator.standing,
+                }
+                if game.mystery.investigator
+                else None
+            ),
             "discovery": (
                 {
                     "finder": game.names.get(
@@ -669,7 +722,7 @@ opacity:0;transition:opacity .5s}
 #where.on{opacity:.85}
 th.rm.clickable{cursor:pointer;color:var(--cool)}
 th.rm.clickable:hover{text-decoration:underline}
-#scene.shifted{right:min(430px,92vw)}
+#scene.shifted{right:min(var(--book),92vw)}
 @media(max-width:760px){#scene.shifted{right:0}}
 #top{padding:14px 20px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
 z-index:3}
@@ -732,11 +785,32 @@ button.accuse{border-color:var(--bad);color:var(--bad)}
 .badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
 text-transform:uppercase;color:var(--muted)}
 .badge b{color:var(--bad)}
-#book{position:fixed;top:0;right:0;bottom:0;width:min(430px,92vw);background:var(--panel);
+/* The panel's width is a variable so it can be dragged (D-098). Everything that
+   has to agree with it reads the same property: the panel, and the shift that
+   keeps the portrait out from under it. */
+#book{position:fixed;top:0;right:0;bottom:0;width:min(var(--book),92vw);
+background:var(--panel);
 border-left:1px solid var(--rule);padding:22px;overflow-y:auto;z-index:5;
 transform:translateX(100%);transition:transform .32s cubic-bezier(.2,.8,.2,1);
 user-select:text}
 #book.open{transform:none}
+/* The handle is a sibling of the panel rather than a child of it, and fixed
+   rather than absolute. Inside a panel that scrolls, an absolutely positioned
+   full-height handle covers only the first screenful and then scrolls away with
+   the content, so it is missing exactly when the notebook is long enough that
+   you want to widen it. It is wider than it looks, so it can be grabbed without
+   aiming. */
+#grip{position:fixed;top:0;bottom:0;width:11px;z-index:6;cursor:col-resize;
+right:min(var(--book),92vw);margin-right:-5px;display:none}
+#book.open~#grip,#grip.on{display:block}
+#grip::after{content:"";position:absolute;left:4px;top:0;bottom:0;width:3px;
+background:transparent;transition:background .15s}
+#grip:hover::after,body.dragging #grip::after{background:var(--cool)}
+@media(max-width:760px){#grip{display:none!important}}
+/* While dragging, nothing animates and nothing selects: a panel easing towards
+   the pointer feels broken, and a drag that highlights the transcript is worse. */
+body.dragging{user-select:none;cursor:col-resize}
+body.dragging #book,body.dragging #scene{transition:none}
 #tabs{display:flex;gap:6px;margin-bottom:18px;position:sticky;top:-22px;
 background:var(--panel);padding:6px 0 10px;z-index:2}
 #tabs button{flex:1;font-size:12px;padding:6px 4px}
@@ -781,12 +855,68 @@ margin-bottom:7px;font-size:12.5px;line-height:1.5;border-radius:0 4px 4px 0}
 .item.soft{border-left-color:var(--warm)}
 .item.cold{border-left-color:var(--rule);color:var(--muted)}
 .empty{color:var(--muted);font-size:12.5px}
+/* A centred flex child taller than the viewport loses its top edge, and the
+   overflow cannot be scrolled back to because it is above the start of the box.
+   `margin:auto` on the card centres it when it fits and leaves it alone when it
+   does not, which is the fix rather than `align-items:center` (D-106). */
 #reveal{position:fixed;inset:0;background:rgba(5,6,9,.95);display:none;
-align-items:center;justify-content:center;padding:24px;overflow-y:auto;z-index:9;
-user-select:text}
+justify-content:center;padding:24px;overflow-y:auto;z-index:9;user-select:text}
+#reveal.on{display:flex}
 #reveal .card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;
-padding:32px;max-width:640px;width:100%}
+padding:32px;max-width:640px;width:100%;margin:auto;height:max-content}
 #reveal h3{font-family:var(--display);font-size:34px;margin:0 0 4px;font-weight:400}
+#find{width:100%;background:var(--panel2);border:1px solid var(--rule);
+border-radius:6px;padding:7px 11px;color:var(--ink);font-family:var(--body);
+font-size:13px;margin-bottom:12px}
+#find:focus{outline:none;border-color:var(--cool)}
+#mynotes{width:100%;background:var(--panel2);border:1px solid var(--rule);
+border-radius:6px;padding:10px 12px;color:var(--ink);font-family:var(--body);
+font-size:13.5px;line-height:1.55;resize:vertical}
+#mynotes:focus{outline:none;border-color:var(--cool)}
+.qa .whose{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;
+text-transform:uppercase;color:var(--cool);margin-bottom:4px}
+mark{background:var(--warm);color:#12151d;border-radius:2px;padding:0 2px}
+#reveal textarea{width:100%;background:var(--panel2);border:1px solid var(--rule);
+border-radius:7px;padding:11px 13px;color:var(--ink);font-family:var(--body);
+font-size:15px;line-height:1.55;resize:vertical}
+#reveal textarea:focus{outline:none;border-color:var(--cool)}
+#hours{display:flex;gap:5px;flex-wrap:wrap;margin:2px 0 6px}
+.hr{background:none;border:1px solid var(--rule);border-radius:6px;
+padding:4px 9px;color:var(--muted);font-family:var(--mono);font-size:10.5px;
+letter-spacing:.04em;cursor:pointer}
+.hr:hover{color:var(--ink);border-color:var(--muted)}
+.hr.on{color:var(--ink);border-color:var(--cool);background:var(--panel2)}
+#plan{width:100%;height:auto;display:block;margin:0;overflow:visible}
+#plan .door{stroke:var(--rule);stroke-width:1.5}
+#plan .room rect{fill:var(--panel2);stroke:var(--rule);stroke-width:1.5}
+#plan .room.seen rect{stroke:var(--muted)}
+#plan text.rn{fill:var(--muted);font-family:var(--mono);font-size:10px;
+letter-spacing:.07em;text-anchor:middle}
+#plan .room.seen text.rn{fill:var(--ink)}
+#plan text.who{fill:var(--ink);font-family:var(--mono);font-size:11px;
+font-weight:600;text-anchor:middle}
+#plan text.who.bad{fill:var(--bad)}
+#plan text.who.dead{fill:var(--muted)}
+#plan text.who.firm{text-decoration:underline}
+#plan .room.clickable{cursor:pointer}
+#plan .room.clickable:hover rect{stroke:var(--warm)}
+#plan .room.clickable:hover text.rn{fill:var(--warm)}
+/* Reading size (D-091). Three steps, applied to the text people actually read
+   for an hour rather than to the whole page: scaling everything moves the
+   portrait and the layout, and the complaint was legibility, not zoom. */
+body.big #said{font-size:19px;line-height:1.66}
+body.big #said .asked{font-size:15px}
+body.big .item{font-size:14px;line-height:1.55}
+body.big table{font-size:13.5px}
+body.big #book{font-size:14px}
+body.big .thing{font-size:13.5px}
+body.huge #said{font-size:22px;line-height:1.7}
+body.huge #said .asked{font-size:17px}
+body.huge .item{font-size:16px;line-height:1.6}
+body.huge table{font-size:15px}
+body.huge #book{font-size:16px}
+body.huge .thing{font-size:15px}
+body.huge #nameplate{font-size:26px}
 /* The things you are carrying (D-087). A row under the cast, empty until the
    first secret with an object behind it surfaces, so it costs nothing visually
    in a case that has none. */
@@ -801,6 +931,7 @@ font-family:var(--display);display:flex;align-items:center;gap:8px}
 .thing:hover{border-color:var(--cool)}
 .thing small{font-family:var(--mono);font-size:9px;letter-spacing:.1em;
 text-transform:uppercase;color:var(--muted)}
+.thing i{font-style:italic;font-size:11px;color:var(--muted);white-space:nowrap}
 .thing.spent{opacity:.45;cursor:default}
 .thing.spent:hover{border-color:var(--rule)}
 </style></head><body>
@@ -812,6 +943,7 @@ text-transform:uppercase;color:var(--muted)}
     <div class="right">
       <span class="badge" id="count">0 questions</span>
       <button id="mute">Sound on</button>
+      <button id="textsize" title="Reading size">A</button>
       <button id="booktoggle">Notebook</button>
     </div>
   </div>
@@ -828,7 +960,8 @@ text-transform:uppercase;color:var(--muted)}
     <div id="hand" class="gone"></div>
   </div>
 </div>
-<aside id="book"></aside>
+<div id="grip" title="Drag to resize, double-click to reset"></div>
+<aside id="book"><div id="pages"></div></aside>
 <div id="reveal"><div class="card" id="revealcard"></div></div>
 <script>
 const $=i=>document.getElementById(i);
@@ -948,6 +1081,55 @@ function say(text,pitch,asked){
 document.addEventListener('click',e=>{
   if(typer&&!e.target.closest('#bar,#book,#reveal,#top'))$('said')._finish()});
 
+/* ---------- the panel edge (D-098) -------------------------------------- */
+/* Width lives in a CSS variable, so the drag sets one property and the panel and
+   the shifted stage both follow it. Clamped: too narrow and the timeline
+   columns wrap into nonsense, too wide and there is no game left to look at. */
+const BOOK_MIN=300,BOOK_MAX=880,BOOK_DEFAULT=430;
+
+function setBook(px){
+  const wide=Math.max(BOOK_MIN,Math.min(BOOK_MAX,Math.round(px)));
+  document.documentElement.style.setProperty('--book',wide+'px');
+  return wide;
+}
+
+function grabEdge(){
+  const grip=$('grip');
+  if(!grip)return;
+  grip.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add('dragging');
+    const move=ev=>setBook(window.innerWidth-ev.clientX);
+    const done=ev=>{
+      grip.releasePointerCapture(e.pointerId);
+      document.body.classList.remove('dragging');
+      grip.removeEventListener('pointermove',move);
+      grip.removeEventListener('pointerup',done);
+      grip.removeEventListener('pointercancel',done);
+      save('book',String(setBook(window.innerWidth-ev.clientX)));
+    };
+    grip.addEventListener('pointermove',move);
+    grip.addEventListener('pointerup',done);
+    grip.addEventListener('pointercancel',done);
+  });
+  // The way back, for anyone who has dragged it somewhere silly.
+  grip.addEventListener('dblclick',()=>save('book',String(setBook(BOOK_DEFAULT))));
+}
+
+/* ---------- reading size ----------------------------------------------- */
+/* Served from the player's own machine, so browser storage is the right place
+   for a per-person preference: it survives a restart and belongs to nobody
+   else. Wrapped, because a browser set to refuse site data throws here. */
+let size='',atSlot='',find='';
+function save(k,v){try{localStorage.setItem('mystery.'+k,v)}catch(e){}}
+function load(k){try{return localStorage.getItem('mystery.'+k)}catch(e){return null}}
+function setSize(v){
+  size=(v==='big'||v==='huge')?v:'';
+  document.body.className=size;
+  $('textsize').textContent={'':'A',big:'A+',huge:'A++'}[size];
+}
+
 /* ---------- app -------------------------------------------------------- */
 function pitchOf(id){return 300+(hash(id)%9)*46}
 function nameOf(id){const s=S.suspects.find(x=>x.id===id);return s?s.name:id}
@@ -1003,9 +1185,20 @@ function paintHand(){
   const to=who?nameOf(who).split(' ')[0]:'';
   row.innerHTML='<span class="label">You have</span>'+held.map(h=>{
     const done=seen.has(h.id);
+    // Where it came from was in this payload from the day the hand existed and
+    // was never drawn (D-112). Without it there is no cue that showing a thing
+    // to somebody other than its owner is the move, which is where the whole
+    // second half of a case lives.
+    const src=h.from?esc(h.from.split(' ')[0]):'';
+    // Where it came from, and nothing else. An earlier version footed every card
+    // with "SHOW MARGIT" and "GIVE IT BACK TO SANNE", which is the game telling
+    // you the move rather than letting you find it: the provenance is the clue,
+    // the imperative was a walkthrough (D-112). What stays is the one thing that
+    // is memory rather than hint: whether this person has already seen it.
     return '<button class="thing'+(done?' spent':'')+'" data-ev="'+esc(h.id)+'"'+
-      (done?' disabled':'')+'>'+esc(h.name)+
-      '<small>'+(done?to+' has seen it':'show '+to)+'</small></button>';
+      (done?' disabled':'')+' title="'+esc(h.name)+(src?' — from '+src:'')+'">'+
+      esc(h.name)+(src?'<i>from '+src+'</i>':'')+
+      (done?'<small>'+to+' has seen it</small>':'')+'</button>';
   }).join('');
   row.querySelectorAll('.thing:not(.spent)').forEach(b=>{
     b.onclick=()=>produce(b.dataset.ev);
@@ -1049,10 +1242,17 @@ async function boot(){
   S=await (await fetch('/state')).json();
   if(S.scene)showScene(S.scene,'');
   $('title').textContent=S.title;
-  $('sub').textContent=S.discovery
+  /* The player's own position, stated (D-100). It is load-bearing now: the
+     suspects talk to each other and watch how you go about this, and none of
+     that makes sense if you might be the police. */
+  $('sub').textContent=(S.discovery
     ? S.victim+' is dead. '+S.discovery.finder+' found the body in the '+
       S.discovery.place+'.'
-    : S.victim+' is dead. One of them did it.';
+    : S.victim+' is dead. One of them did it.')+
+    (S.you&&S.you.role?' You are '+S.you.role.replace(/^(An?|The) /i,
+      m=>m.toLowerCase()).replace(/\\.$/,'')+'.':'')+
+    ' The police are on their way and you are not the police.';
+
   const cast=$('cast');
   S.suspects.forEach(s=>{
     const b=document.createElement('button');
@@ -1067,9 +1267,17 @@ async function boot(){
   });
   $('q').onkeydown=e=>{if(e.key==='Enter')send()};
   $('mute').onclick=()=>{sound=!sound;$('mute').textContent=sound?'Sound on':'Sound off'};
+  setSize(load('size')||'');
+  setBook(parseInt(load('book'),10)||BOOK_DEFAULT);
+  grabEdge();
+  $('textsize').onclick=()=>{
+    const next={'':'big',big:'huge',huge:''}[size];
+    setSize(next);save('size',next);
+  };
   $('booktoggle').onclick=()=>{
     const open=$('book').classList.toggle('open');
     $('scene').classList.toggle('shifted',open);
+    $('grip').classList.toggle('on',open);
   };
   $('accusebtn').onclick=()=>who&&accuse(who);
   paintBook(S.notebook);
@@ -1119,11 +1327,22 @@ function render(){
   if(tab==='book')h+=viewBook(n);
   if(tab==='log')h+=viewLog(n);
   if(tab==='map')h+=viewMap(n);
-  $('book').innerHTML=h;
+  $('pages').innerHTML=h;
   document.querySelectorAll('#tabs button').forEach(b=>
     b.onclick=()=>{tab=b.dataset.tab;render()});
-  document.querySelectorAll('th.rm.clickable').forEach(b=>
+  document.querySelectorAll('th.rm.clickable,#plan .room.clickable').forEach(b=>
     b.onclick=()=>showScene(b.dataset.scene,b.dataset.room));
+  document.querySelectorAll('#hours .hr').forEach(b=>
+    b.onclick=()=>{atSlot=b.dataset.slot;render()});
+  const box=$('find');
+  if(box){
+    // Re-rendered on every keystroke would lose the caret, so the field keeps
+    // its own state and only the rows below it are redrawn.
+    box.oninput=()=>{find=box.value;const at=box.selectionStart;render();
+      const again=$('find');if(again){again.focus();again.setSelectionRange(at,at)}};
+  }
+  const mine=$('mynotes');
+  if(mine)mine.oninput=()=>save(noteKey(who),mine.value);
 }
 
 function viewBook(n){
@@ -1132,6 +1351,12 @@ function viewBook(n){
   const by={};
   n.grid.forEach(r=>{(by[r.subject]=by[r.subject]||[]).push(r)});
   let h='';
+  /* Who you are, kept where you can reread it (D-101). It is the answer to
+     "why is anybody telling me anything", and the player is entitled to it. */
+  if(S.you)h+='<h2>You</h2><div class="item soft">'+esc(S.you.role)+
+    (S.you.why?'<br><span class="empty">'+esc(S.you.why)+'</span>':'')+
+    (S.you.standing?'<br><span class="empty">'+esc(S.you.standing)+'</span>':'')+
+    '</div>';
   if(n.conflicts.length)h+='<h2>Contradictions</h2>'+n.conflicts.map(c=>
     '<div class="item hard">'+esc(c.text)+'<br><span class="empty">'+esc(c.kind)+
     '</span></div>').join('');
@@ -1149,12 +1374,138 @@ function viewBook(n){
   return h;
 }
 
+/* The transcript, searchable, and across everybody rather than one person
+   (D-106). Forty answers in, "who mentioned the gearbox" is a real question and
+   scrolling five separate logs is not an answer to it. With no search it stays
+   what it was: this person, in order. */
 function viewLog(n){
-  const log=(n.logs||{})[who]||[];
-  let h='<h2>Everything '+esc(nameOf(who))+' has said</h2>';
-  if(!log.length)return h+'<div class="empty">You have not asked them anything yet.</div>';
-  return h+log.map(x=>'<div class="qa"><div class="qq">'+esc(x.q)+
-    '</div><div class="aa">'+esc(x.a)+'</div></div>').join('');
+  const logs=n.logs||{}, term=find.trim().toLowerCase();
+  let h='<h2>'+(term?'Everything anybody said about it':
+    'Everything '+esc(nameOf(who))+' has said')+'</h2>'+
+    '<input id="find" placeholder="Search the transcript" value="'+esc(find)+'">';
+
+  const rows=[];
+  Object.keys(logs).forEach(id=>{
+    if(!term&&id!==who)return;
+    (logs[id]||[]).forEach(x=>{
+      if(term&&!(x.q+' '+x.a).toLowerCase().includes(term))return;
+      rows.push({id:id,q:x.q,a:x.a});
+    });
+  });
+
+  if(!rows.length)h+='<div class="empty">'+(term?'Nothing matches that.':
+    'You have not asked them anything yet.')+'</div>';
+  else h+=rows.map(r=>'<div class="qa">'+
+    (term?'<div class="whose">'+esc(nameOf(r.id))+'</div>':'')+
+    '<div class="qq">'+mark(r.q,term)+'</div>'+
+    '<div class="aa">'+mark(r.a,term)+'</div></div>').join('');
+
+  return h+notes();
+}
+
+function mark(text,term){
+  if(!term)return esc(text);
+  const at=text.toLowerCase().indexOf(term);
+  if(at<0)return esc(text);
+  return esc(text.slice(0,at))+'<mark>'+esc(text.slice(at,at+term.length))+
+    '</mark>'+mark(text.slice(at+term.length),term);
+}
+
+/* Somewhere to write down what you think, per person, kept in this browser
+   (D-106). The notebook records what was said; this is the other half, which is
+   what you made of it. */
+function notes(){
+  if(!who)return '';
+  return '<h2>Your notes on '+esc(nameOf(who).split(' ')[0])+'</h2>'+
+    '<textarea id="mynotes" rows="5" placeholder="What you make of them, what to '+
+    'come back to\u2026">'+esc(noteFor(who))+'</textarea>';
+}
+
+function noteKey(id){return 'note.'+(S.title||'case')+'.'+id}
+function noteFor(id){return load(noteKey(id))||''}
+
+/* The floor plan, with the evening running through it (D-096).
+   One moment at a time: pick an hour and the rooms fill with whoever has been
+   placed in them. The plan on its own was a picture of a building, which is not
+   a question anybody was asking. The question is "where was everyone at nine",
+   and that needs the two halves in one picture.
+
+   Rooms are drawn as rooms rather than dots: a box you can put people in. The
+   layout is a depth-first walk of the plan arranged round an ellipse, so
+   connected rooms end up near each other and the picture does not rearrange
+   itself between renders. */
+function plan(n){
+  const P=S.places||[];
+  if(!P.some(p=>(p.adjacent||[]).length))return '';
+
+  const times=S.times||[];
+  if(!times.length)return '';
+  if(!times.some(t=>t.id===atSlot))atSlot=times[0].id;
+
+  const by={};P.forEach(p=>by[p.id]=p);
+  const order=[],seen={};
+  (function walk(id){
+    if(!id||seen[id]||!by[id])return;
+    seen[id]=1;order.push(id);
+    (by[id].adjacent||[]).forEach(walk);
+  })(P[0].id);
+  P.forEach(p=>{if(!seen[p.id])order.push(p.id)});
+
+  const W=520,H=252,cx=W/2,cy=H/2,rx=W/2-70,ry=H/2-44;
+  const at={};
+  order.forEach((id,i)=>{
+    const a=(i/order.length)*Math.PI*2-Math.PI/2;
+    at[id]={x:cx+rx*Math.cos(a),y:cy+ry*Math.sin(a)};
+  });
+
+  // Each door once: adjacency is symmetric by the time it reaches the browser.
+  const drawn={};let edges='';
+  P.forEach(p=>(p.adjacent||[]).forEach(q=>{
+    const key=[p.id,q].sort().join('|');
+    if(drawn[key]||!at[q]||!at[p.id])return;
+    drawn[key]=1;
+    edges+='<line x1="'+at[p.id].x.toFixed(1)+'" y1="'+at[p.id].y.toFixed(1)+
+      '" x2="'+at[q].x.toFixed(1)+'" y2="'+at[q].y.toFixed(1)+'" class="door"/>';
+  }));
+
+  const here=((n.timeline||{})[atSlot])||{};
+  const dead=new Set((n.tags||[]).filter(k=>k.dead).map(k=>k.tag));
+  const BW=104,BH=34;
+  let rooms='';
+  P.forEach(p=>{
+    const q=at[p.id];if(!q)return;
+    const inside=here[p.id]||[];
+    rooms+='<g class="room'+(inside.length?' seen':'')+(p.scene?' clickable':'')+
+      '" data-scene="'+esc(p.scene||'')+'" data-room="'+esc(p.name)+'">'+
+      '<rect x="'+(q.x-BW/2).toFixed(1)+'" y="'+(q.y-BH/2).toFixed(1)+
+      '" width="'+BW+'" height="'+BH+'" rx="6"/>'+
+      '<text class="rn" x="'+q.x.toFixed(1)+'" y="'+(q.y-BH/2-7).toFixed(1)+'">'+
+      esc(p.name)+'</text>'+
+      inside.map((x,i)=>{
+        const span=(inside.length-1)*20;
+        return '<text class="who'+(x.disputed?' bad':(dead.has(x.tag)?' dead':''))+
+          (x.firm?' firm':'')+'" x="'+(q.x-span/2+i*20).toFixed(1)+'" y="'+
+          (q.y+4).toFixed(1)+'"><title>'+esc(x.name+', from '+x.source)+
+          '</title>'+esc(x.tag)+'</text>';
+      }).join('')+'</g>';
+  });
+
+  // The dead man is left off this line. "Nobody has placed the victim at this
+  // hour" is true and useless, and after the murder it is true of every hour.
+  const gone=new Set((n.tags||[]).filter(k=>k.dead).map(k=>k.tag));
+  const nobody=(((n.missing||{})[atSlot])||[]).filter(x=>!gone.has(x.tag));
+  const scrub='<div id="hours">'+times.map(t=>
+    '<button class="hr'+(t.id===atSlot?' on':'')+'" data-slot="'+esc(t.id)+'">'+
+    esc(t.label)+'</button>').join('')+'</div>';
+
+  return '<h2>The building</h2>'+scrub+
+    '<svg id="plan" viewBox="0 0 '+W+' '+H+'">'+edges+rooms+'</svg>'+
+    (nobody.length?'<div class="empty" style="margin:2px 0 0">Nobody has placed '+
+      nobody.map(x=>esc(x.name)).join(', ')+' at this hour.</div>':'')+
+    '<div class="empty" style="margin:6px 0 18px">A line is a door. Red means two '+
+    'people put them in different rooms at this hour, and a ringed tag was '+
+    'confirmed by somebody other than themselves.'+
+    (P.some(p=>p.scene)?' Click a room to stand in it.':'')+'</div>';
 }
 
 function viewMap(n){
@@ -1163,7 +1514,7 @@ function viewMap(n){
      movement is the only thing on this screen worth seeing. */
   const T=n.timeline||{}, M=n.missing||{}, K=n.tags||[];
   const dead=new Set(K.filter(k=>k.dead).map(k=>k.tag));
-  let h='<h2>Where they say they were</h2><div class="tlwrap"><table class="tl">'+
+  let h=plan(n)+'<h2>Where they say they were</h2><div class="tlwrap"><table class="tl">'+
     '<tr><th></th>'+S.times.map(t=>'<th>'+esc(t.label)+'</th>').join('')+'</tr>';
   S.places.forEach(p=>{
     h+='<tr><th class="rm'+(p.scene?' clickable" data-scene="'+esc(p.scene)+
@@ -1175,6 +1526,11 @@ function viewMap(n){
         '">'+esc(x.tag)+'</span>').join('')+'</td>';
     }).join('')+'</tr>';
   });
+  // Before a single claim exists, every person is unaccounted for at every
+  // hour, which fills the row with the whole cast five times over and says
+  // nothing (D-106). The empty grid above is worth showing: it is the shape of
+  // the evening and the player can see the building. This row is not.
+  if(Object.keys(T).length)
   h+='<tr class="gap"><th class="rm">unaccounted for</th>'+S.times.map(t=>
     '<td>'+((M[t.id]||[]).map(x=>'<span class="pin off" title="'+esc(x.name)+
       ' — nobody has placed them here yet">'+esc(x.tag)+'</span>').join(''))+
@@ -1189,35 +1545,36 @@ function viewMap(n){
 }
 
 function accuse(id){
-  /* Two questions, not one (D-065). The timeline gets you to the person; only
-     the secrets get you to the reason, and you may only offer a reason you
-     actually got out of somebody. */
-  const found=NB.found||[];
+  /* Two questions, not one (D-065). The timeline gets you to the person and the
+     secrets get you to the reason. The reason is written rather than picked
+     (D-092): nothing marks it, and afterwards you read what you wrote against
+     what was true and decide for yourself whether you had it. */
   let h='<h3>Charge '+esc(nameOf(id))+'</h3>'+
-    '<p>Say what they did it for. You can only name something you found out, '+
-    'and this ends the game.</p>';
-  h+=found.map(f=>'<div class="item pick" data-why="'+esc(f.id)+'">'+esc(f.text)+
-    '</div>').join('');
-  h+='<div class="item pick cold" data-why="">'+(found.length?
-    'None of these. I never found out why.':
-    'You have not got a single secret out of anybody. Charge them anyway.')+'</div>';
-  h+='<div style="margin-top:18px"><button id="backout">Not yet</button></div>';
-  $('revealcard').innerHTML=h;$('reveal').style.display='flex';
-  document.querySelectorAll('.pick').forEach(b=>
-    b.onclick=()=>charge(id,b.dataset.why));
-  $('backout').onclick=()=>{$('reveal').style.display='none'};
+    '<p>In your own words: what did they do it for? Nothing here is marked. '+
+    'You will see the whole case afterwards and can judge your own answer '+
+    'against it. This ends the game.</p>'+
+    '<textarea id="why" rows="4" placeholder="They killed him because\u2026"></textarea>'+
+    '<div style="margin-top:18px;display:flex;gap:10px">'+
+    '<button id="press" class="accuse">Charge '+esc(nameOf(id).split(' ')[0])+'</button>'+
+    '<button id="backout">Not yet</button></div>';
+  $('revealcard').innerHTML=h;$('reveal').classList.add('on');
+  $('why').focus();
+  $('press').onclick=()=>charge(id,$('why').value);
+  $('backout').onclick=()=>{$('reveal').classList.remove('on')};
 }
 
 async function charge(id,why){
   const r=await (await fetch('/accuse',{method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({who:id,why:why||null})})).json();
-  let h='<h3>'+(r.correct?(r.right_reason?'Correct.':'You named him.'):'Wrong.')+'</h3>';
-  h+='<p>The killer was <b>'+esc(r.killer)+'</b>. You asked '+r.questions+' questions.</p>';
-  if(r.correct&&!r.right_reason)h+='<div class="item hard">The right person, and not '+
-    'the reason. '+(r.offered?'You charged him over: '+esc(r.offered):
-    'You never found out why.')+'</div>';
-  if(r.motive)h+='<h2>Why</h2><p>'+esc(r.motive)+'</p>';
+  let h='<h3>'+(r.correct?'You named him.':'Wrong.')+'</h3>';
+  h+='<p>The killer was <b>'+esc(r.killer)+'</b>. You asked '+r.questions+
+    (r.questions===1?' question.':' questions.')+'</p>';
+  if(r.charged)h+='<h2>What you said</h2><div class="item soft">'+esc(r.charged)+'</div>';
+  if(r.motive)h+='<h2>What it was</h2><div class="item '+(r.correct?'hard':'cold')+'">'+
+    esc(r.motive)+'</div>';
+  if(r.charged&&r.motive)h+='<p class="empty">Nobody is marking this. Read the two '+
+    'and decide whether you had it.</p>';
   if(r.lie)h+='<h2>The lie</h2><p>'+esc(r.lie)+'</p>';
   if((r.lies||[]).length>1)h+='<h2>Everyone who lied to you</h2>'+r.lies.map(l=>
     '<div class="item '+(l.killer?'hard':'soft')+'"><b>'+esc(l.name)+'</b> said the '+
@@ -1227,9 +1584,11 @@ async function charge(id,why){
   if(r.witnesses.length)h+='<h2>Who could have broken it</h2>'+r.witnesses.map(w=>
     '<div class="item '+(w.asked?'soft':'cold')+'">'+esc(w.name)+' \u2014 '+
     (w.asked?('asked '+w.asked+'x'):'you never asked them')+'</div>').join('');
+  if((r.surfaced||[]).length)h+='<h2>What you got out of them</h2>'+r.surfaced.map(x=>
+    '<div class="item soft">'+esc(x)+'</div>').join('');
   if(r.missed.length)h+='<h2>Secrets you never found</h2>'+r.missed.map(m=>
     '<div class="item cold">'+esc(m)+'</div>').join('');
-  $('revealcard').innerHTML=h;$('reveal').style.display='flex';
+  $('revealcard').innerHTML=h;$('reveal').classList.add('on');
 }
 
 /* Cross-fade the backdrop between the establishing shot and a room (D-069).
@@ -1274,9 +1633,10 @@ def _lan_address() -> str:
 def _estimate(mystery, quality: str, faces: bool, rooms: bool) -> float:
     """What the pictures for this case are about to cost.
 
-    Eleven images, not five: a portrait each for the cast, plus an establishing
-    shot and one room. The backdrops are landscape and landscape costs half
-    again as much, so they are the larger half of the bill.
+    Six images: a portrait for each living member of the cast, and one
+    establishing shot of the place. It was eleven until the per-room backdrops
+    were dropped (D-102), which is where five sixths of the scenery bill went
+    and where almost none of the attention did.
     """
     from mystery.portraits import PRICES as FACES
     from mystery.scenery import PRICES as ROOMS
@@ -1285,7 +1645,7 @@ def _estimate(mystery, quality: str, faces: bool, rooms: bool) -> float:
     if faces:
         total += FACES[quality] * len([c for c in mystery.characters if c.id != mystery.victim])
     if rooms:
-        total += ROOMS[quality] * (1 + len(mystery.places))
+        total += ROOMS[quality]
     return total
 
 
@@ -1307,7 +1667,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cast", type=int, default=5)
     parser.add_argument("--slots", type=int, default=5)
     parser.add_argument("--places", type=int, default=5)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="pin the case. Left off, a fresh one is drawn and printed, so an "
+        "evening you liked can be asked for again by number",
+    )
     parser.add_argument(
         "--topology",
         default=DEFAULT_TOPOLOGY,
@@ -1385,10 +1751,10 @@ def main(argv: list[str] | None = None) -> int:
         help="serve on the local network so other people on the same wifi can play",
     )
     parser.add_argument(
-        "--remember",
+        "--forget",
         action="store_true",
-        help="keep sessions on disk, so restarting the server does not throw "
-        "away everybody's notebook. Off, they live in memory and die with the process",
+        help="do not keep sessions on disk. On by default: a transcript is the "
+        "most useful thing a playtest produces and it used to be thrown away",
     )
     parser.add_argument(
         "--together",
@@ -1397,6 +1763,19 @@ def main(argv: list[str] | None = None) -> int:
         "solving one case actually want. Off, each visitor gets their own",
     )
     args = parser.parse_args(argv)
+
+    # Drawn once here rather than defaulted to zero, so two runs of the same
+    # command are two different evenings (D-102). Printed, because a seed you
+    # cannot read is not reproducible.
+    if args.seed is None:
+        args.seed = fresh_seed()
+        print(f"  Seed {args.seed}. Pass --seed {args.seed} for this case again.")
+
+    # The shape comes from the seed too, so the number reproduces the whole
+    # case and not most of it (D-103).
+    if args.topology is None:
+        args.topology = drawn(args.seed)
+        print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
 
     if args.cases:
         print(catalogue())
@@ -1417,6 +1796,12 @@ def main(argv: list[str] | None = None) -> int:
         saved = load_case(args.case)
         return _serve(saved.mystery, saved.id, saved.setting, saved.title, args)
 
+    # Before anything is spent, and only on the paths that spend (D-110).
+    complaint = None if args.dry_run else complaint_about_setting(args.setting)
+    if complaint:
+        print(complaint)
+        return 2
+
     request = GenerationRequest(
         setting=args.setting,
         cast_size=args.cast,
@@ -1426,6 +1811,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
     )
 
+    print(f"Setting: {args.setting}")
     print("Building a mystery. This takes about half a minute.")
     try:
         from mystery.example import OPENING_NIGHT
@@ -1547,7 +1933,7 @@ def _serve(mystery, case_id: str, setting: str, title: str, args) -> int:
         build_app(
             case,
             anthropic_responder(model=args.model),
-            sessions=FileSessions() if args.remember else None,
+            sessions=None if args.forget else FileSessions(),
             together=args.together,
         ),
         host="0.0.0.0" if args.share else "127.0.0.1",  # noqa: S104

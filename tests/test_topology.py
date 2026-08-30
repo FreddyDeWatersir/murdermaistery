@@ -7,6 +7,7 @@ shapes that all accept the same case is a library of names (D-067).
 """
 
 import pytest
+
 from mystery.models import Character, Constraint, FalseClaim, Mystery, Place, Secret, Slot
 from mystery.topology import DEFAULT, LIBRARY, assess, catalogue, get
 
@@ -163,3 +164,37 @@ def test_the_confessor_is_told_to_confess_and_nobody_else_is() -> None:
 
     assert "you killed them" in render_system(build_brief(case, knowledge, "a"))
     assert "you killed them" not in render_system(build_brief(case, knowledge, "b"))
+
+
+# The library, and how a shape gets picked (D-103)
+
+
+def test_every_shape_has_at_least_one_check_of_its_own() -> None:
+    """A shape with no checks is a paragraph, and the model will drift back to
+    the plain shape while reporting that it did what was asked."""
+    from mystery.topology import DEFAULT, LIBRARY
+
+    for shape in LIBRARY.values():
+        if shape.id == DEFAULT:
+            continue  # the plain shape is what every general advisory assumes
+        assert shape.checks, f"{shape.id} has nothing that would notice it drifted"
+
+
+def test_the_shape_comes_from_the_seed() -> None:
+    """Reproducible, not fixed: a seed reproduces the whole case rather than
+    most of it."""
+    from mystery.topology import LIBRARY, drawn
+
+    assert drawn(483102) == drawn(483102)
+    assert drawn(0) in LIBRARY
+    assert len({drawn(n) for n in range(40)}) == len(LIBRARY), (
+        "every shape should be reachable by some seed"
+    )
+
+
+def test_the_mapping_is_stable_when_a_shape_is_added() -> None:
+    """Sorted rather than insertion-ordered, so adding a shape in the middle of
+    the list does not silently repoint every existing seed."""
+    from mystery.topology import LIBRARY, drawn
+
+    assert drawn(2) == sorted(LIBRARY)[2 % len(LIBRARY)]

@@ -26,11 +26,18 @@ class Place(BaseModel):
     position as the corridor it opens onto. Playtesting hit this four separate
     times (finding F3, decision D-011). No rule uses it yet; it is here so the
     fixture corpus does not have to be migrated later.
+
+    `adjacent` is what you can reach or hear from here: the doors out of this
+    room (D-093). It is what makes a building out of a list of rooms, and it is
+    the difference between the Map tab drawing a plan and drawing a table.
+    Symmetry is enforced rather than requested, because a door works from both
+    sides and no prompt reliably remembers to say so twice.
     """
 
     id: PlaceId
     name: str
     within: PlaceId | None = None
+    adjacent: list[PlaceId] = Field(default_factory=list)
 
 
 class Character(BaseModel):
@@ -143,6 +150,60 @@ class Secret(BaseModel):
     breaks_when: str = ""
     evidence: str = ""
     is_motive: bool = False
+    # Would a reader who learned only this put the holder on the list (D-106)?
+    # Distinct from `is_motive`, which is the one reason the killer actually
+    # acted. A case where only the killer has a damning secret is smooth and
+    # dull: the player finds the one person with something and is finished.
+    # Stated rather than inferred, because "a secret about the victim" and "a
+    # reason to kill the victim" are not the same thing and only the writer
+    # knows which one this is.
+    damning: bool = False
+
+
+def with_doors_both_ways(places: list[Place]) -> list[Place]:
+    """Every door open from both sides, and nobody adjacent to themselves.
+
+    A model writing a floor plan will say the corridor opens onto the office and
+    then describe the office without mentioning the corridor. Both halves are
+    the same door. Repairing this is not worth a validator rule and a retry: it
+    is bookkeeping with exactly one right answer, so it is done rather than
+    complained about (D-093).
+    """
+    known = {place.id for place in places}
+    doors: dict[str, set[str]] = {place.id: set() for place in places}
+
+    for place in places:
+        for other in place.adjacent:
+            if other == place.id or other not in known:
+                continue
+            doors[place.id].add(other)
+            doors[other].add(place.id)
+
+    return [
+        place.model_copy(update={"adjacent": sorted(doors[place.id])})
+        for place in places
+    ]
+
+
+class Investigator(BaseModel):
+    """Who the player is tonight, and why anybody is talking to them (D-101).
+
+    Written per case rather than fixed, because the only frame that works in
+    every setting is a vague one, and a vague one is exactly what made the
+    question "why would they answer me at all" unanswerable. An assessor sent by
+    the insurer, a solicitor acting for the estate, somebody the dead man himself
+    engaged three weeks ago about the thefts: each is specific, each belongs to
+    its setting, and each has a reason to be standing there at midnight.
+
+    `standing` is the crucial half. Never police, never able to compel anybody.
+    The compliance model is not authority: it is that the police are an hour away
+    and everybody would rather their version reached them first, through
+    somebody, than be the subject of somebody else's.
+    """
+
+    role: str = ""
+    why_here: str = ""
+    standing: str = ""
 
 
 class FalseClaim(BaseModel):
@@ -201,12 +262,20 @@ class Mystery(BaseModel):
     # The id of the constraint in which the killing happens. Optional, because
     # it can usually be worked out, and worth asking for anyway: working it out
     # is where two real cases went wrong (D-071).
+    investigator: Investigator | None = None
     murder: str | None = None
     false_claims: list[FalseClaim] = Field(default_factory=list)
     # Somebody who says they did it and did not. Only some shapes of case have
     # one, so it is optional and means nothing when absent (D-067).
     false_confessor: CharacterId | None = None
     discovery: Discovery | None = None
+    # Plain facts about the occasion that everybody in the building would state
+    # the same way, and the only place a number about the house is allowed to
+    # come from. Without it each suspect re-derives the world from their own role
+    # text, and in one played case the same list of names was six long to one
+    # person and nine long to another (D-111). Optional: cases written before it
+    # existed simply have less shared ground.
+    common_ground: list[str] = Field(default_factory=list)
 
     @property
     def false_claim(self) -> FalseClaim | None:

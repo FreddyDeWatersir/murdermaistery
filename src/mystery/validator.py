@@ -456,14 +456,104 @@ def check_the_victim_stays_dead(mystery: Mystery) -> list[Violation]:
 # What the model just handed us. Only referential integrity applies. A clash
 # between two constraints is not grounds for rejection: the solver reschedules
 # one of them (D-033), and only a clash that survives that is a real failure.
+def check_the_body_is_not_stepped_over(mystery: Mystery) -> list[Violation]:
+    """V10: after the killing, nobody is in the room with the body.
+
+    Guards: the language model. The discovery says the body was found after the
+    evening was over, which means nobody found it during the evening, which
+    means nobody was in that room. A case that puts three people in the murder
+    room an hour after the murder is a case where either the body was found then
+    and the story is wrong, or three people stood next to a corpse and carried on
+    working (D-094).
+
+    It came out of a playtest where the reader could not work out when the victim
+    died. The killer lied about the murder hour, and then the victim appeared in
+    the same room an hour later with other people around him, so the timeline
+    read as though he had been alive the whole time and the lie made no sense.
+
+    The victim is exempt: they are the body, and V7 already requires them to stay
+    where they fell.
+    """
+    killed_at = murder_slot(mystery)
+    scene = mystery.murder_scene
+    if killed_at is None or scene is None or scene.place is None:
+        return []
+
+    index = {slot.id: slot.index for slot in mystery.slots}
+    when = index.get(killed_at)
+    if when is None:
+        return []
+
+    later = sorted(
+        (slot for slot in mystery.slots if slot.index > when), key=lambda s: s.index
+    )
+    violations: list[Violation] = []
+
+    for slot in later:
+        intruders = sorted(
+            character.id
+            for character in mystery.characters
+            if character.id != mystery.victim
+            and mystery.placements.get(character.id, {}).get(slot.id) == scene.place
+        )
+        if intruders:
+            violations.append(
+                Violation(
+                    rule="V10",
+                    message=(
+                        f"{intruders} are in {scene.place!r} at {slot.id!r}, after the "
+                        f"murder happened there at {killed_at!r}. The body is on that "
+                        f"floor. Either they found it, which the discovery says nobody "
+                        f"did until later, or they stepped over it. Move them, or move "
+                        f"the scene they are there for"
+                    ),
+                )
+            )
+
+    return violations
+
+
+def check_every_lie_covers_something(mystery: Mystery) -> list[Violation]:
+    """V11: nobody lies about where they were for no reason.
+
+    A11 has reported this for innocents since it existed, and reporting was the
+    wrong strength. An unmotivated lie is not a case that is merely worse: it is
+    a trap in the middle of the board. The player catches somebody out, which is
+    the game's single strongest signal, presses it for ten questions and finds
+    nothing underneath, and what they learn is that pressing does not pay. That
+    is the opposite of the mechanic. A rule, from the proposed phase, so the
+    model is told to fix it while it still costs a repair rather than a draft
+    (D-111).
+
+    `covers` pointing at a secret that does not exist is V4's job. This is the
+    emptier failure: a lie with no `covers` at all.
+    """
+    return [
+        Violation(
+            rule="V11",
+            message=(
+                f"{claim.character!r} lies about where they were and `covers` is "
+                f"empty. Give the id of the secret the lie protects, or take the "
+                f"lie out: a lie with nothing under it is a dead end the player "
+                f"cannot tell from a live one"
+            ),
+        )
+        for claim in mystery.false_claims
+        if not claim.covers.strip()
+    ]
+
+
 PROPOSED_RULES = [
+    check_every_lie_covers_something,
     check_references_exist,
     check_constraints_do_not_contradict,
     check_exclusive_scenes_do_not_collide,
+    check_the_body_is_not_stepped_over,
 ]
 
 # After the solver. Everything must hold.
 FINAL_RULES = [
+    check_every_lie_covers_something,
     check_references_exist,
     check_constraints_do_not_contradict,
     check_the_victim_stays_dead,
@@ -472,6 +562,7 @@ FINAL_RULES = [
     check_exclusive_constraints_are_private,
     check_every_constraint_was_placed,
     check_exclusive_scenes_do_not_collide,
+    check_the_body_is_not_stepped_over,
 ]
 
 

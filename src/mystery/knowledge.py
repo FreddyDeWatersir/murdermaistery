@@ -66,18 +66,25 @@ class Knowledge:
 
 
 def murder_slot_index(mystery: Mystery) -> int | None:
-    """When the killing happened, as a slot index."""
-    if mystery.killer is None or mystery.victim is None:
+    """When the killing happened, as a slot index.
+
+    Deferred to `Mystery.murder_scene`, which is the one definition (D-071).
+    This function used to work it out again by taking the first constraint
+    holding both the killer and the victim, which is exactly the bug D-071 was
+    written to remove, surviving in the one module that fix did not reach
+    (D-094).
+
+    It matters more here than anywhere. The prompt asks for an earlier private
+    confrontation between those two, so "the first constraint with both of them
+    in it" is usually that argument rather than the killing. In a real case it
+    put the murder three slots early, which meant the victim was treated as dead
+    from the moment of the argument and every downstream question about who saw
+    what was answered against the wrong hour.
+    """
+    scene = mystery.murder_scene
+    if scene is None or not scene.is_bound:
         return None
-    index = {slot.id: slot.index for slot in mystery.slots}
-    for constraint in mystery.constraints:
-        if (
-            constraint.is_bound
-            and mystery.killer in constraint.people
-            and mystery.victim in constraint.people
-        ):
-            return index.get(constraint.slot)
-    return None
+    return {slot.id: slot.index for slot in mystery.slots}.get(scene.slot)
 
 
 def derive(mystery: Mystery) -> dict[CharacterId, Knowledge]:
@@ -99,8 +106,20 @@ def derive(mystery: Mystery) -> dict[CharacterId, Knowledge]:
     }
 
     for slot in ordered:
-        # The victim stops observing at the moment they die. The body is still in
-        # the room, and other people still see it, but it testifies to nothing.
+        # Two separate things stop at the murder, and only the first of them used
+        # to (D-094).
+        #
+        # The victim stops observing, obviously. But other people also stop
+        # *seeing the victim*: from the murder onward there is no man in that
+        # room, there is a body, and "at 23:00 you saw Gerhard in the high bay"
+        # is a sentence about a living person. A real playtest could not work out
+        # when the victim died, because two witnesses placed him in the murder
+        # room an hour after he was killed and the grid drew it as a sighting
+        # like any other.
+        #
+        # Anyone actually standing in that room has found the body, which is a
+        # different event and one V10 now stops a case from containing by
+        # accident.
         by_place: dict[PlaceId, list[CharacterId]] = {}
         for character in mystery.characters:
             place = mystery.placements.get(character.id, {}).get(slot.id)
@@ -117,6 +136,12 @@ def derive(mystery: Mystery) -> dict[CharacterId, Knowledge]:
                     continue
                 for subject in present:
                     if subject == observer:
+                        continue
+                    if (
+                        subject == mystery.victim
+                        and killed_at is not None
+                        and slot.index >= killed_at
+                    ):
                         continue
                     knowledge[observer].observations.append(
                         Observation(subject=subject, place=place, slot=slot.id)

@@ -20,7 +20,7 @@ import json
 import re
 import secrets
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -53,9 +53,32 @@ class Card:
         return f"{self.saved}__{self.id}.json"
 
 
+# The last stamp this process handed out. The queue is ordered by stamp, so two
+# cases saved inside the same clock tick used to tie and fall back to comparing
+# their random suffixes, which is not an order at all. Seconds tied first, and
+# milliseconds tied later on a faster machine, which is the lesson: an ordering
+# that depends on a clock being finer than the loop above it is a race, and
+# chasing resolution loses it twice (D-078, D-081, D-094).
+_last: datetime | None = None
+
+
 def _stamp() -> str:
-    """Sortable, compact, and safe in a key on any storage anybody uses."""
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    """Sortable, compact, unique within this process, and a real timestamp.
+
+    Monotonic rather than merely precise. If the clock has not moved since the
+    last call, this returns one millisecond past the previous stamp instead of
+    repeating it, so save order is save order whatever the machine's speed. The
+    result is still a valid ISO instant, which matters because it is displayed
+    and because it sits in a filename that has to sort lexicographically.
+    """
+    global _last
+    now = datetime.now(UTC).replace(microsecond=0) + timedelta(
+        milliseconds=datetime.now(UTC).microsecond // 1000
+    )
+    if _last is not None and now <= _last:
+        now = _last + timedelta(milliseconds=1)
+    _last = now
+    return now.isoformat(timespec="milliseconds")
 
 
 def mint(title: str) -> str:
@@ -126,11 +149,10 @@ def save(
         topology=topology,
         seed=seed,
         # A timestamp rather than a date, because the buffer is served oldest
-        # first and two cases made the same night have to have an order (D-078).
-        # Milliseconds, not seconds. Two cases made in the same second had the
-        # same sort key, and the queue fell back to comparing random suffixes,
-        # which is not an order at all (D-081).
-        saved=datetime.now(UTC).isoformat(timespec="milliseconds"),
+        # first and two cases made the same night have to have an order (D-078,
+        # D-081, D-094). `_stamp` guarantees it is later than the last one this
+        # process wrote, so a tight loop cannot produce a tie.
+        saved=_stamp(),
         mystery=mystery,
     )
 

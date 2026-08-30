@@ -40,12 +40,37 @@ STYLE = (
 
 
 def _prompt(mystery: Mystery, character) -> str:
+    """One picture of one person, with the parts that are not negotiable first.
+
+    `gender` leads, and it is stated as a requirement rather than mentioned
+    (D-095). It exists for exactly this: D-074 added it because the *drawn* SVG
+    faces were inferring gender from the `look` sentence and getting it wrong
+    whenever the sentence did not say. That fix reached the drawings and the page
+    and never reached this prompt, so the image model was left making the same
+    inference from the same sentence, and a woman in the cast came back as a man
+    in her portrait.
+
+    `role` is in here too, because a portrait of a foreman of forty years and a
+    portrait of a wine journalist should not be interchangeable, and the role is
+    public anyway.
+    """
     look = character.look or "an adult, dressed for the occasion"
-    return (
-        f"{STYLE} The subject: {look}. "
-        f"They are a guest at {mystery.title.lower()}, being questioned after a "
-        f"death. Their manner is {character.manner or 'guarded'}."
+    who = character.gender.strip()
+    subject = f"a {who}" if who else "a person"
+
+    lines = [
+        STYLE,
+        f"The subject is {subject}. This is not optional: the portrait must "
+        f"clearly show {subject}.",
+        f"Appearance: {look}.",
+    ]
+    if character.role:
+        lines.append(f"They are {character.role.rstrip('.')}.")
+    lines.append(
+        f"They are at {mystery.title.lower()}, being questioned after a death. "
+        f"Their manner is {character.manner or 'guarded'}."
     )
+    return " ".join(lines)
 
 
 def generate_portraits(

@@ -25,6 +25,8 @@ and solver needs a corpus, not a live model, and a corpus costs money once.
 
 import hashlib
 import os
+import re
+import secrets
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -68,10 +70,11 @@ RATES = {
     "claude-sonnet-4-5": (3.0, 15.0),
 }
 
-# What one draft has actually been costing, from the logs: about eight and a
-# half thousand tokens in and six thousand out. Used for the estimate printed
-# before a run, since nobody knows the real numbers until afterwards.
-TYPICAL_DRAFT = (8500, 6000)
+# What one draft actually costs, from the logs. Re-measured after the prompt grew
+# (D-110): thirteen thousand in and seven and a half out, against eight and a
+# half and six when this was first written. The estimate printed before a run is
+# only honest if this is kept up to date with the prompt.
+TYPICAL_DRAFT = (13000, 7500)
 
 
 def cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -82,6 +85,31 @@ def cost(model: str, input_tokens: int, output_tokens: int) -> float:
 
 def draft_estimate(model: str = DRAFT_MODEL, drafts: int = 1) -> float:
     return cost(model, *TYPICAL_DRAFT) * drafts
+
+
+# The placeholder in every example command in STATE.md and in this module's own
+# docstring. Pasted through once and three Opus drafts were spent writing a
+# murder set in nothing (D-110). Refusing it costs nothing and the run that
+# taught us this cost seventy four cents.
+def complaint_about_setting(setting: str) -> str | None:
+    """Why this setting cannot be used, or None if it can.
+
+    Not a taste check. The only thing being caught is a setting that carries no
+    words: the ellipsis placeholder, an empty string, punctuation on its own.
+    """
+    words = re.sub(r"[^\w\s]", " ", setting).split()
+    if not words:
+        return (
+            f"--setting {setting!r} is the placeholder, not a setting. "
+            "Give the model somewhere to put five people, for example "
+            '--setting "the last night of a residency at an old house"'
+        )
+    if len("".join(words)) < 6:
+        return (
+            f"--setting {setting!r} is too thin to write a case from. "
+            "A phrase, not a word: who is gathered, where, and why tonight."
+        )
+    return None
 
 
 class GenerationRequest(BaseModel):
@@ -132,6 +160,53 @@ a writer does, from the story outward, and you finish by writing down the \
 evening as a grid.
 
 Work in this order.
+
+0. Before the cast, decide **what is happening tonight**. The setting names a \
+place; it does not name an occasion, and a place with nothing happening in it \
+produces the same evening every time. Something is at stake this evening and it \
+would have been at stake even if nobody had died: money arrives or does not, a \
+decision is announced, somebody is leaving, an inspection lands in the morning, \
+a thing that has been put off for a year cannot be put off past tonight. Write \
+that first and let the cast follow from it.
+
+**Resist the obvious staffing.** Given a place, there is a set of jobs that \
+comes to mind immediately, and it is the same set every time: the owner, the \
+deputy, the one who keeps the books, the loyal old hand of forty years, the \
+young assistant, the outsider visiting. Four cases in a row came back with \
+exactly those six. At least half this cast should be people that list would not \
+have produced: somebody who does not work here, somebody who used to, somebody \
+present for a reason unrelated to the business of the place, somebody whose \
+connection to the victim is personal and old. The rooms go the same way. Do not \
+reach for the obvious floor plan either.
+
+**Title it as a novel would.** Take a phrase out of the case itself, something \
+a reader only understands afterwards.
+
+Two failure modes, both seen. The template: "The Last <noun> at <place>", three \
+times out of four. And the setting's own noun as a stem, which produced *What \
+the Fog Owes Us*, *What the Fog Keeps* and *What the Fog Owes* from one setting \
+on three different seeds. Do not build the title out of the most obvious word in \
+the setting. Build it out of something only this case contains: a phrase \
+somebody says, an object, a number, a name, the thing that was promised.
+
+**The player always arrives after the body has been found.** They did not see \
+it happen, they did not see anybody leave, and they have no observation of their \
+own from before the discovery. Everything they know, they were told. Never write \
+the case around something the questioner personally witnessed.
+
+**Say who is asking the questions.** Fill in `investigator` with the person the \
+player is tonight: `role` (what they are, in a few words), `why_here` (the \
+reason they were in this building before anybody died, or arrived within the \
+hour), and `standing` (what they can and cannot do). They are **never police**. \
+They cannot arrest, charge or compel anybody. What they have is a professional \
+reason to be asking and somebody's authority behind them that is not legal \
+authority. "A detective" is wrong. So is anybody who can compel an answer.
+
+**What kind of person that is, is dealt to you** under MATERIAL FOR THIS CASE \
+below, and it is the assignment rather than a suggestion. Work out who that \
+description is in *this* building and write them. Asked to invent this freely, \
+and shown one worked example, five consecutive cases produced five insurance \
+assessors, which is why it is no longer being asked freely.
 
 1. The cast. Each suspect wants something and each is concealing something. \
 Only one of those secrets is the murder. A cast where three people have nothing \
@@ -200,7 +275,12 @@ innocent people who lied for their own reasons.
 
 For every entry give the room and the slot they will claim, which must not be \
 where they actually were, plus `covers` (the id of the secret the lie protects) \
-and `admits_when` (what would make them drop it). The innocent lies are the \
+and `admits_when` (what would make them drop it). **`covers` is not optional and \
+must name a real secret.** Nobody lies about where they were for no reason. A \
+lie with nothing underneath it is the worst thing in the game: the player \
+catches it, presses it, spends ten questions on it and finds an empty room, and \
+learns from that that pressing does not pay. If you cannot say what a lie \
+protects, do not write the lie. The innocent lies are the \
 good part: somebody was where they should not have been, with someone they \
 should not have been with, going through papers that were not theirs. Being \
 caught out is embarrassing rather than fatal, and that is exactly why they hold \
@@ -244,14 +324,102 @@ told that someone else has already said it. Concealment that never breaks is a \
 wall rather than a mystery, and the conditions should differ from character to \
 character.
 
+**Write it as a state of affairs, not as a stage direction.** "Once she believes \
+somebody else has read the letters" is a condition: any number of things a \
+player might say could bring it about, and she is a person who folds when her \
+privacy is already gone. "Shown the letters and asked, without preamble, who \
+resealed them" is a script, and a script gets played as a password: the player \
+does the right thing in the wrong words and nothing happens, which reads as the \
+game being broken rather than the character being difficult. Describe what this \
+person's resistance is made of and what dissolves it. Never a required gesture, \
+a required order of words, or a particular phrasing.
+
+**Entangle them with each other, not only with the dead man.** This is the \
+other half of the same failure and it is the deeper one.
+
+Asked for a victim who is a hub, the obvious move is to give every suspect a \
+secret about the victim and stop. Five real cases came back that way, and in the \
+one somebody played, **not a single secret was about another suspect**. Four \
+pointed at the dead man and three pointed at nobody. The player questioned each \
+person, took the one thing they had, and moved on, because nothing anybody said \
+gave them a reason to go from this person to that one.
+
+What a house of suspects should be is a web. The one who keeps the accounts is \
+protecting the son. The son is covering for somebody's wife. She knows what the \
+solicitor did. **At least three in ten of your secrets must be about another \
+suspect**, and every suspect must be tied to at least one other, either by \
+holding something about them or by being in somebody's `known_by`. Nobody is an \
+island: if the player learns nothing that leads towards a person, that person \
+is furniture.
+
+**The old business binds them.** Under MATERIAL FOR THIS CASE you are dealt a \
+thing that happened here before tonight, that most of this cast was present for, \
+and that nobody has raised since. Use it. It is what gives them reasons to know \
+about each other rather than only about the victim, it is why they each have a \
+different reason for not mentioning it, and it means the question the player is \
+really answering stops being "who wanted him dead this week" and becomes "what \
+happened in this place".
+
+**The victim should have been working on all of them, tonight.** Not five old \
+grievances: five things happening this evening. He was going to sign something \
+away from one of them, had already told another they were finished, was about to \
+be told something by a third. A victim who was busy is a victim who is worth \
+asking about, and a case where five people were each being damaged in a \
+different way over one evening produces its own suspects without being asked to.
+
+**The case must have a second half.** This is the thing most likely to go wrong \
+and it went wrong five times out of five.
+
+Asked to gate the killer's motive behind another secret, the obvious move is to \
+gate exactly that and leave everything else lying on the surface. Five cases in \
+a row came back with seven secrets, six of them available cold and one gate. A \
+player asked a hundred and one questions, was given everything the killer had \
+inside nine, and spent the remaining ninety-two finding nothing. They called it \
+easy and unsatisfying, and they were describing a case with no middle.
+
+So: **at least four in ten of your secrets need something else to surface \
+first**, and at least one chain must be **two deep**: A opens B, and B opens C, \
+where C is the thing that matters. Build it as a real order of discovery, not as \
+a lock on a box. The first thing is something anybody would let slip. The second \
+is what that first thing gives you leverage to ask about. The third is what \
+somebody will only say once they know you already have the second.
+
+Think about the shape of an evening rather than a list of facts. What can be got \
+in the first ten minutes; what is only worth asking after that; what nobody would \
+say to a stranger who did not already half know it.
+
+**At least three of them must look guilty.** Mark every secret that would put \
+its holder on the list, on its own, with `damning: true`. Not "they were \
+evasive" and not "they had a grievance": a reader who learned only this would \
+write that name down. Money that dies with the victim, a threat somebody made \
+out loud, a ruin the victim was about to cause them, a thing they were about to \
+lose tonight. The killer's motive is damning by definition. **At least two \
+other people need one as well**, and it must be false, or a dead end, or about \
+somebody who could not have been there.
+
+A case where only the killer has a real reason plays fast and flat: the player \
+finds the one person with something and stops. That happened, and it was \
+reported back as smooth and not engaging. Grievances are not enough. Three \
+people the player would genuinely put in the frame is the target, and only one \
+of them did it.
+
 **A secret that gates another one must be a thing, not just a fact.** Whenever \
 you put `revealed_by` on a secret, the secret it points at has to carry \
 `evidence`: the object that proves it and that the player can pick up and put \
 in front of somebody. The ledger pages. The letter of reference. The photograph \
-of the loan documents. Name it in four or five words, the way a person would \
-say it. This is not decoration: producing that object is how the player opens \
-the gate, and a gate with nothing behind it can only be argued at, which means \
-in practice it never opens at all.
+of the loan documents. This is not decoration: producing that object is how the \
+player opens the gate, and a gate with nothing behind it can only be argued at, \
+which means in practice it never opens at all.
+
+**Name it as an object, not as a conclusion.** A phrase somebody could read off \
+a card in an evidence bag: what it physically is, plus the one detail that makes \
+it damning. "A bundle of twelve letters in a ribbon, dated February to October" \
+is right, and so is "A bone paperknife and a drawer of slit-and-regummed \
+envelopes": you can see both, and neither tells you what it proves. "Proof that \
+Margit read the post" is wrong, because it is the answer printed on the front of \
+the question. The player is holding this thing and deciding who to put it in \
+front of, and that decision is only interesting while the object is still a \
+thing rather than a label.
 
 Everything else can be `evidence`-free. Most secrets are things people know, \
 not things people keep in a drawer, and a case where every secret comes with a \
@@ -272,6 +440,20 @@ be alone with nobody else present. You need, at minimum:
    - at least two other suspects with a private moment of their own, so a \
 missing alibi proves nothing on its own
    - one exchange overheard by exactly one person who was not part of it
+
+**Give the building a floor plan.** Every place lists `adjacent`: the other \
+places you can walk to, or hear through a wall, directly from it. Doors, not \
+routes: the storeroom is adjacent to the corridor, not to the office at the far \
+end of it. Make it a plan somebody could walk through, so no room is cut off \
+from the rest, and put the overhearer next door to whatever they overhear. You \
+only have to write each door once, from either side.
+
+**After the killing, that room is empty.** Nobody goes back into it, and \
+nobody has a scene there, until the body is found. The discovery happens after \
+the evening is over, which means nobody found the body during it, which means \
+nobody was in the room. Put the killer's return, the last check, the clearing \
+up, anywhere else. Two people working next to a corpse and not mentioning it is \
+the single fastest way to make a player stop believing the evening.
 
 **`exclusive` is literal and it is about the room, not the scene.** It means \
 nobody else is in that place at that moment, full stop. Two exclusive \
@@ -328,6 +510,15 @@ the murder cannot be guessed from the outside. Say which.
 - Fill in `discovery`: who found the body, in which room, and a sentence about \
 how. This happened after the last slot and everybody knows it. Without it the \
 suspects cannot discuss the death they are being questioned about.
+- Fill in `common_ground` with four to six plain sentences: the things about \
+this occasion that everybody in the building would say the same way. What the \
+gathering is, what happens in the morning, how long people have been here, who \
+pays for it. **Every number that matters goes here and nowhere else**: how many \
+people live in the house, how many names are on the list, how many years since \
+the thing they all remember. Each suspect is given this block verbatim and is \
+forbidden to invent a figure that is not in it, because when one of them says \
+six and another says nine about the same list the house stops being a real \
+place. Write no secret here: this is only what is said out loud at breakfast.
 
 Design rules for a case worth playing:
 
@@ -430,6 +621,22 @@ person back rather than a timetable.\
 """
 
 
+def fresh_seed() -> int:
+    """A case nobody has seen, and a number that gets it back (D-102).
+
+    `--seed` used to default to zero, which meant every run of the same command
+    returned the same evening from the cache: the same six people, the same
+    secrets, and, because casting is two bits of the seed, a man killing a man
+    every single time. That looked like a biased generator and was a default
+    argument.
+
+    Random by default and printed loudly. Determinism was never the thing worth
+    keeping; *reproducibility* was, and a seed you can read off the terminal and
+    pass back is reproducible. Tests and the solver still pass explicit seeds.
+    """
+    return secrets.randbelow(1_000_000)
+
+
 def _casting(seed: int) -> str:
     """Who is the killer and who is the victim, decided here rather than there.
 
@@ -463,7 +670,9 @@ def _user_prompt(request: GenerationRequest) -> str:
         f"{_casting(request.seed)}\n\n"
         f"{_material(request)}\n"
         f"Variation key {request.seed}: use it to take a different angle on this "
-        f"setting than you otherwise would."
+        f"setting than you otherwise would. Take it seriously at step 0: a "
+        f"different occasion is what makes a different case, and the same place "
+        f"on two different nights should not produce the same six people."
     )
 
 
@@ -511,7 +720,14 @@ def anthropic_drafter(
 
         response = client.messages.create(
             model=model,
-            max_tokens=8000,
+            # The prompt has roughly doubled since this was set, and so has what
+            # it asks the model to write: a floor plan, a web of secrets, layers,
+            # an investigator. Two drafts in one run came back at exactly 8000
+            # output tokens, which is not a coincidence, it is the ceiling: the
+            # JSON was cut off mid-object and arrived as "title: Field required"
+            # (D-110). Headroom is cheap and a truncated draft costs a whole
+            # attempt.
+            max_tokens=16000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
             tools=[
@@ -536,6 +752,17 @@ def anthropic_drafter(
             seconds=round(time.monotonic() - started, 2),
             setting=request.setting,
         )
+
+        # Truncation announces itself as a schema error three lines later, which
+        # is the least useful place to meet it (D-110). Say it here, where the
+        # number that proves it is in hand.
+        if response.stop_reason == "max_tokens":
+            log.warning(
+                "mystery.truncated",
+                output_tokens=response.usage.output_tokens,
+                detail="the draft was cut off at the ceiling and cannot parse. "
+                "Raise max_tokens rather than reading the schema errors below",
+            )
 
         for block in response.content:
             if block.type == "tool_use":
