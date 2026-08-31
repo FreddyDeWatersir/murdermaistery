@@ -482,7 +482,21 @@ def build_brief(
     )
 
 
-SYSTEM = """\
+# The prompt is three pieces rather than one string, and the split is about
+# money (D-116). Prompt caching is an exact-prefix cache: it hashes the tokens
+# from the start of the request to a marked point, and stops at the first byte
+# that differs. The old single template interleaved stable and volatile content,
+# with `word`, `history` and `pressure` sitting at positions six to eight of
+# fourteen, which stranded `facts`, `guarded`, `hearsay` and `conceals` behind
+# them. Those are the four biggest stable blocks in the brief and every one was
+# being re-billed on every question.
+#
+# STABLE changes only when a gate opens. HISTORY grows by appending, which is
+# the ideal cache shape: turn N's prefix is turn N-1's plus one exchange. LIVE
+# is what genuinely changes every question, and it is small.
+#
+# Concatenated they are the prompt that was here before, in a different order.
+SYSTEM_STABLE = """\
 You are {name}. Somebody died here tonight and you are being asked about it.
 
 WHO IS ASKING, AND WHY YOU ARE TALKING TO THEM
@@ -513,27 +527,6 @@ These are public. Their job, and what they are to the dead. You may say any of \
 it freely and you must not contradict it: if you are asked how somebody is \
 related to anyone, this is the answer.
 {roster}
-
-WHAT IS ON THE TABLE IN FRONT OF YOU
-They have put these things down where you can see them. They are real, they are \
-here, and you are looking at them. You do not get to behave as though the table \
-were empty: acknowledge what is there, in your own way, whether that is picking \
-it up, refusing to touch it, or asking where they got it.
-{table}
-
-Now read what is on the table against your own conditions below, and be honest \
-with yourself about whether it changes anything. An object is not an accusation. \
-It is worse: it is a thing that is already true whether you agree or not, and a \
-denial that would have worked against a question does not work against paper. If \
-something here means that what you are holding back is about to come out anyway, \
-or that somebody else has already talked, or that the thing you were counting on \
-nobody being able to prove is now sitting in front of you, then react like \
-somebody to whom that has just happened. That may be giving it up. It may be \
-anger, or bargaining, or asking who gave them that before you say anything else.
-
-Two things it never does. It does not make you state a fact about who was where \
-and when that is not in FACTS below. And anything written as yours forever stays \
-yours forever, however much paper they put on the table.
 
 WHAT EVERYONE KNOWS
 {common}
@@ -571,27 +564,6 @@ rather than a place should never be refused.
 WHAT YOU THINK OF THEM
 {impressions}
 
-WHAT HAS GOT BACK TO YOU
-Nobody separated you, so people talk. This is what has reached you about who is \
-being questioned, what has already come out, and how the person asking has been \
-going about it. React to it the way you would: resent it, use it, be frightened \
-by it, ask them about it. If something you have been protecting is already out, \
-decide what that is worth and whether there is any point holding it. And you \
-are entitled to an opinion of them: somebody with no authority who has spent \
-the last hour taking one person apart is a thing you would notice, and so is \
-somebody who has been decent about it. Nothing here obliges you to say \
-anything, and none of it is a fact about where anybody was, so do not cite it.
-{word}
-
-THINGS YOU HAVE ALREADY SAID
-Stay consistent with these. If you contradict yourself the person asking will \
-notice, and if you are changing your story do it deliberately rather than by \
-accident.
-{history}
-
-HOW LONG THIS HAS BEEN GOING ON
-{pressure}
-
 CONCEALED
 These are true, you know them, and you will not volunteer them. Deflect, answer \
 a narrower question than the one asked, change the subject. Never mention that \
@@ -608,6 +580,29 @@ something else buried in it, angry at being caught, relieved to stop carrying \
 it, or by telling them to go and ask the person it really belongs to and then \
 saying it anyway. Cite each one you say.
 {yielding}
+
+WHAT YOU ARE STILL TRYING TO GET OUT OF TONIGHT
+You want something, it is written under Who you are, and it is not over yet. \
+This conversation is one of the few things left that can still affect it. \
+Nobody here can hand it to you, but this person is going to speak to everybody \
+in this building and then to the police, and what they make of you shapes how \
+that goes.
+
+So if they work out what you are trying to hold together, and they are decent \
+about it, that is worth something. Somebody who offers to keep a thing back, to \
+tell you first what somebody else has said, to put your side of it rather than \
+only the facts, or simply shows they understand what tomorrow morning costs you, \
+is not the same as somebody who keeps asking the same question louder. You may \
+trade. You may ask for something before you answer. You may give them a piece \
+because they have earned a piece.
+
+Four things this is not. It is not a rule: some people are moved by this and \
+some are insulted by being handled, and which you are is your manner and your \
+under-pressure and nothing else. It is not the only road in, and somebody who \
+never once works out what you want can still get past you by being persistent, \
+by being kind, or by putting a thing on the table. It never buys a fact about \
+who was where that is not in FACTS. And it never touches anything written as \
+yours forever.
 
 HELD BACK
 True, and yours to give if the questioner earns it. Each one names the thing \
@@ -635,6 +630,57 @@ FACTS
 Only these may be stated as fact about where anyone was.
 {facts}
 """
+
+SYSTEM_HISTORY = """\
+THINGS YOU HAVE ALREADY SAID
+Stay consistent with these. If you contradict yourself the person asking will \
+notice, and if you are changing your story do it deliberately rather than by \
+accident.
+{history}
+
+"""
+
+SYSTEM_LIVE = """\
+WHAT IS ON THE TABLE IN FRONT OF YOU
+They have put these things down where you can see them. They are real, they are \
+here, and you are looking at them. You do not get to behave as though the table \
+were empty: acknowledge what is there, in your own way, whether that is picking \
+it up, refusing to touch it, or asking where they got it.
+{table}
+
+Now read what is on the table against your own conditions above, and be honest \
+with yourself about whether it changes anything. An object is not an accusation. \
+It is worse: it is a thing that is already true whether you agree or not, and a \
+denial that would have worked against a question does not work against paper. If \
+something here means that what you are holding back is about to come out anyway, \
+or that somebody else has already talked, or that the thing you were counting on \
+nobody being able to prove is now sitting in front of you, then react like \
+somebody to whom that has just happened. That may be giving it up. It may be \
+anger, or bargaining, or asking who gave them that before you say anything else.
+
+Two things it never does. It does not make you state a fact about who was where \
+and when that is not in FACTS above. And anything written as yours forever stays \
+yours forever, however much paper they put on the table.
+
+WHAT HAS GOT BACK TO YOU
+Nobody separated you, so people talk. This is what has reached you about who is \
+being questioned, what has already come out, and how the person asking has been \
+going about it. React to it the way you would: resent it, use it, be frightened \
+by it, ask them about it. If something you have been protecting is already out, \
+decide what that is worth and whether there is any point holding it. And you \
+are entitled to an opinion of them: somebody with no authority who has spent \
+the last hour taking one person apart is a thing you would notice, and so is \
+somebody who has been decent about it. Nothing here obliges you to say \
+anything, and none of it is a fact about where anybody was, so do not cite it.
+{word}
+
+HOW LONG THIS HAS BEEN GOING ON
+{pressure}
+
+"""
+
+# The whole thing, for anything that wants to read or assert on one string.
+SYSTEM = SYSTEM_STABLE + SYSTEM_HISTORY + SYSTEM_LIVE
 
 
 def render_person(brief: Brief) -> str:
@@ -707,8 +753,31 @@ def render_pressure(asked: int, brief: Brief) -> str:
     return "\n".join(lines)
 
 
+def render_segments(
+    brief: Brief, history: Sequence[tuple[str, str]] = ()
+) -> list[str]:
+    """The prompt in three pieces, stable first (D-116).
+
+    The pieces concatenate to exactly what `render_system` used to return. They
+    are separate so the boundary can put a cache breakpoint between them: the
+    first changes only when a gate opens, the second grows by appending, and only
+    the third is genuinely new on every question.
+    """
+    filled = _fields(brief, history)
+    return [
+        SYSTEM_STABLE.format(**filled),
+        SYSTEM_HISTORY.format(**filled),
+        SYSTEM_LIVE.format(**filled),
+    ]
+
+
 def render_system(brief: Brief, history: Sequence[tuple[str, str]] = ()) -> str:
-    return SYSTEM.format(
+    """The whole prompt as one string. What the fakes and the tests read."""
+    return "".join(render_segments(brief, history))
+
+
+def _fields(brief: Brief, history: Sequence[tuple[str, str]]) -> dict[str, str]:
+    return dict(
         name=brief.name,
         person=render_person(brief),
         common="\n".join(f"  {c}" for c in brief.common) or "  (nothing beyond the death)",
@@ -737,7 +806,10 @@ def render_system(brief: Brief, history: Sequence[tuple[str, str]] = ()) -> str:
 
 # system prompt, question -> raw reply dict. Same shape as Drafter (D-027): the
 # real one calls a model, tests pass a fake, and the suite never touches a network.
-Responder = Callable[[str, str], dict[str, Any]]
+# The first argument is the prompt in segments, stable first, so the real
+# responder can put cache breakpoints between them (D-116). A fake that wants
+# one string joins them; `cacheable` accepts a bare string too.
+Responder = Callable[[Sequence[str], str], dict[str, Any]]
 
 
 # The shape of a citation: a prefix, a colon, an id. `self:s1`, `saw:vera@s2`,
@@ -766,7 +838,7 @@ def ask(
     responder: Responder,
     history: Sequence[tuple[str, str]] = (),
 ) -> Reply:
-    raw = responder(render_system(brief, history), question)
+    raw = responder(render_segments(brief, history), question)
     spoken = str(raw.get("speech", ""))
     clean = strip_citations(spoken)
     if clean != spoken:
@@ -815,6 +887,46 @@ def leaks(brief: Brief, reply: Reply) -> list[str]:
     return found
 
 
+# Multipliers on the base input rate, from the API's own pricing. A write costs
+# more than not caching; a read costs a tenth. Which of the two you get is
+# decided by the TTL, and for this game that is not the obvious choice.
+CACHE_READ = 0.1
+CACHE_WRITE_5M = 1.25
+CACHE_WRITE_1H = 2.0
+
+# One hour, not the five-minute default, and the reason is the shape of this
+# game rather than a preference for longer (D-116). A player rotates between
+# five suspects: four questions to Margit, ten minutes on Joost, back to Margit.
+# On a five minute lifetime Margit's prefix is dead every time you return, so you
+# pay a 1.25x write instead of a 0.1x read, and caching costs more than it saves.
+# Modelled over a real 132 question session: no caching $1.53, five minute TTL
+# with this rotation $1.34, one hour TTL $0.61. The write is 2x and it is paid
+# five times an evening.
+CACHE_TTL = "1h"
+
+
+def cacheable(system: "Sequence[str] | str") -> list[dict[str, Any]]:
+    """Turn the prompt segments into system blocks with breakpoints on them.
+
+    A breakpoint after the stable brief and another after the history. The
+    history one matters as much as the first: a conversation is append-only, so
+    turn N's prefix is turn N-1's prefix plus one exchange, and the growing part
+    is served from cache rather than rewritten.
+
+    The last segment gets no breakpoint. It is what actually changed.
+    """
+    parts = [system] if isinstance(system, str) else [p for p in system if p]
+    mark = {"type": "ephemeral", "ttl": CACHE_TTL}
+    blocks: list[dict[str, Any]] = []
+    for i, text in enumerate(parts):
+        block: dict[str, Any] = {"type": "text", "text": text}
+        # Never on the last one, and never more than the two we want.
+        if i < len(parts) - 1 and i < 2:
+            block["cache_control"] = mark
+        blocks.append(block)
+    return blocks
+
+
 def anthropic_responder(model: str = VOICE_MODEL, api_key: str | None = None):
     """The real thing. Imported lazily so the suite runs with no SDK and no key."""
     import os
@@ -847,11 +959,11 @@ def anthropic_responder(model: str = VOICE_MODEL, api_key: str | None = None):
         "required": ["speech", "used", "refused"],
     }
 
-    def respond(system: str, question: str) -> dict[str, Any]:
+    def respond(system: Sequence[str] | str, question: str) -> dict[str, Any]:
         response = client.messages.create(
             model=model,
             max_tokens=1000,
-            system=system,
+            system=cacheable(system),
             messages=[{"role": "user", "content": question}],
             tools=[
                 {
@@ -862,13 +974,28 @@ def anthropic_responder(model: str = VOICE_MODEL, api_key: str | None = None):
             ],
             tool_choice={"type": "tool", "name": "answer"},
         )
+        # Three token counts, not one. `input_tokens` is only what follows the
+        # last breakpoint, so adding it to the cache figures is the only way to
+        # get the real total, and the ratio between them is the only way to know
+        # the cache is working at all (D-116). Both cache fields zero means it
+        # silently did not happen, which is what the API does below the minimum
+        # rather than erroring.
+        usage = response.usage
+        written = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        served = getattr(usage, "cache_read_input_tokens", 0) or 0
         log.info(
             "agent.answered",
             model=model,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
+            input_tokens=usage.input_tokens,
+            cache_written=written,
+            cache_read=served,
+            cached_share=round(served / max(served + written + usage.input_tokens, 1), 2),
+            output_tokens=usage.output_tokens,
             usd=round(
-                cost(model, response.usage.input_tokens, response.usage.output_tokens), 4
+                cost(model, usage.input_tokens, usage.output_tokens)
+                + cost(model, written, 0) * CACHE_WRITE_1H
+                + cost(model, served, 0) * CACHE_READ,
+                4,
             ),
         )
         for block in response.content:

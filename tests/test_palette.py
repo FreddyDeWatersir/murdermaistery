@@ -128,3 +128,42 @@ def test_the_place_reaches_the_brief_and_yields_to_a_named_setting() -> None:
 
     assert "Where on earth this house is" in brief
     assert "that wins" in brief, "a setting that names a country must override it"
+
+
+# --- the occasion is dealt too (D-115) ---------------------------------------
+
+
+def test_omitting_the_setting_does_not_give_the_same_evening_forever() -> None:
+    """`--setting` defaulted to a fixed string, so every case nobody named a
+    setting for was a private view at the same small art gallery. It was the one
+    input to a case that was never dealt, and the largest one (D-115)."""
+    from mystery.palette import occasion
+
+    drawn = {occasion(seed) for seed in range(20)}
+
+    assert len(drawn) > 8, f"twenty seeds, only {len(drawn)} occasions"
+
+
+def test_an_occasion_reproduces_from_its_seed() -> None:
+    from mystery.palette import occasion
+
+    assert occasion(11) == occasion(11)
+
+
+def test_every_occasion_survives_the_setting_guard() -> None:
+    """A drawn occasion goes straight into the generator, so it must pass the
+    check that refuses a placeholder (D-110)."""
+    from mystery.generator import complaint_about_setting
+    from mystery.palette import OCCASIONS
+
+    for line in OCCASIONS:
+        assert complaint_about_setting(line) is None, line
+
+
+def test_the_entry_points_no_longer_default_to_a_gallery() -> None:
+    import mystery.cli as cli
+    import mystery.web as web
+
+    for module in (cli, web):
+        source = __import__("inspect").getsource(module)
+        assert "default=\"a private view at a small art gallery\"" not in source

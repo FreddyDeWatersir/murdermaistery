@@ -10,7 +10,14 @@ start, and it doubles as the instrument for choosing which model can play which
 role (D-004).
 """
 
-from mystery.agent import ask, build_brief, leaks, render_system, strip_citations
+from mystery.agent import (
+    ask,
+    build_brief,
+    leaks,
+    render_segments,
+    render_system,
+    strip_citations,
+)
 from mystery.knowledge import derive
 from mystery.models import Character, Constraint, FalseClaim, Mystery, Place, Secret, Slot
 
@@ -868,3 +875,139 @@ def test_a_breaking_point_is_not_worded_as_a_password() -> None:
     assert "only if:" not in system
     assert "rather than a password" in system
     assert "by another road has still arrived" in system
+
+
+# --- what they are still trying to get out of tonight (D-114) ----------------
+
+
+def test_a_suspect_is_told_their_own_stake_is_still_live() -> None:
+    """`wants` had been in the brief since the beginning as a line of colour.
+    Nothing told the character that the person asking could affect it, so there
+    was nothing to negotiate over and every road in was pressure (D-114)."""
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, mystery.characters[0].id), [])
+
+    assert "WHAT YOU ARE STILL TRYING TO GET OUT OF TONIGHT" in system
+    assert "You may trade" in system
+
+
+def test_the_trade_is_a_road_and_not_a_rule() -> None:
+    """His worry, and it changed the design: a want must not become the second
+    password after breaking points were the first."""
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, mystery.characters[0].id), [])
+
+    assert "It is not a rule" in system
+    assert "not the only road in" in system
+    assert "some are insulted by being handled" in system
+
+
+def test_a_trade_still_never_buys_a_fact_or_the_thing_kept_forever() -> None:
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, mystery.killer), [])
+
+    stake = system.split("WHAT YOU ARE STILL TRYING")[1].split("HELD BACK")[0]
+
+    assert "not in FACTS" in stake
+    assert "yours forever" in stake
+
+
+# --- the prompt is shaped for the cache (D-116) ------------------------------
+
+
+def test_the_segments_are_the_same_prompt_in_a_different_order() -> None:
+    """The reorder is about money, not about writing. Whatever else changes, the
+    three pieces have to be the whole prompt and nothing but it."""
+    from mystery.agent import SYSTEM, SYSTEM_HISTORY, SYSTEM_LIVE, SYSTEM_STABLE
+    from mystery.example import OPENING_NIGHT
+
+    assert SYSTEM == SYSTEM_STABLE + SYSTEM_HISTORY + SYSTEM_LIVE
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    brief = build_brief(mystery, knowledge, mystery.characters[0].id)
+    history = [("what did you see", "not very much at all")] * 3
+
+    assert "".join(render_segments(brief, history)) == render_system(brief, history)
+
+
+def test_nothing_that_changes_every_question_is_in_the_stable_part() -> None:
+    """The whole saving. `word`, `history` and `pressure` used to sit at
+    positions six to eight of fourteen, stranding `facts`, `guarded`, `hearsay`
+    and `conceals` behind them (D-116)."""
+    from mystery.agent import SYSTEM_STABLE
+
+    for volatile in ("{word}", "{history}", "{pressure}", "{table}"):
+        assert volatile not in SYSTEM_STABLE, f"{volatile} breaks the cache prefix"
+
+    for stable in ("{facts}", "{guarded}", "{hearsay}", "{conceals}", "{roster}"):
+        assert stable in SYSTEM_STABLE, f"{stable} should be cacheable and is not"
+
+
+def test_the_stable_part_is_the_bulk_of_the_prompt() -> None:
+    """If the stable part were small the reorder would not be worth doing, and a
+    later edit that moves a big block into the tail should say so here."""
+    from mystery.agent import SYSTEM_LIVE, SYSTEM_STABLE
+
+    assert len(SYSTEM_STABLE) > 3 * len(SYSTEM_LIVE)
+
+
+def test_the_stable_part_clears_the_models_cache_minimum() -> None:
+    """Below the minimum, `cache_control` is ignored silently and no error is
+    returned. Sonnet 5 wants 1024 tokens."""
+    from mystery.agent import SYSTEM_STABLE
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    knowledge = derive(mystery)
+    stable = render_segments(build_brief(mystery, knowledge, mystery.characters[0].id))[0]
+
+    assert len(stable) / 4 > 1024, "the stable brief is below the cacheable minimum"
+    assert len(SYSTEM_STABLE) > 4096
+
+
+def test_breakpoints_go_on_every_segment_but_the_last() -> None:
+    from mystery.agent import CACHE_TTL, cacheable
+
+    blocks = cacheable(["stable", "history", "live"])
+
+    assert [b.get("cache_control") is not None for b in blocks] == [True, True, False]
+    assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": CACHE_TTL}
+    assert [b["text"] for b in blocks] == ["stable", "history", "live"]
+
+
+def test_the_ttl_is_an_hour_because_players_rotate() -> None:
+    """Five suspects and a player who moves between them means a five minute
+    prefix is dead every time they come back, and a write costs more than not
+    caching. Modelled on a real session: no cache $1.53, 5m $1.34, 1h $0.61."""
+    from mystery.agent import CACHE_TTL
+
+    assert CACHE_TTL == "1h"
+
+
+def test_a_bare_string_still_works() -> None:
+    """Anything holding the old contract gets one uncached block rather than a
+    crash."""
+    from mystery.agent import cacheable
+
+    blocks = cacheable("one whole prompt")
+
+    assert blocks == [{"type": "text", "text": "one whole prompt"}]
+
+
+def test_never_more_than_the_four_breakpoints_the_api_allows() -> None:
+    """A fifth is a 400, so this must hold however many segments arrive."""
+    from mystery.agent import cacheable
+
+    blocks = cacheable([f"part {i}" for i in range(9)])
+
+    assert sum(1 for b in blocks if "cache_control" in b) <= 4

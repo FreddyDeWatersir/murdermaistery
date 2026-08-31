@@ -30,6 +30,27 @@ separately) needs `OPENAI_API_KEY` and
 
 ---
 
+**AWS, as of 31 August 2026**
+
+Stage 4 has started. Nothing in the code touches AWS yet: this is the account and
+the first bucket, and the local game is unchanged and needs no credentials.
+
+| | |
+|---|---|
+| Account | the original one, recovered by root email. Root has MFA, daily work is an IAM user with `AdministratorAccess` and its own MFA |
+| Guard rails | a zero-spend budget and a $5 budget, both by email, set before any resource existed |
+| Region | **eu-north-1** (Stockholm). Console region comes from the top-right selector; it must match `aws configure get region` |
+| Bucket | `mystery-cases-197099231733-eu-north-1-an`, account regional namespace, versioning on, all public access blocked, SSE-S3 |
+| Verified | `aws s3 cp` / `ls` / `rm` round-trip against it |
+
+Next: `S3Shelf` against the `Shelf` protocol already in `library.py`, with
+`cases/{id}.json` for `load` and zero-byte `index/{saved}__{id}` markers for
+`cards`, because S3 lists by prefix and never by suffix. `FileShelf` stays the
+default: local must keep working with no account, no credentials and no Docker,
+and if that ever breaks we have done this wrong. See D-117.
+
+---
+
 **Where things are, 27 August 2026**
 
 The game is playable end to end in a browser, three playtests deep. The third
@@ -56,14 +77,14 @@ timeline answered the case on its own (D-063).
 - `scenery.py` — one optional establishing shot of the place
 - `example.py` — one case in the repo, for `--dry-run` and the end-to-end test
 - `library.py` — the shelf: cheap listings, whole cases, and the art with them
-- `palette.py` — manners, motives, intrigues, where on earth the house is, the
-  player's standing and the old business that binds the cast, dealt from the seed
+- `palette.py` — the occasion, where on earth the house is, manners, motives,
+  intrigues, the player's standing and the old business, all dealt from the seed
 - `session.py` — a play-through, as a record, and what has been shown to whom
 - `daily.py` — the rota: claim a day, and the buffer behind it
 - `portraits.py` — optional generated faces, never load-bearing
-- Three hundred and seventeen tests green, ruff clean, no test calls an API
+- Three hundred and thirty three tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- One hundred and thirteen decisions in `docs/decisions.md`
+- One hundred and seventeen decisions in `docs/decisions.md`
 
 **Which model does what**
 
@@ -74,7 +95,7 @@ timeline answered the case on its own (D-063).
 
 Both overridable: `--generator-model` and `--model`. See D-060.
 
-A draft costs about twenty five cents, a question about half a cent, so a case is
+A draft costs about twenty five cents, a played evening about seventy, a question about half a cent, so a case is
 roughly twenty cents to make and twenty five more to play through. Every model
 call logs its own `usd`, and `--fill` prints the bill before it starts. See
 D-084.
@@ -175,7 +196,7 @@ All invented. All at least visible. See D-025 and D-031.
 **How to check the state of things, cheapest first**
 
     uv sync                                   # httpx is new
-    uv run pytest                             # 317 tests, no network, no spend
+    uv run pytest                             # 333 tests, no network, no spend
     uv run ruff check .
     uv run python -m mystery.cli --topologies
     uv run python -m mystery.cli --material 3 --setting "a residency"  # what 3 seeds get dealt
@@ -224,6 +245,14 @@ first is free to start with the second, as long as every flag matches.
   with it. See D-112
 - A breaking point is the shape of what gets past somebody, never a password.
   No required gesture, order of words, or phrasing. See D-113
+- The prompt is three segments, stable first, with cache breakpoints between
+  them and a one hour TTL. Anything added to the brief goes in the stable part
+  unless it genuinely changes every question. See D-116
+- Omitting `--setting` draws an occasion from the seed. Nothing about a case is
+  hardcoded any more. See D-115
+- What somebody wants tonight is a road into them, never the road. It is never
+  shown on screen, never buys a fact, and never moves the thing written as
+  theirs forever. See D-114
 
 **Errands, not gates**
 

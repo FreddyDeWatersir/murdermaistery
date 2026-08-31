@@ -385,3 +385,29 @@ def test_a_portrait_prompt_survives_a_character_with_no_gender_written() -> None
 
     assert "The subject is a person." in asked
     assert "a woman" not in asked and "a man" not in asked
+
+
+def test_the_web_path_hands_the_responder_three_segments() -> None:
+    """The seam. `ask` builds the segments and the boundary puts the breakpoints
+    on them, so if the web path ever flattened them to one string the caching
+    would silently stop and nothing else would fail (D-116)."""
+    from fastapi.testclient import TestClient
+
+    from mystery.agent import cacheable
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    seen: list = []
+
+    def watching(system, question):
+        seen.append(system)
+        return {"speech": "The green room.", "used": [], "refused": False}
+
+    case = Case(solve(CASE, seed=0), id="seams")
+    who = next(c.id for c in case.mystery.characters if c.id != case.mystery.victim)
+    client = TestClient(build_app(case, watching))
+    client.post("/ask", json={"who": who, "text": "Where were you?"})
+
+    assert len(seen) == 1
+    assert isinstance(seen[0], list) and len(seen[0]) == 3
+    assert sum(1 for b in cacheable(seen[0]) if "cache_control" in b) == 2

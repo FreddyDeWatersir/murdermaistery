@@ -30,6 +30,7 @@ from mystery.library import load as load_case
 from mystery.library import save as save_case
 from mystery.models import Mystery
 from mystery.palette import draw as draw_palette
+from mystery.palette import occasion
 from mystery.solvable import report
 from mystery.solver import solve
 from mystery.topology import LIBRARY, assess, drawn
@@ -225,7 +226,11 @@ def _casts() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate, solve and check one mystery.")
-    parser.add_argument("--setting", default="a private view at a small art gallery")
+    parser.add_argument(
+        "--setting",
+        default=None,
+        help="what the gathering is. Drawn from the seed when omitted (D-115)",
+    )
     parser.add_argument("--cast", type=int, default=5)
     parser.add_argument("--slots", type=int, default=5)
     parser.add_argument("--places", type=int, default=5)
@@ -326,6 +331,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.topology is None:
         args.topology = drawn(args.seed)
         print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
+
+    # The one input that was never dealt. `--setting` defaulted to a fixed
+    # string, so every case nobody named a setting for was the same private view
+    # at the same small art gallery (D-115). Drawn from the seed like the shape,
+    # and printed, so the number still reproduces the whole case.
+    if args.setting is None:
+        args.setting = occasion(args.seed)
+        print(f"  Occasion: {args.setting}")
+
 
     if args.topologies:
         print(topologies())

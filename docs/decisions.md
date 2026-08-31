@@ -2500,3 +2500,238 @@ library and the different shapes of lie. He asked to keep the vibe going. Noted
 here so that a later decision that would flatten any of them has to argue with a
 playtest rather than with a preference.
 **Status:** active
+
+## D-114 The lever that was already in the file
+**Date:** 2026-08-30
+**Asked to choose between a leverage deck, a four-axis personality model and two
+more shapes of lie, he chose the first and then said the thing that mattered
+more than the choice:** "im just afraid it would become too strict as a format
+again. maybe it can be extra nice ways to get at them? but not the only ones?
+and there should be a variety of things, only some that make sense with rest of
+vibe of character and that dont significantly change but only enrich a bit."
+
+That is D-113 arriving one day early, as a prediction rather than a post-mortem,
+and it killed the deck.
+
+**Because a deck was the wrong answer anyway, and `wants` was the right one.**
+`Character.wants` has existed since the first cast: private, per person, written
+for that person in that house, and rendered in every brief as "You want: ..." In
+the played case they were excellent and completely distinct. Margit wanted a
+clean unanimous story by nine o'clock. Pim wanted to be liked well enough that
+nobody said out loud what everybody could see. Sanne wanted her letters back
+before anybody else read them. Five different wants, varying every case, already
+tied to the character's actual situation.
+
+**And not one thing in the prompt told anybody they could be traded with.** The
+want sat there as colour. The character was never told that this person is about
+to speak to everybody in the house and then to the police, that what they make of
+them shapes how tomorrow goes, and that somebody who works out what you are
+holding together and is decent about it is a different proposition from somebody
+asking the same question louder. So there was one road in, pressure, and the
+whole negotiation half of an interrogation did not exist.
+
+A deck would have added a second authored field to sit next to an unused one.
+**One paragraph makes the field that already varies per character do the work,**
+which is exactly his "only some that make sense with rest of vibe of character":
+it cannot fail to fit the character, because the character wrote it.
+
+**The fence is four sentences and every one of them is his worry.** It is not a
+rule: some people are moved by this and some are insulted by being handled, and
+which you are is your manner and nothing else. It is not the only road, and
+somebody who never works out what you want can still get in by being persistent,
+by being kind, or by putting a thing on the table. It never buys a fact about who
+was where. It never touches what is written as theirs forever.
+
+**Nothing is added to the screen, deliberately.** A "what they want" card would
+turn this into a checklist, which is the objects mistake from D-112 in a new
+place. A want is inferred from how somebody talks or it is not inferred, and Pim
+wanting to be liked is already visible in the fact that he agrees with everything.
+
+**One generator change, phrased to avoid the D-108 trap of asking for a minimum
+and getting exactly the minimum.** A want has to be live: something tonight can
+still change and another person could imaginably help with or ruin. "To not be
+named tomorrow morning" is live. "To have been a better painter" is not, because
+nobody can offer anything against it. And the reachability should vary, so that
+working out who can be dealt with at all is itself part of the case.
+
+**The general note.** Asked for a new mechanic, the first move should be to check
+what is already in the model and not wired to anything. That is now the tenth
+time, and the first time the answer was found before the feature was built rather
+than after a playtest.
+**Status:** active
+
+## D-115 Every unnamed case was the same art gallery
+**Date:** 2026-08-30
+**"If i leave the setting empty, what happens? is it better if i give something
+or not?"** The answer was worse than the question expected. `--setting` defaulted
+to the literal string `"a private view at a small art gallery"`, in both entry
+points, so every case where nobody typed a setting was the same evening in the
+same room, forever. Not a random gallery. That gallery.
+
+**It was the one input to a case that was never dealt.** The seed is drawn
+(D-102), the shape is drawn from the seed (D-103), the manners, the motive, the
+intrigues, the old business and the player's standing are all dealt (D-075), and
+where on earth the house is was added yesterday (D-111). The setting sat outside
+all of it with a hardcoded default, and it is the largest input of the lot: it
+decides the building, the cast's jobs, what is at stake and what a victim can
+threaten.
+
+**`OCCASIONS`, eighteen of them, drawn on the seed alone** like `WHERE`, so the
+number the run prints still reproduces the whole case. Each has the same job and
+the deck is written to that job rather than to atmosphere: put a small group
+under one roof past the point where they can leave, and put something at stake in
+the morning. That stake is what a victim can threaten somebody with and what a
+killer runs out of time about, so an occasion with nothing due at nine o'clock is
+not an occasion, it is a location.
+
+Paired with `WHERE` it produces a specific evening in a specific country from one
+number: the eve of a wedding half the household is against, in the Aegean in the
+wrong month. Neither deck knows about the other and that is fine; the model is
+given both and writes the intersection.
+
+**Naming a setting still wins**, and is still the better move when you have one
+in mind, because a setting somebody actually wanted beats a card off a deck. What
+changed is that the alternative is no longer a fixed gallery.
+
+**The general note, which is the third time in three days.** A default that was
+written to make a command runnable during development quietly became the
+behaviour of the product. It was invisible precisely because it worked: nothing
+failed, nothing warned, and the only way to notice was to ask what happens when
+you leave it out. Grep the argument parsers for a hardcoded default the next time
+something feels samey.
+**Status:** active
+
+## D-116 The prompt was ordered by how it reads, not by what it costs
+**Date:** 2026-08-31
+**Asked whether any deployment shape pays for itself, and the answer turned out
+to be a question about prompt ordering.** Prompt caching is an exact-prefix cache
+over tokens: the API hashes from the start of the request to a marked point and
+stops at the first byte that differs. Not semantic, not partial. One byte and you
+get nothing.
+
+`render_system` built one string with fourteen substitutions in the order they
+read well:
+
+    investigator person roster table common impressions word HISTORY pressure
+    conceals yielding guarded hearsay facts
+
+`word` changes every question, `history` grows every question, `pressure`
+changes every question, and they sat at positions six, seven and eight of
+fourteen. Everything after them was uncacheable, which is `conceals`,
+`yielding`, `guarded`, `hearsay` and `facts`: **the five biggest stable blocks
+in the brief, all stranded behind three small volatile ones.** Nobody ordered it
+badly; it was ordered before cost was a consideration and never revisited, which
+is the same shape as the token ceiling in D-110.
+
+**Three pieces now.** `SYSTEM_STABLE` (6,456 chars, changes only when a gate
+opens), `SYSTEM_HISTORY` (append-only), `SYSTEM_LIVE` (2,058 chars, genuinely new
+each question: table, word, pressure). They concatenate to exactly the old prompt
+in a different order, and a test asserts that, because the reorder is about money
+and must not quietly become an edit to the writing. Two deixis fixes were needed
+where the table block said "below" about blocks now above it.
+
+**The history breakpoint matters as much as the first.** A conversation is
+append-only, so turn N's prefix is turn N−1's prefix plus one exchange, and a
+breakpoint at the end of history means the growing part is served rather than
+rewritten. This is why history moved out of the middle rather than merely later.
+
+**The TTL is the non-obvious part and it is where the money actually is.** The
+five-minute default is measured from the start of the request that writes it, and
+this game has five suspects with a player who rotates: four questions to Margit,
+ten minutes on Joost, back to Margit. On a five-minute lifetime Margit's prefix is
+dead every single time you return, so you pay a 1.25x write instead of a 0.1x
+read, and **caching costs more than not caching**. Modelled over the real
+132-question session:
+
+| | cost |
+|---|---|
+| no caching | $1.53 |
+| 5 minute TTL, with this rotation | $1.34 |
+| **1 hour TTL** | **$0.61** |
+| output tokens alone, uncacheable | $0.34 |
+
+The one-hour write is 2x and it is paid five times an evening. Measured against
+the real case after the change: **$1.54 to $0.69**, against a floor of $0.34 that
+no architecture removes. Anyone who had shipped the default and measured would
+have concluded caching does not help this workload.
+
+**The logging is the part that matters more than the change,** because this is a
+project whose signature failure is a field that reaches the schema and never
+reaches the place it needs to be, and prompt caching fails *silently*: below the
+model's minimum the API ignores `cache_control` and returns no error. So
+`agent.answered` now logs `cache_written`, `cache_read` and a `cached_share`
+ratio, and `usd` is computed with the real multipliers rather than pretending
+every input token cost list price. Both cache fields zero means it did not
+happen. A test asserts the stable segment clears the 1,024-token minimum for
+Sonnet 5, and another caps breakpoints at four, because a fifth is a 400.
+
+**One interface change, made properly rather than worked around.** `Responder`
+now takes the prompt as segments rather than one string. Five fakes needed one
+line each. The alternative was sniffing the callable's signature, which would
+have hidden the change instead of making it.
+**Status:** active
+
+## D-117 One account, one region, and a bucket shaped like the protocol
+**Date:** 2026-08-31
+**The AWS work started with three choices worth writing down, because next time
+the question will be "why is it like this" and the answer will have evaporated.**
+
+**One account, the old one, not a new one.** There was an existing account with
+forgotten credentials. The first instinct was to abandon it and take the new
+account's $100-200 of Free Tier credits, and that was wrong twice over. An
+abandoned account you cannot sign into is not neutral: anything left running has
+been billing a card, and a NAT gateway alone is about thirty dollars a month
+doing nothing. Recovery only needs the signup email, not the password. Cost
+Explorer showed zero across twelve months, so nothing was running, and a second
+bucket from an old ML exercise turned up as the only trace.
+
+Against the credits: the AWS Free Tier changed in July 2025. A new account picks
+a Free Plan, gets credits, and the plan ends at **six months or when the credits
+run out, whichever is first**, after which there are ninety days to upgrade or
+**AWS permanently closes the account**. For infrastructure meant to keep running
+and be pointed at in interviews, an account with a self-destruct timer is a
+liability. The credits are not decisive either way, because the whole point of
+the Lambda shape is that the infrastructure costs cents: one played case costs
+more in model calls than a month of AWS.
+
+**eu-north-1, Stockholm.** Cheapest region in Europe, largely hydro and wind. The
+choice matters less than the writing down: a region is set once and a resource
+created in the wrong one is invisible rather than missing, which is the single
+most common early confusion. The console's region comes from the top-right
+selector rather than from any form, and it has to match `aws configure get
+region`.
+
+**The bucket uses the account regional namespace.** New in March 2026, and it
+reserves a slice of the S3 namespace only this account can create in, so the
+name carries `-197099231733-eu-north-1-an` and cannot collide with anybody. AWS
+documents it as a security best practice and states that applications need no
+change, which was worth verifying rather than assuming, since a bucket name is
+permanent. It also means the random suffix originally added to dodge a global
+collision was redundant, so the name is plain `mystery-cases`.
+
+Versioning on, all four public-access blocks on, ACLs disabled (bucket owner
+enforced), SSE-S3 rather than KMS. KMS is the interesting one to have rejected:
+it charges per request and adds a `kms:Decrypt` grant the Lambda needs, which is
+a permission people routinely forget and then debug an AccessDenied that never
+mentions KMS. Nothing about case JSON justifies that.
+
+**What the shelf will look like, and why the design was already done.** `Card`'s
+docstring, written months before any of this, says the hot path needs only the id
+and when it was made, that both live in **the object's name**, and that a listing
+should therefore be "one request and no reads at all, rather than one request and
+three hundred" (D-081). That is the S3 cost model exactly, arrived at from first
+principles on a filesystem.
+
+The one thing it does not solve is that the current key is `{saved}__{id}.json`,
+with the id at the end. **S3 can only list by prefix, never by suffix**, so
+`load(case_id)` would have to list everything and filter. The fix is the pattern
+worth learning: the key namespace *is* the index, so each prefix is shaped for
+the one access pattern that uses it.
+
+    cases/{id}.json          load(): one GET, key derived from the id
+    index/{saved}__{id}      cards(): one LIST, zero GETs, sorted by name
+
+The second is a zero-byte object whose name is the entire payload. Two writes per
+save so that both reads are cheap, which is the right trade when saves happen
+once a night and reads happen on every page load.
+**Status:** active

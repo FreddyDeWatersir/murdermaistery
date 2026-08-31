@@ -182,6 +182,37 @@ WHERE = [
 ]
 
 
+# What has brought them together, and why it has to be tonight. The one input to
+# a case that was never dealt: `--setting` defaulted to a fixed string, so every
+# case somebody did not name a setting for was a private view at a small art
+# gallery, forever (D-115). Paired with WHERE, an occasion here becomes a
+# specific evening in a specific country.
+#
+# Each one has to put a small group under one roof past the point where they can
+# leave, and put something at stake in the morning. That is the whole job: the
+# stake is what a victim can threaten and what a killer runs out of time about.
+OCCASIONS = [
+    "the last night of a residency, with the funding decision in the morning",
+    "a family gathered to sign the sale of a business none of them agree about",
+    "the closing dinner of an inspection that has gone badly for somebody",
+    "a wake, on the night before the will is read",
+    "a small firm's annual weekend, the year the accounts stopped adding up",
+    "the eve of a wedding that half the household is quietly against",
+    "a handover: the outgoing and incoming both here, and the books open",
+    "the night a long strike is settled, in the building it was about",
+    "a reunion of people who were all somewhere else together, twenty years ago",
+    "the last service before a place closes for good, staff and owners both",
+    "a christening lunch that has run into the evening and not broken up",
+    "the night before an auction of everything in the house",
+    "a board stranded overnight by weather, with the vote due at nine",
+    "the anniversary dinner of the thing nobody mentions",
+    "a harvest, a catch or a season's end, with the money being divided",
+    "an inheritance being counted, physically, room by room, over one night",
+    "the final rehearsal before an opening that several people need to fail",
+    "a hospital, hotel or school being handed to new owners at first light",
+]
+
+
 @dataclass(frozen=True)
 class Palette:
     manners: list[str]
@@ -244,3 +275,13 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
         # (D-111).
         where=random.Random(f"where|{seed}").choice(WHERE),
     )
+
+
+def occasion(seed: int) -> str:
+    """What is happening tonight, drawn from the seed.
+
+    Used when nobody passed `--setting`. Keyed the same way as `where`, on the
+    seed alone, so that the two together are reproducible from the number the
+    run prints and nothing else (D-115).
+    """
+    return random.Random(f"occasion|{seed}").choice(OCCASIONS)

@@ -224,6 +224,17 @@ the player has asked anything, so it must contain nothing they would hide.
 `wants` is the opposite: private, what they are actually after tonight. The \
 player never sees it written down and has to work it out.
 
+**Make it something tonight can still change, and something another person \
+could imaginably help with or ruin.** The questioner will be told that what this \
+person is trying to hold together is one of the ways into them: not the only \
+one, and not a lock, but a road. That only works if the want is live. "To not be \
+named tomorrow morning as the one who left the valve shut" is live, because the \
+person asking will be talking to everybody and then to the police. "To have been \
+a better painter" is not: nobody can offer anything against it. Vary how \
+reachable they are. Somebody should want a specific thing that could physically \
+be handed over, and somebody else should want something no outsider can touch at \
+all, so that working out who can be dealt with is itself part of the case.
+
 `gender` is "woman" or "man". `look` is one sentence: roughly how old, build, \
 and how they are dressed this evening. Be concrete, and vary it. Not everyone \
 is elegant and in their forties. Somebody is over sixty. Somebody is under \

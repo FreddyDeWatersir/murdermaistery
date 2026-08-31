@@ -79,7 +79,7 @@ def _cites_everything(system, question):
     the leak detector and the best case for filling a notebook."""
     ids = [
         line.strip()[1:].split("]")[0]
-        for line in system.splitlines()
+        for line in "".join(system).splitlines()
         if line.strip().startswith("[")
     ]
     return {"speech": "Here is everything.", "used": ids, "refused": False}

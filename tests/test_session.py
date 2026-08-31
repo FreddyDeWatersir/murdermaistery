@@ -17,9 +17,11 @@ CASE = Case(solve(Mystery.model_validate(OPENING_NIGHT), seed=0), id="opening-ni
 
 
 def _answers(system, question):
+    # The responder is handed the prompt in segments now (D-116); a fake that
+    # wants one string joins them.
     ids = [
         line.strip()[1:].split("]")[0]
-        for line in system.splitlines()
+        for line in "".join(system).splitlines()
         if line.strip().startswith("[")
     ]
     return {"speech": "As I said.", "used": ids[:1], "refused": False}
