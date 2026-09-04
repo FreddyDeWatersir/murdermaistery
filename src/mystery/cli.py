@@ -23,11 +23,11 @@ from mystery.generator import (
     generate,
 )
 from mystery.knowledge import analyse_alibi, derive
-from mystery.library import ART, catalogue
+from mystery.library import ART, S3Shelf, catalogue
 from mystery.library import LIBRARY as LIBRARY_DIR
 from mystery.library import entries as saved_cases
-from mystery.library import load as load_case
-from mystery.library import save as save_case
+from mystery.library import load as load_local
+from mystery.library import shelf as pick_shelf
 from mystery.models import Mystery
 from mystery.palette import draw as draw_palette
 from mystery.palette import occasion
@@ -76,21 +76,22 @@ def _fill(args, want: int) -> int:
     """
     from mystery.solvable import analyse
 
+    store = pick_shelf()
     complaint = complaint_about_setting(args.setting)
     if complaint:
         print(f"  {complaint}")
         return 2
 
-    needed = shortfall(want=want)
+    needed = shortfall(store, want=want)
     if not needed:
-        print(f"  Buffer is full: {len(waiting())} cases waiting. Nothing to do.")
+        print(f"  Buffer is full: {len(waiting(store))} cases waiting. Nothing to do.")
         return 0
 
     # Said before it is spent (D-084). A draft is about nineteen cents at Opus
     # prices, and a retry costs the same again, so the honest number is a range.
     least = draft_estimate(drafts=needed)
     print(f"  Setting: {args.setting}")
-    print(f"  {len(waiting())} waiting, want {want}. Generating {needed}.")
+    print(f"  {len(waiting(store))} waiting, want {want}. Generating {needed}.")
     print(f"  About ${least:.2f}, up to ${least * ATTEMPTS:.2f} if every one needs retries.")
     made = 0
 
@@ -134,7 +135,7 @@ def _fill(args, want: int) -> int:
             if complaints:
                 print(f"  seed {seed}: advisories {sorted(set(complaints))}")
 
-            kept = save_case(solved, args.setting, shape, seed)
+            kept = store.save(solved, args.setting, shape, seed)
             print(f"  {kept.id}   seed {seed}   {shape}")
             made += 1
             break
@@ -142,7 +143,7 @@ def _fill(args, want: int) -> int:
             print(f"  Gave up after {ATTEMPTS} attempts. {made} made, buffer short.")
             return 1
 
-    print(f"  {made} added. {len(waiting())} waiting.")
+    print(f"  {made} added. {len(waiting(store))} waiting.")
     return 0
 
 
@@ -156,7 +157,7 @@ def _bundle(case_id: str) -> int:
     """
     import zipfile
 
-    case = load_case(case_id)
+    case = load_local(case_id)
     art = ART / case.id
     out = Path(f"{case.id}.zip")
 
@@ -222,6 +223,40 @@ def _casts() -> str:
         ]
         blocks.append(f"  {case.id}  ({case.topology or 'the_lie'})\n" + "\n".join(people))
     return "\n\n".join(blocks) or "  Nothing saved yet."
+
+
+def _draw(args, announce: bool = True) -> None:
+    """Fill in whatever was left off the command line, and say what was drawn.
+
+    Only the commands that actually build a case call this. It used to run
+    unconditionally after parsing, so `--cases` announced a seed, a shape and an
+    occasion before printing a listing, none of which had anything to do with
+    anything (D-120). A number nobody used is worse than no number: it looks like
+    provenance.
+    """
+    # Drawn once rather than defaulted to zero, so two runs of the same command
+    # are two different evenings (D-102). Printed, because a seed you cannot read
+    # is not reproducible.
+    if args.seed is None:
+        args.seed = fresh_seed()
+        if announce:
+            print(f"  Seed {args.seed}. Pass --seed {args.seed} for this case again.")
+
+    # The shape comes from the seed too, so the number reproduces the whole case
+    # and not most of it (D-103). `pinned` is kept because --fill draws a shape
+    # per case rather than one for the batch, and may only do that when the shape
+    # was left to us.
+    args.pinned = args.topology is not None
+    if args.topology is None:
+        args.topology = drawn(args.seed)
+        if announce:
+            print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
+
+    # The one input that was never dealt, until D-115.
+    if args.setting is None:
+        args.setting = occasion(args.seed)
+        if announce:
+            print(f"  Occasion: {args.setting}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -316,37 +351,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Drawn once here rather than defaulted to zero, so two runs of the same
-    # command are two different evenings (D-102). Printed, because a seed you
-    # cannot read is not reproducible.
-    if args.seed is None:
-        args.seed = fresh_seed()
-        print(f"  Seed {args.seed}. Pass --seed {args.seed} for this case again.")
-
-    # The shape comes from the seed too, so the number reproduces the whole
-    # case and not most of it (D-103). `pinned` is kept because --fill draws a
-    # shape per case rather than one for the batch, and it may only do that when
-    # the shape was left to us.
-    args.pinned = args.topology is not None
-    if args.topology is None:
-        args.topology = drawn(args.seed)
-        print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
-
-    # The one input that was never dealt. `--setting` defaulted to a fixed
-    # string, so every case nobody named a setting for was the same private view
-    # at the same small art gallery (D-115). Drawn from the seed like the shape,
-    # and printed, so the number still reproduces the whole case.
-    if args.setting is None:
-        args.setting = occasion(args.seed)
-        print(f"  Occasion: {args.setting}")
-
+    # One shelf for this process, chosen once, from the environment (D-119).
+    store = pick_shelf()
+    if isinstance(store, S3Shelf):
+        print(f"  Shelf: s3://{store.bucket}")
 
     if args.topologies:
         print(topologies())
         return 0
 
     if args.cases:
-        print(catalogue())
+        print(catalogue(store))
         return 0
 
     if args.casts:
@@ -360,22 +375,43 @@ def main(argv: list[str] | None = None) -> int:
         return _unbundle(Path(args.unbundle))
 
     if args.today:
-        case = todays_case()
-        queue = waiting()
+        case = todays_case(store)
+        queue = waiting(store)
         print(f"  Today:   {case.id if case else 'NOTHING. Run --fill'}")
         print(f"  Waiting: {len(queue)} ({', '.join(c.id for c in queue) or 'none'})")
         return 0
 
     if args.fill:
+        _draw(args)
         return _fill(args, args.fill)
 
     if args.material:
+        _draw(args)
         for seed in range(args.seed, args.seed + args.material):
             print(f"\n=== seed {seed} " + "=" * 52)
             print(draw_palette(seed, args.setting, args.topology, args.cast).brief())
         return 0
 
-    if not (args.case or args.dry_run):
+    # Inspecting a saved case needs no seed, no shape and no occasion: it has its
+    # own, from the night it was made. It returns before anything is drawn, so
+    # the request below is built only on the path that actually generates
+    # (D-120). Building it earlier meant `--case` constructed a request out of
+    # three Nones and died in validation.
+    if args.case:
+        saved = store.load(args.case)
+        solved = saved.mystery
+        print(f"\n{solved.title}\n")
+        print(render(solved))
+        print("\n" + report(solved))
+        for advisory in assess(solved, saved.topology or "the_lie"):
+            print(f"  [{advisory.check}] {advisory.message}")
+        return 0
+
+    # A dry run fills these in because the request object needs them, and
+    # announces nothing, because nothing it prints would be true (D-120).
+    _draw(args, announce=not args.dry_run)
+
+    if not args.dry_run:
         complaint = complaint_about_setting(args.setting)
         if complaint:
             print(complaint)
@@ -390,18 +426,16 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
     )
 
-    if args.case:
-        saved = load_case(args.case)
-        solved = saved.mystery
-        print(f"\n{solved.title}\n")
-        print(render(solved))
-        print("\n" + report(solved))
-        for advisory in assess(solved, saved.topology or args.topology):
-            print(f"  [{advisory.check}] {advisory.message}")
-        return 0
-
     # The dry run swaps the model for a case that is already in the repo. Every
     # other stage is the real one, parse boundary included (D-070).
+    if args.dry_run:
+        # Say what this is. The drafter is replaced by the shipped case, so the
+        # seed, the shape and the occasion drawn above reach nothing: the output
+        # is Opening Night whatever they said, and the shape advisories below
+        # will complain that a case nobody asked a model for is not the shape
+        # nobody asked for (D-120).
+        print("  Dry run: the shipped example case. No model, no spend, nothing kept.")
+
     drafter = (
         (lambda request, complaints: OPENING_NIGHT) if args.dry_run else anthropic_drafter()
     )
@@ -488,13 +522,18 @@ def main(argv: list[str] | None = None) -> int:
     for violation in result.violations:
         print(f"  [{violation.rule}] {violation.message}")
 
-    if result.ok:
-        kept = save_case(solved, args.setting, args.topology, args.seed)
+    # A dry run is a check on the pipeline, not a case. It used to keep what it
+    # made, which was harmless clutter in a folder and is junk in a bucket
+    # somebody pays for: the same example case, under a new id, every run
+    # (D-120).
+    if result.ok and not args.dry_run:
+        kept = store.save(solved, args.setting, args.topology, args.seed)
         print(f"\nSaved as {kept.id}. Come back with --case {kept.id}")
+    if result.ok:
         print("\n" + report(solved))
 
     # Advisories on a broken mystery are noise: fix correctness first.
-    advisories = assess(solved, args.topology) if result.ok else []
+    advisories = assess(solved, args.topology) if result.ok and not args.dry_run else []
     if advisories:
         print("\nValid, but:")
         for advisory in advisories:

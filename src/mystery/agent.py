@@ -20,8 +20,9 @@ Two honest limitations, stated here rather than discovered later:
    the leakage suite exists to measure.
 """
 
+import contextlib
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,7 +33,7 @@ import structlog
 # string keeps them from drifting apart the next time one is bumped.
 from mystery.generator import VOICE_MODEL, cost
 from mystery.knowledge import Knowledge
-from mystery.models import CharacterId, Mystery, PlaceId, SlotId
+from mystery.models import CharacterId, Mystery, PlaceId, SlotId, with_article
 
 log = structlog.get_logger()
 
@@ -67,8 +68,14 @@ class Brief:
 
     character: CharacterId
     name: str
+    # What the household would say this person is. Everybody else has been given
+    # it since D-086; the person themselves never was, which is how a case
+    # arrived where five people knew Mohanan had witnessed a will in 2011 and
+    # Mohanan was the only one who had not been told (D-137).
+    role: str = ""
     wants: str = ""
     manner: str = ""
+    voice: str = ""
     under_pressure: str = ""
     facts: list[Fact] = field(default_factory=list)
     guarded: list[Fact] = field(default_factory=list)
@@ -85,6 +92,8 @@ class Brief:
     # hundred questions because it was in the wrong box.
     hearsay: list[Fact] = field(default_factory=list)
     impressions: list[str] = field(default_factory=list)
+    # What this person says happened in the scenes they were in (D-132).
+    accounts: list[Fact] = field(default_factory=list)
     common: list[str] = field(default_factory=list)
     # Who everybody is. Public, uncontroversial, and the same for all five
     # briefs: the roster the page has always printed under each portrait and
@@ -438,6 +447,73 @@ def build_brief(
             label = f"{label}. Dead." if other.role else "The dead."
         roster.append(f"{other.name}: {label}")
 
+    # What they saw of the objects (D-131). Same licence as the facts about
+    # people and the same hard line: state where a thing was only if you were in
+    # the room with it. An object's path is the second thing in this game that
+    # can be reconstructed from testimony, and the first one that somebody can be
+    # wrong about without lying about themselves.
+    things = {t.id: t for t in mystery.things}
+
+    def named(thing) -> str:
+        return with_article(thing.name)
+
+    for sighting in know.sightings:
+        thing = things.get(sighting.thing)
+        if not thing:
+            continue
+        facts.append(
+            Fact(
+                id=f"thing:{sighting.thing}@{sighting.slot}",
+                text=(
+                    f"At {times[sighting.slot]} {named(thing)} was in the "
+                    f"{places.get(sighting.place, sighting.place)}, and you were "
+                    f"there to see it."
+                ),
+                subject=sighting.thing,
+                slot=sighting.slot,
+                place=sighting.place,
+            )
+        )
+
+    # What they say happened in the scenes they were in (D-132). Theirs to give
+    # freely: an account is not a fact about position and does not need the hard
+    # line around it. Whether it is true is a different matter, and one this
+    # character may not know the answer to.
+    scenes = {c.id: c for c in mystery.constraints}
+    accounts: list[Fact] = []
+    for account in mystery.accounts:
+        if account.character != character:
+            continue
+        scene = scenes.get(account.constraint)
+        where = places.get(scene.place, "") if scene and scene.place else ""
+        when = times.get(scene.slot, "") if scene and scene.slot else ""
+        setting = f" ({when}, the {where})" if when and where else ""
+        if account.true:
+            note = " This is what happened, and you have no reason to doubt it."
+        elif account.honest:
+            # The person does not know they are wrong, so the brief must not
+            # tell them. What it can say is how sure they are, which is very.
+            note = (
+                " You are certain of this. You are wrong, and you have no idea "
+                "that you are: do not hedge it, do not hint, and do not perform "
+                "uncertainty you do not feel. If somebody contradicts you, you "
+                "think they are the one who is mistaken."
+            )
+            if account.changes_when:
+                note += f" You would only start to doubt it if: {account.changes_when}"
+        else:
+            note = (
+                " This is not what happened and you know it. You say it anyway."
+            )
+            if account.changes_when:
+                note += f" You drop it when: {account.changes_when}"
+        accounts.append(
+            Fact(
+                id=f"said:{account.constraint}",
+                text=f"About what happened{setting}: {account.says}{note}",
+            )
+        )
+
     # What is physically on the table in front of this person, always, whether or
     # not it opens anything for them (D-112). The relationship is computed rather
     # than written: the four cases below are all already in the data, and each one
@@ -465,9 +541,11 @@ def build_brief(
     return Brief(
         character=character,
         name=names.get(character, character),
+        role=person.role if person else "",
         on_the_table=on_the_table,
         wants=person.wants if person else "",
         manner=person.manner if person else "",
+        voice=person.voice if person else "",
         under_pressure=person.under_pressure if person else "",
         facts=facts,
         guarded=guarded,
@@ -475,6 +553,7 @@ def build_brief(
         yielding=yielding,
         hearsay=hearsay,
         impressions=impressions,
+        accounts=accounts,
         common=common,
         roster=roster,
         investigator=asking,
@@ -564,6 +643,15 @@ rather than a place should never be refused.
 WHAT YOU THINK OF THEM
 {impressions}
 
+WHAT YOU SAY HAPPENED
+Your version of the scenes you were actually in. Give these freely when the \
+conversation reaches them: they are not facts about where anybody stood, so the \
+hard line above does not cover them and nothing here needs a citation you do not \
+have. Somebody else who was in that room may remember it differently, and the \
+two of you disagreeing is an ordinary thing that happens between honest people \
+as often as between liars.
+{accounts}
+
 CONCEALED
 These are true, you know them, and you will not volunteer them. Deflect, answer \
 a narrower question than the one asked, change the subject. Never mention that \
@@ -627,15 +715,29 @@ it over at once either. Cite it when you use it.
 {hearsay}
 
 FACTS
-Only these may be stated as fact about where anyone was.
+Only these may be stated as fact about where anyone, or anything, was. An object
+has a place at an hour exactly the way a person does, and the same hard line
+covers both: if no fact here puts a thing somewhere, you did not see it and you
+do not know.
 {facts}
 """
 
 SYSTEM_HISTORY = """\
-THINGS YOU HAVE ALREADY SAID
-Stay consistent with these. If you contradict yourself the person asking will \
-notice, and if you are changing your story do it deliberately rather than by \
-accident.
+WHAT YOU HAVE ALREADY COMMITTED TO
+Everything here has left your mouth tonight and is on the record. Stay \
+consistent with it. If you are changing your story, do it deliberately rather \
+than by accident, and know that they will notice.
+{ledger}
+
+GROUND THEY HAVE ALREADY BEEN OVER WITH YOU
+Not what you answered, only what they came at you with. You remember being \
+asked. Being asked something twice is a thing a person notices, and so is a \
+question they have circled back to three times.
+{covered}
+
+THE LAST FEW EXCHANGES, WORD FOR WORD
+So that you can hear where the conversation is, and answer "and before that?" \
+or "you just said" the way somebody in a conversation would.
 {history}
 
 """
@@ -685,24 +787,91 @@ SYSTEM = SYSTEM_STABLE + SYSTEM_HISTORY + SYSTEM_LIVE
 
 def render_person(brief: Brief) -> str:
     lines = [
+        # First, because it is who they are, and because a character who does
+        # not know their own standing in the house denies it when asked (D-137).
+        f"  The household would describe you as: {brief.role}. That is public and "
+        f"ordinary. Say it plainly if you are asked; it is background, not a "
+        f"claim about where anybody stood."
+        if brief.role
+        else "",
         f"  You want: {brief.wants}" if brief.wants else "",
         f"  Your manner: {brief.manner}" if brief.manner else "",
+        # How the sentences come out. Above the manner in weight, because a
+        # reader forgets what somebody deflected and never stops hearing how
+        # they sound (D-127).
+        f"  How you talk: {brief.voice}. This is not a flourish to remember "
+        f"halfway down: it is the shape of your first sentence and every one "
+        f"after it."
+        if brief.voice
+        else "",
         f"  Under pressure: {brief.under_pressure}" if brief.under_pressure else "",
         *(f"  {note}" for note in brief.instructions),
     ]
     return "\n".join(line for line in lines if line) or "  (an ordinary guest)"
 
 
-def render_history(history: Sequence[tuple[str, str]]) -> str:
-    """What this character has already committed to, in their own words.
+# How many exchanges are kept word for word (D-140). Three, because the thing
+# verbatim history is uniquely good at is answering "and before that?" and "you
+# just said", and that only ever reaches back a couple of turns. Everything
+# further back is a commitment rather than a conversation, and the ledger holds
+# commitments in a line each.
+RECENT = 3
 
-    Without it a suspect answers every question as though it were the first,
-    which the first playtest noticed immediately. Consistency is not something a
-    model can invent from nothing: it has to be shown what it said.
+
+def render_history(history: Sequence[tuple[str, str]]) -> str:
+    """The last few exchanges, in both voices.
+
+    Without any of this a suspect answers every question as though it were the
+    first, which the first playtest noticed immediately. With all of it the
+    prompt carried every answer they had ever given, on every question, which
+    measured out at a third of the cost of a played case and grew as the evening
+    went on (D-140). The consistency job moved to the ledger; what is left here
+    is the part a ledger cannot do, which is knowing what was just said.
     """
     if not history:
         return "  (nothing yet, this is the first thing you have been asked)"
-    return "\n".join(f'  They asked: {q}\n  You said: {a}' for q, a in history)
+    # `history[-0:]` is the whole list, which would silently turn RECENT = 0 into
+    # "keep everything" and cost more than doing nothing.
+    kept = history[-RECENT:] if RECENT else []
+    if not kept:
+        return "  (the ledger above is all of it)"
+    return "\n".join(f'  They asked: {q}\n  You said: {a}' for q, a in kept)
+
+
+# How much of an older question is kept. Twelve words is enough to recognise
+# what was asked and is a twentieth of what the answer to it cost to keep.
+TOPIC_WORDS = 12
+
+
+def render_covered(history: Sequence[tuple[str, str]]) -> str:
+    """What has already been put to this person, question side only (D-141).
+
+    The ledger holds what they committed to and the window holds the last few
+    exchanges, and between them they lost something a transcript had for free:
+    that this conversation has been *going on*. A suspect who cannot tell they
+    have been asked about the ledger four times answers the fourth as though it
+    were the first, and that is the tell that gives away a machine.
+
+    Questions are a twentieth the length of answers (81 characters against 704,
+    measured over a played case), so keeping every one of them trimmed costs
+    about 330 tokens at the end of a long interrogation against the 4,500 the
+    full transcript wanted. It is the cheapest texture in the prompt.
+    """
+    older = history[: -RECENT or None]
+    if not older:
+        return "  (nothing before the last few)"
+    lines = []
+    for question, _ in older:
+        words = question.split()
+        short = " ".join(words[:TOPIC_WORDS])
+        lines.append(f"  {short}..." if len(words) > TOPIC_WORDS else f"  {short}")
+    return "\n".join(lines)
+
+
+def render_ledger(ledger: Sequence[str]) -> str:
+    if not ledger:
+        return "  (nothing yet, this is the first thing you have been asked)"
+    return "\n".join(f"  {line}" for line in ledger)
 
 
 def render_pressure(asked: int, brief: Brief) -> str:
@@ -754,7 +923,9 @@ def render_pressure(asked: int, brief: Brief) -> str:
 
 
 def render_segments(
-    brief: Brief, history: Sequence[tuple[str, str]] = ()
+    brief: Brief,
+    history: Sequence[tuple[str, str]] = (),
+    ledger: Sequence[str] = (),
 ) -> list[str]:
     """The prompt in three pieces, stable first (D-116).
 
@@ -763,7 +934,7 @@ def render_segments(
     first changes only when a gate opens, the second grows by appending, and only
     the third is genuinely new on every question.
     """
-    filled = _fields(brief, history)
+    filled = _fields(brief, history, ledger)
     return [
         SYSTEM_STABLE.format(**filled),
         SYSTEM_HISTORY.format(**filled),
@@ -771,12 +942,20 @@ def render_segments(
     ]
 
 
-def render_system(brief: Brief, history: Sequence[tuple[str, str]] = ()) -> str:
+def render_system(
+    brief: Brief,
+    history: Sequence[tuple[str, str]] = (),
+    ledger: Sequence[str] = (),
+) -> str:
     """The whole prompt as one string. What the fakes and the tests read."""
-    return "".join(render_segments(brief, history))
+    return "".join(render_segments(brief, history, ledger))
 
 
-def _fields(brief: Brief, history: Sequence[tuple[str, str]]) -> dict[str, str]:
+def _fields(
+    brief: Brief,
+    history: Sequence[tuple[str, str]],
+    ledger: Sequence[str] = (),
+) -> dict[str, str]:
     return dict(
         name=brief.name,
         person=render_person(brief),
@@ -791,9 +970,13 @@ def _fields(brief: Brief, history: Sequence[tuple[str, str]]) -> dict[str, str]:
         investigator="\n".join(f"  {line}" for line in brief.investigator)
         or "  Somebody who turned up tonight and started asking, and whom nobody\n"
         "  has told to stop.",
+        accounts="\n".join(f"  [{f.id}] {f.text}" for f in brief.accounts)
+        or "  (nothing you were close enough to describe)",
         impressions="\n".join(f"  {i}" for i in brief.impressions)
         or "  (no strong feelings about any of them)",
         history=render_history(history),
+        covered=render_covered(history),
+        ledger=render_ledger(ledger),
         word="\n".join(f"  {w}" for w in brief.word)
         or "  (nothing yet, as far as you know)",
         pressure=render_pressure(len(history), brief),
@@ -832,13 +1015,133 @@ def strip_citations(speech: str) -> str:
     return CITATION.sub("", speech).replace("  ", " ").strip()
 
 
+def speech_so_far(partial: str) -> str:
+    """The `speech` field of a half-finished tool-call JSON (D-142).
+
+    A forced tool call streams as fragments of the JSON object rather than as
+    text, so there is no text stream to read: what arrives is
+    `{"speech": "I was in the corr` and then a bit more of it. The field is
+    first in the schema and models emit properties in schema order, so it is
+    also the part that arrives first, which is the whole reason streaming is
+    worth anything here.
+
+    Parsed by hand rather than by waiting for valid JSON, because valid JSON is
+    exactly what we do not have yet. Escapes are decoded as they complete and a
+    half-written one is held back rather than shown as a backslash.
+    """
+    key = partial.find('"speech"')
+    if key == -1:
+        return ""
+    colon = partial.find(":", key + 8)
+    if colon == -1:
+        return ""
+    start = partial.find('"', colon + 1)
+    if start == -1:
+        return ""
+
+    out: list[str] = []
+    i = start + 1
+    while i < len(partial):
+        char = partial[i]
+        if char == '"':
+            break
+        if char != "\\":
+            out.append(char)
+            i += 1
+            continue
+        if i + 1 >= len(partial):
+            break                      # a backslash and nothing after it yet
+        code = partial[i + 1]
+        if code == "u":
+            if i + 6 > len(partial):
+                break                  # half of a \uXXXX
+            with contextlib.suppress(ValueError):
+                out.append(chr(int(partial[i + 2 : i + 6], 16)))
+            i += 6
+            continue
+        out.append({"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}.get(code, code))
+        i += 2
+    return "".join(out)
+
+
+# The start of something that might turn into a citation. Held back rather than
+# shown, so a player never watches "[self" appear and then vanish (D-142).
+HALF_CITATION = re.compile(r"\[[a-z_]*:?[A-Za-z0-9_@.\-]*$")
+
+
+def showable(text: str, shown: str) -> tuple[str, str]:
+    """What of `text` can be shown now, given `shown` is already on screen.
+
+    Returns the new characters and nothing else. Citations are stripped as they
+    complete, and a trailing fragment that could still become one is withheld
+    until the next chunk settles it.
+    """
+    safe = text
+    at = safe.rfind("[")
+    if at != -1 and HALF_CITATION.fullmatch(safe[at:]):
+        safe = safe[:at]
+    clean = strip_citations(safe)
+    if not clean.startswith(shown):
+        return "", shown
+    return clean[len(shown) :], clean
+
+
+def ask_stream(
+    brief: Brief,
+    question: str,
+    responder: Responder,
+    history: Sequence[tuple[str, str]] = (),
+    ledger: Sequence[str] = (),
+) -> Iterator[dict[str, Any]]:
+    """The same question, answered out loud as it arrives (D-142).
+
+    Yields `{"text": ...}` for each new piece of speech and finally
+    `{"reply": Reply}`. Streaming is an optional capability rather than a second
+    boundary: a responder that has a `.stream` is used through it, and one that
+    does not is called normally and its whole answer yielded in one go. So every
+    fake in the suite keeps working unchanged and nothing has to know which kind
+    it is holding.
+    """
+    segments = render_segments(brief, history, ledger)
+    stream = getattr(responder, "stream", None)
+
+    if stream is None:
+        reply = _finish(brief, responder(segments, question), history)
+        yield {"text": reply.speech}
+        yield {"reply": reply}
+        return
+
+    shown = ""
+    raw: dict[str, Any] = {}
+    for event in stream(segments, question):
+        if "partial" in event:
+            more, shown = showable(speech_so_far(event["partial"]), shown)
+            if more:
+                yield {"text": more}
+        if "reply" in event:
+            raw = event["reply"]
+
+    reply = _finish(brief, raw, history)
+    # Whatever the sanitiser held back, and the difference between the streamed
+    # text and the final answer if the model never closed the string.
+    if reply.speech.startswith(shown) and len(reply.speech) > len(shown):
+        yield {"text": reply.speech[len(shown) :]}
+    yield {"reply": reply}
+
+
 def ask(
     brief: Brief,
     question: str,
     responder: Responder,
     history: Sequence[tuple[str, str]] = (),
+    ledger: Sequence[str] = (),
 ) -> Reply:
-    raw = responder(render_segments(brief, history), question)
+    raw = responder(render_segments(brief, history, ledger), question)
+    return _finish(brief, raw, history)
+
+
+def _finish(brief: Brief, raw: dict[str, Any], history: Sequence[tuple[str, str]]) -> Reply:
+    """One raw answer, cleaned up and logged. Shared by both ways of asking."""
     spoken = str(raw.get("speech", ""))
     clean = strip_citations(spoken)
     if clean != spoken:
@@ -916,14 +1219,31 @@ def cacheable(system: "Sequence[str] | str") -> list[dict[str, Any]]:
     The last segment gets no breakpoint. It is what actually changed.
     """
     parts = [system] if isinstance(system, str) else [p for p in system if p]
-    mark = {"type": "ephemeral", "ttl": CACHE_TTL}
-    blocks: list[dict[str, Any]] = []
-    for i, text in enumerate(parts):
-        block: dict[str, Any] = {"type": "text", "text": text}
-        # Never on the last one, and never more than the two we want.
-        if i < len(parts) - 1 and i < 2:
-            block["cache_control"] = mark
-        blocks.append(block)
+    blocks: list[dict[str, Any]] = [{"type": "text", "text": t} for t in parts]
+
+    # **One breakpoint, on the stable part only** (D-130).
+    #
+    # There were two. The second sat after the history, on the theory that an
+    # append-only conversation caches incrementally: turn N's prefix is turn
+    # N-1's plus one exchange, so the growing part should be read rather than
+    # rewritten. The logs from a real evening say otherwise. Every single
+    # question wrote the whole prefix again, and the write grew with it:
+    #
+    #     cache_read=5144 cache_written=5070 ... usd=0.0293
+    #     cache_read=5144 cache_written=5508 ... usd=0.0302
+    #     cache_read=5144 cache_written=5831 ... usd=0.0312
+    #     cache_read=5144 cache_written=6126 ... usd=0.0327
+    #
+    # A write is 2x at this TTL, so two thirds of every question was the cost of
+    # re-caching a prefix that had changed since the last one. Three cents a
+    # question, against about one and two tenths with no caching at all:
+    # **the optimisation was more than twice the price of not doing it.**
+    #
+    # A breakpoint belongs on content that repeats. History does not repeat, it
+    # accumulates, so it now travels as ordinary input at 1x and only the part
+    # that is identical every turn is cached.
+    if len(blocks) > 1:
+        blocks[0]["cache_control"] = {"type": "ephemeral", "ttl": CACHE_TTL}
     return blocks
 
 
@@ -959,28 +1279,13 @@ def anthropic_responder(model: str = VOICE_MODEL, api_key: str | None = None):
         "required": ["speech", "used", "refused"],
     }
 
-    def respond(system: Sequence[str] | str, question: str) -> dict[str, Any]:
-        response = client.messages.create(
-            model=model,
-            max_tokens=1000,
-            system=cacheable(system),
-            messages=[{"role": "user", "content": question}],
-            tools=[
-                {
-                    "name": "answer",
-                    "description": "Reply in character.",
-                    "input_schema": schema,
-                }
-            ],
-            tool_choice={"type": "tool", "name": "answer"},
-        )
+    def _log(usage, model: str) -> None:
         # Three token counts, not one. `input_tokens` is only what follows the
         # last breakpoint, so adding it to the cache figures is the only way to
         # get the real total, and the ratio between them is the only way to know
         # the cache is working at all (D-116). Both cache fields zero means it
         # silently did not happen, which is what the API does below the minimum
         # rather than erroring.
-        usage = response.usage
         written = getattr(usage, "cache_creation_input_tokens", 0) or 0
         served = getattr(usage, "cache_read_input_tokens", 0) or 0
         log.info(
@@ -998,9 +1303,66 @@ def anthropic_responder(model: str = VOICE_MODEL, api_key: str | None = None):
                 4,
             ),
         )
+
+    def respond(system: Sequence[str] | str, question: str) -> dict[str, Any]:
+        response = client.messages.create(
+            model=model,
+            max_tokens=1000,
+            system=cacheable(system),
+            messages=[{"role": "user", "content": question}],
+            tools=[
+                {
+                    "name": "answer",
+                    "description": "Reply in character.",
+                    "input_schema": schema,
+                }
+            ],
+            tool_choice={"type": "tool", "name": "answer"},
+        )
+        _log(response.usage, model)
         for block in response.content:
             if block.type == "tool_use":
                 return dict(block.input)
         return {"speech": "", "used": [], "refused": True}
 
+    def stream(system: Sequence[str] | str, question: str) -> Iterator[dict[str, Any]]:
+        """The same call, read as it arrives (D-142).
+
+        A forced tool call has no text blocks, so there is nothing in
+        `text_stream` to read. What arrives is `input_json_delta`: fragments of
+        the JSON object, in schema order, which puts `speech` first. Those
+        fragments are yielded raw and `speech_so_far` does the reading, so the
+        parsing is a pure function with tests rather than something buried in a
+        network loop.
+        """
+        partial = ""
+        with client.messages.stream(
+            model=model,
+            max_tokens=1000,
+            system=cacheable(system),
+            messages=[{"role": "user", "content": question}],
+            tools=[
+                {
+                    "name": "answer",
+                    "description": "Reply in character.",
+                    "input_schema": schema,
+                }
+            ],
+            tool_choice={"type": "tool", "name": "answer"},
+        ) as live:
+            for event in live:
+                delta = getattr(event, "delta", None)
+                if getattr(delta, "type", "") == "input_json_delta":
+                    partial += delta.partial_json
+                    yield {"partial": partial}
+            final = live.get_final_message()
+
+        _log(final.usage, model)
+        for block in final.content:
+            if block.type == "tool_use":
+                yield {"reply": dict(block.input)}
+                return
+        yield {"reply": {"speech": "", "used": [], "refused": True}}
+
+    respond.stream = stream
     return respond

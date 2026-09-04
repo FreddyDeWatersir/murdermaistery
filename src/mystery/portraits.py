@@ -81,7 +81,20 @@ def generate_portraits(
     Failures are logged and dropped rather than raised. Half a cast with images
     and half drawn is a slightly odd-looking game; a crash is no game.
     """
-    from openai import OpenAI
+    # The docstring above says failures are logged and dropped rather than
+    # raised, and until D-123 that promise did not cover the failure most likely
+    # to happen: the package not being installed at all. `uv sync --extra aws`
+    # removes the `portraits` extra, which is a normal thing to do and took the
+    # game down after the case was drafted and paid for (D-123).
+    try:
+        from openai import OpenAI
+    except ImportError:
+        log.warning(
+            "portraits.no_package",
+            detail="openai is not installed. Run: uv sync --extra portraits "
+            "--extra aws. Playing without pictures.",
+        )
+        return {}
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:

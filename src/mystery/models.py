@@ -54,6 +54,10 @@ class Character(BaseModel):
     name: str
     wants: str = ""
     manner: str = ""
+    # How the sentences come out, as opposed to what they do with the question
+    # (D-127). Dealt from the seed like the manner, and independent of it: a
+    # blunt three-word answerer can still be the one who answers for everybody.
+    voice: str = ""
     under_pressure: str = ""
     # What the player is told about them before asking anything: their job, and
     # what they were to the victim. Public, printable, and no part of the puzzle
@@ -105,6 +109,96 @@ class Constraint(BaseModel):
     def is_bound(self) -> bool:
         """True once the solver has chosen a place and a slot for this."""
         return self.place is not None and self.slot is not None
+
+
+class Account(BaseModel):
+    """What one person says happened in a scene they were in (D-132).
+
+    The third falsifiable axis, and the one that finally makes the web
+    load-bearing. Person-place-slot says who was in the room. Thing-place-slot
+    says what was in it. Neither says **what happened there**, so a scene was one
+    authoritative `description` the player never saw, and `impressions` were
+    opinions, which cannot be wrong.
+
+    An account can be. Two people were in the library when the argument
+    happened; each gives their version; the versions disagree; and now catching
+    somebody out does not require catching them in a room.
+
+    **`honest` is the point of the whole class.** A false account is not
+    automatically a lie. Somebody can be certain and wrong — about what was said,
+    who said it first, whether the door was open — and until now every fact in
+    this game was true and every conflict meant a liar. That made a contradiction
+    an accusation. With honest error in the mix, a contradiction becomes a
+    question: one of you is wrong, and which is the interesting part.
+    """
+
+    # The scene this is about: the id of a `Constraint`.
+    constraint: str
+    character: CharacterId
+    # Their version, in their voice, one or two sentences.
+    says: str
+    # Whether it is what actually happened.
+    true: bool = True
+    # If it is not true: are they lying, or do they simply remember it wrong?
+    # A liar can be broken. A person who is honestly mistaken can only be shown
+    # something, and will be relieved rather than caught.
+    honest: bool = False
+    # What would make them change their account. For a liar, what breaks them;
+    # for an honest mistake, what would jog it.
+    changes_when: str = ""
+
+
+class Thing(BaseModel):
+    """An object with a path through the evening (D-131).
+
+    The second falsifiable axis, and the reason for it: until now every claim the
+    game can check reduced to *person, place, slot*. So the only lie anybody
+    could tell was about which room they were in, the only contradiction was a
+    collision on one grid, and the notebook was a spreadsheet with a story
+    printed next to it.
+
+    A thing has its own `where`, slot by slot, and it moves because somebody
+    moved it. That makes an object's path a claim people can be wrong about
+    without lying about themselves, which is the oldest evidence in the
+    tradition: the weapon was in the hall at eight and beside the body at
+    eleven, so somebody carried it, and the interesting question is who and when
+    rather than who was in the drawing room.
+
+    `Secret.evidence` is a different thing and stays: that is a document produced
+    to open a gate. This is an object that was somewhere.
+    """
+
+    id: str
+    name: str
+    # Whose it is, when that means anything. A key belongs to somebody; a stone
+    # off a newel post belongs to the house.
+    belongs_to: CharacterId | None = None
+    # Slot to place. A dict rather than a list of records for the same reason
+    # `placements` is: "in two rooms at once" becomes unrepresentable rather
+    # than merely invalid.
+    where: dict[SlotId, PlaceId] = Field(default_factory=dict)
+    # Who carried it, when it moved. The id of whoever was responsible, per slot
+    # in which its place changes. Not derivable: two people were in that room.
+    moved_by: dict[SlotId, CharacterId] = Field(default_factory=dict)
+    # What its path is worth knowing. One sentence, for the reveal.
+    matters: str = ""
+
+    @property
+    def moves(self) -> int:
+        seen = list(self.where.values())
+        return sum(1 for a, b in zip(seen, seen[1:], strict=False) if a != b)
+
+
+def with_article(name: str) -> str:
+    """A name with exactly one article in front of it.
+
+    A generator writes both "stone head of a newel post" and "a signet ring",
+    and both "hall" and "The central hall". Anything that puts one of these in a
+    sentence has to cope with both, and doing it in two places is how the two
+    places disagree.
+    """
+    first = name.split(" ", 1)[0].lower()
+    return name if first in ("a", "an", "the") else f"the {name}"
 
 
 class Secret(BaseModel):
@@ -276,6 +370,21 @@ class Mystery(BaseModel):
     # person and nine long to another (D-111). Optional: cases written before it
     # existed simply have less shared ground.
     common_ground: list[str] = Field(default_factory=list)
+    # What the player was told they are here to settle (D-129). Stated to them
+    # in the briefing, because being told what you are for is not a spoiler.
+    # Whether it was the right question is the case, and roughly two in five
+    # commissions are wrong about something.
+    commission: str = ""
+    # Objects with paths of their own (D-131). The second thing in the game that
+    # can be somewhere, and therefore the second thing anybody can be wrong
+    # about.
+    things: list[Thing] = Field(default_factory=list)
+    # What people say happened in the scenes they were in (D-132). The third
+    # thing that can be wrong, and the first that can be wrong innocently.
+    accounts: list[Account] = Field(default_factory=list)
+
+    def accounts_of(self, constraint: str) -> list[Account]:
+        return [a for a in self.accounts if a.constraint == constraint]
 
     @property
     def false_claim(self) -> FalseClaim | None:

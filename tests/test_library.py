@@ -7,9 +7,9 @@ the moment the prompt changes. A saved case has to survive exactly that.
 """
 
 from mystery.example import OPENING_NIGHT
+from mystery.gallery import FileGallery
 from mystery.library import catalogue, entries, load, save, slug
 from mystery.models import Mystery
-from mystery.web import _existing
 
 CASE = Mystery.model_validate(OPENING_NIGHT)
 
@@ -93,18 +93,22 @@ def test_an_empty_shelf_says_so(tmp_path) -> None:
     assert "Nothing saved yet" in catalogue(tmp_path)
 
 
-def test_art_already_on_disk_belongs_to_the_case(tmp_path) -> None:
-    """Paid for once. A saved case brings its faces back without --art."""
-    folder = tmp_path / "portraits"
-    folder.mkdir()
+def test_art_already_there_belongs_to_the_case(tmp_path) -> None:
+    """Paid for once. A saved case brings its faces back without --art. Moved
+    from `web._existing` to the gallery, which is the thing that now answers
+    this question on a folder and on a bucket alike (D-121)."""
+    folder = tmp_path / "a-case" / "portraits"
+    folder.mkdir(parents=True)
     (folder / "wouter.png").write_bytes(b"")
     (folder / "ilse.png").write_bytes(b"")
 
-    assert _existing(folder) == {"wouter": "wouter.png", "ilse": "ilse.png"}
+    found = FileGallery(tmp_path).names("a-case", "portraits")
+
+    assert found == {"ilse": "ilse.png", "wouter": "wouter.png"}
 
 
 def test_no_art_is_not_an_error(tmp_path) -> None:
-    assert _existing(tmp_path / "nothing-here") == {}
+    assert FileGallery(tmp_path).names("nothing-here", "portraits") == {}
 
 
 def test_two_cases_saved_in_the_same_instant_still_have_an_order() -> None:

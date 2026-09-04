@@ -22,6 +22,7 @@ a swap rather than a rewrite.
 """
 
 import json
+import os
 import secrets
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -231,3 +232,126 @@ class FileSessions:
 
     def count(self) -> int:
         return len(list(self.folder.glob("*.json"))) if self.folder.exists() else 0
+
+
+# The table this process writes to, or nothing, in which case the folder wins.
+# Same shape as `MYSTERY_BUCKET`: one variable, read in one place, and a laptop
+# that sets neither needs no AWS at all (D-122).
+SESSIONS_TABLE = "MYSTERY_SESSIONS_TABLE"
+
+# A DynamoDB item cannot exceed 400 KB. A played session of a hundred and
+# thirty two questions came to 119 KB, about nine tenths of a kilobyte per
+# statement, so the wall is somewhere near four hundred and forty questions.
+# Nobody has come close, and a wall you cannot see is worse than one you can.
+ITEM_LIMIT = 400_000
+LOUD_AT = 0.75
+
+
+class DynamoSessions:
+    """Sessions in a table, one item each.
+
+    `table` is injectable for the same reason every other boundary's client is:
+    the suite passes a dictionary that behaves like a table and never touches a
+    network (D-002, D-027, D-118).
+
+    **The record goes in as one JSON string, deliberately.** DynamoDB has its own
+    type system and boto3 maps Python onto it, which mostly works and then
+    refuses a float, because DynamoDB has no float: it has `Decimal`, and a
+    single stray one anywhere in a nested structure fails the write with an
+    error that names the type and not the field. A session is written by
+    `to_record` and read by `from_record` and is never queried by its contents,
+    so there is nothing to gain by exploding it into attributes and one whole
+    class of bug to avoid by not doing so.
+
+    Two things stay real attributes. `id`, because it is the key, and `expires`,
+    because TTL reads it: a number on the item, in epoch seconds, which DynamoDB
+    uses to delete the row itself for free. `Session.expires` has been that shape
+    since it was written, for exactly this.
+    """
+
+    def __init__(self, table_name: str = "", table=None, region: str | None = None) -> None:
+        self.table_name = table_name
+        self._table = table
+        self._region = region
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource(
+                "dynamodb", region_name=self._region
+            ).Table(self.table_name)
+        return self._table
+
+    def create(self, case_id: str) -> Session:
+        session = Session(case_id=case_id)
+        self.save(session)
+        log.info("session.started", session=session.id, case=case_id)
+        return session
+
+    def get(self, session_id: str) -> Session | None:
+        if not session_id:
+            return None
+        got = self.table.get_item(Key={"id": session_id})
+        item = got.get("Item")
+        if not item:
+            return None
+
+        try:
+            session = Session.from_record(json.loads(item["record"]))
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            log.warning("session.unreadable", session=session_id, error=str(error))
+            return None
+
+        # TTL deletes within a day or so of the deadline rather than at it, so an
+        # expired item can still be handed back. The check has to stay.
+        if session.expired:
+            log.info("session.expired", session=session_id)
+            return None
+        return session
+
+    def save(self, session: Session) -> None:
+        record = json.dumps(session.to_record(), ensure_ascii=False)
+        size = len(record.encode("utf-8"))
+        if size > ITEM_LIMIT * LOUD_AT:
+            # Said out loud well before it breaks, because the failure mode is a
+            # write that starts refusing mid-game and a notebook that stops
+            # keeping up. The escape hatch is one item per statement, keyed by
+            # session and round, which needs a wider `Sessions` protocol.
+            log.warning(
+                "session.large",
+                session=session.id,
+                bytes=size,
+                limit=ITEM_LIMIT,
+                rounds=session.transcript.rounds,
+                detail="approaching the DynamoDB item ceiling",
+            )
+        self.table.put_item(
+            Item={"id": session.id, "expires": session.expires, "record": record}
+        )
+
+    def count(self) -> int:
+        """How many sessions exist. A scan, and the only one here.
+
+        Nothing in the game calls this on a page load; it is for a person asking
+        how busy the evening was. `Select="COUNT"` returns the number without
+        returning the items, so a hundred and twenty kilobyte record does not
+        come back over the wire to be thrown away.
+        """
+        total = 0
+        start = None
+        while True:
+            page = self.table.scan(
+                Select="COUNT", **({"ExclusiveStartKey": start} if start else {})
+            )
+            total += page.get("Count", 0)
+            start = page.get("LastEvaluatedKey")
+            if not start:
+                return total
+
+
+def sessions() -> "FileSessions | DynamoSessions":
+    """Which store this process uses. One variable, read in one place (D-122)."""
+    table = os.environ.get(SESSIONS_TABLE, "").strip()
+    return DynamoSessions(table) if table else FileSessions()

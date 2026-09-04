@@ -410,4 +410,414 @@ def test_the_web_path_hands_the_responder_three_segments() -> None:
 
     assert len(seen) == 1
     assert isinstance(seen[0], list) and len(seen[0]) == 3
-    assert sum(1 for b in cacheable(seen[0]) if "cache_control" in b) == 2
+    assert sum(1 for b in cacheable(seen[0]) if "cache_control" in b) == 1
+
+
+# --- the briefing (D-126) -----------------------------------------------------
+
+
+def test_the_state_carries_everything_the_briefing_needs() -> None:
+    """All of it was already in `/state` and the page was dribbling it into a
+    one-line subtitle. Only the shared facts and the occasion were missing."""
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    mystery = solve(CASE, seed=0).model_copy(
+        update={"common_ground": ["There are nine residents, so nine names on the list."]}
+    )
+    case = Case(mystery, id="briefed", setting="a residency, the last night")
+    client = TestClient(build_app(case, lambda s, q: {"speech": "", "used": [], "refused": True}))
+
+    got = client.get("/state").json()
+
+    assert got["common"] == ["There are nine residents, so nine names on the list."]
+    assert got["occasion"] == "a residency, the last night"
+    # The shipped example predates `discovery` and `investigator`, so those may
+    # be absent; what must always be there is the shared ground and the roster.
+    assert got["discovery"] is None or got["discovery"]["finder"]
+    assert [s["role"] for s in got["suspects"]], "the roster needs roles"
+
+
+def test_the_briefing_holds_no_secret() -> None:
+    """It is what a person arriving would have been told at the door. Nothing in
+    it is evidence, and the suspects have had every word of it from the start."""
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    mystery = solve(CASE, seed=0)
+    case = Case(mystery, id="briefed", setting="a residency")
+    client = TestClient(build_app(case, lambda s, q: {"speech": "", "used": [], "refused": True}))
+
+    got = client.get("/state").json()
+    said = " ".join(
+        [got["title"], got.get("occasion", ""), *(got.get("common") or [])]
+        + [got["discovery"]["summary"] if got.get("discovery") else ""]
+        + [s["role"] or "" for s in got["suspects"]]
+    ).lower()
+
+    for secret in mystery.secrets:
+        assert secret.summary.lower() not in said, f"{secret.id} is in the briefing"
+    assert mystery.killer not in [s["id"] for s in got["suspects"] if s.get("guilty")]
+
+
+def test_the_page_shows_the_briefing_once_per_case() -> None:
+    """A different evening is a different briefing; a returning player mid-case
+    does not want it again."""
+    from mystery.web import PAGE
+
+    assert "load('briefed')!==S.title" in PAGE
+    assert "save('briefed',S.title)" in PAGE
+    assert 'id="briefagain"' in PAGE, "it has to be reopenable"
+
+
+# --- the police actually arrive (D-128) ---------------------------------------
+
+
+def _budgeted(budget: int):
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    asked = []
+
+    def answering(system, question):
+        asked.append(question)
+        return {"speech": "The green room.", "used": [], "refused": False}
+
+    case = Case(solve(CASE, seed=0), id="clocked")
+    who = next(c.id for c in case.mystery.characters if c.id != case.mystery.victim)
+    return TestClient(build_app(case, answering, budget=budget)), who, asked
+
+
+def test_the_notebook_counts_down_rather_than_up() -> None:
+    client, who, _ = _budgeted(3)
+
+    first = client.get("/state").json()["notebook"]
+    client.post("/ask", json={"who": who, "text": "Where were you?"})
+    after = client.get("/state").json()["notebook"]
+
+    assert first["left"] == 3
+    assert after["left"] == 2
+    assert after["budget"] == 3
+
+
+def test_the_last_question_is_refused_and_costs_nothing() -> None:
+    """Refused on the server, because the page is not the authority on anything
+    and a budget the browser enforces is not a budget. The model is never
+    called, so an exhausted evening costs nothing at all."""
+    client, who, asked = _budgeted(2)
+
+    for _ in range(4):
+        client.post("/ask", json={"who": who, "text": "Where were you?"})
+
+    assert len(asked) == 2, "the model was called after the budget ran out"
+
+
+def test_running_out_says_so_rather_than_erroring() -> None:
+    client, who, _ = _budgeted(1)
+    client.post("/ask", json={"who": who, "text": "Where were you?"})
+
+    got = client.post("/ask", json={"who": who, "text": "And then?"})
+
+    assert got.status_code == 200
+    assert got.json()["over"] is True
+    assert got.json()["speech"] == ""
+
+
+def test_the_accusation_still_works_when_the_time_is_gone() -> None:
+    """The evening ends. The case does not: naming somebody is the whole point
+    and must survive the clock."""
+    client, who, _ = _budgeted(1)
+    client.post("/ask", json={"who": who, "text": "Where were you?"})
+    client.post("/ask", json={"who": who, "text": "Refused."})
+
+    charged = client.post("/accuse", json={"who": who, "why": "a hunch"})
+
+    assert charged.status_code == 200
+    assert "charged" in charged.json()
+
+
+def test_the_clock_survives_a_reload() -> None:
+    """It is computed from the transcript, not held in the page."""
+    client, who, _ = _budgeted(5)
+    for _ in range(3):
+        client.post("/ask", json={"who": who, "text": "Where were you?"})
+
+    assert client.get("/state").json()["notebook"]["left"] == 2
+
+
+def test_late_is_flagged_before_it_runs_out() -> None:
+    from mystery.web import GETTING_LATE
+
+    client, who, _ = _budgeted(GETTING_LATE + 2)
+
+    assert client.get("/state").json()["notebook"]["late"] is False
+    client.post("/ask", json={"who": who, "text": "Where were you?"})
+    client.post("/ask", json={"who": who, "text": "And then?"})
+
+    assert client.get("/state").json()["notebook"]["late"] is True
+
+
+def test_the_commission_reaches_the_player(monkeypatch) -> None:
+    """Being told what you are for is not a spoiler. Whether it was the right
+    question is the case (D-129)."""
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    mystery = solve(CASE, seed=0).model_copy(
+        update={"commission": "They have settled on one name and want it confirmed."}
+    )
+    quiet = {"speech": "", "used": [], "refused": True}
+    client = TestClient(build_app(Case(mystery, id="hired"), lambda s, q: quiet))
+
+    got = client.get("/state").json()
+
+    assert got["commission"] == "They have settled on one name and want it confirmed."
+
+
+def test_the_briefing_does_not_say_whether_the_commission_is_sound() -> None:
+    """The whole point. The player is told what they were hired for and never
+    told whether the question was the right one."""
+    from mystery.web import PAGE
+
+    assert "What you were asked for" in PAGE
+    for tell in ("mistaken", "is sound", "commission is wrong", "unreliable"):
+        assert tell not in PAGE, f"the page gives away {tell!r}"
+
+
+def test_each_case_brings_its_own_clock() -> None:
+    """A property of the evening rather than a setting somebody tuned."""
+    from mystery.solver import solve
+    from mystery.web import Case
+
+    clocks = {Case(solve(CASE, seed=0), id=f"c{n}", seed=n).budget for n in range(40)}
+
+    assert len(clocks) > 3, "every case got the same clock"
+
+
+def test_an_explicit_budget_still_wins() -> None:
+    from mystery.solver import solve
+    from mystery.web import Case, Game
+
+    case = Case(solve(CASE, seed=0), id="pinned", seed=7)
+    game = Game(case, lambda s, q: {}, budget=12)
+
+    assert game.budget == 12
+
+
+# --- one page per person (D-135) ---------------------------------------------
+
+
+def _page(book: dict, who: str) -> dict:
+    return next(p for p in book["people"] if p["id"] == who)
+
+
+def test_every_suspect_has_a_page_before_anybody_speaks():
+    """The spine of the notebook is the cast, not the transcript. An empty
+    notebook still has to show you who there is to ask."""
+    book = Game(CASE, responder_saying("", [])).notebook()
+
+    assert {p["id"] for p in book["people"]} == {c.id for c in CASE.characters}
+    assert _page(book, "vera")["own"] == []
+    assert _page(book, "vera")["asked"] == 0
+
+
+def test_the_dead_are_marked_as_dead():
+    book = Game(CASE, responder_saying("", [])).notebook()
+    assert _page(book, "magnus")["dead"] is True
+    assert _page(book, "vera")["dead"] is False
+
+
+def test_what_they_admit_is_what_they_said_about_themselves():
+    game = Game(CASE, responder_saying("The study, all evening.", ["self:s1"]))
+    game.ask("vera", "Where were you?")
+    page = _page(game.notebook(), "vera")
+
+    assert [(r["time"], r["place"]) for r in page["own"]] == [("21:00", "Study")]
+    assert page["own"][0]["who"] == "their own word"
+    # A claim about herself is not a claim about anybody else.
+    assert page["told"] == []
+    assert page["heard"] == []
+
+
+def test_a_claim_about_somebody_else_lands_on_both_pages():
+    """The same sentence is evidence on two pages and has to read differently on
+    each: on the speaker's it is what they say about others, on the subject's it
+    is what somebody says about them."""
+    game = Game(CASE, responder_saying("Otto was in the hall with me.", ["saw:otto@s0"]))
+    game.ask("vera", "Who else was there?")
+    book = game.notebook()
+
+    assert [r["who"] for r in _page(book, "otto")["heard"]] == ["Vera"]
+    assert [r["who"] for r in _page(book, "vera")["told"]] == ["Otto"]
+    assert _page(book, "otto")["own"] == []
+
+
+def test_a_persons_evening_reads_in_clock_order():
+    """Sorted by the slot's index, not by the label somebody wrote on it."""
+    game = Game(CASE, responder_saying("", []))
+    game.responder = responder_saying("Later.", ["self:s2"])
+    game.ask("vera", "And after that?")
+    game.responder = responder_saying("Earlier.", ["self:s0"])
+    game.ask("vera", "And before?")
+    page = _page(game.notebook(), "vera")
+
+    order = [s.label for s in sorted(CASE.slots, key=lambda s: s.index)]
+    assert [r["time"] for r in page["own"]] == [t for t in order if t in
+                                                {r["time"] for r in page["own"]}]
+
+
+def test_a_secret_they_gave_up_is_on_their_page_and_marked_as_theirs():
+    game = Game(CASE, responder_saying("Yes, alright.", ["secret:affair"]))
+    game.ask("vera", "What were you doing in the study?")
+    page = _page(game.notebook(), "vera")
+
+    assert len(page["admits"]) == 1
+    assert page["admits"][0]["mine"] is True
+    assert page["admits"][0]["from"] == "they told you"
+
+
+def test_a_secret_somebody_else_gave_up_says_who_gave_it_up():
+    """Who told you is half of what a secret is worth. Clara handing over Vera's
+    affair is a fact about Clara as much as about Vera."""
+    game = Game(CASE, responder_saying("Vera has been seeing him.", ["heard:affair"]))
+    game.ask("clara", "What do you make of Vera?")
+    book = game.notebook()
+
+    page = _page(book, "vera")
+    assert page["admits"][0]["mine"] is False
+    assert page["admits"][0]["from"] == "Clara"
+    # And it is about Otto, so it turns up on his page too, from Clara.
+    assert [a["from"] for a in _page(book, "otto")["about"]] == ["Clara"]
+
+
+def test_a_refusal_is_counted_on_the_page_that_refused():
+    game = Game(CASE, lambda system, question: {"speech": "No.", "used": [], "refused": True})
+    game.ask("vera", "What were you doing?")
+    book = game.notebook()
+
+    assert _page(book, "vera")["refused"] == 1
+    assert _page(book, "clara")["refused"] == 0
+
+
+def test_a_contradiction_names_everybody_it_touches():
+    """A page shows the disagreements that are about you, and the subject counts
+    as touched: being the person somebody else's account collides over is the
+    thing most worth seeing on your own page."""
+    case = CASE.model_copy(
+        update={
+            "placements": {
+                "otto": {"s0": "hall", "s1": "study", "s2": "cellar"},
+                "magnus": {"s0": "hall", "s1": "hall", "s2": "cellar"},
+                "vera": {"s0": "hall", "s1": "study", "s2": "hall"},
+                "clara": {"s0": "study", "s1": "study", "s2": "hall"},
+            },
+            "false_claims": [FalseClaim(character="otto", place="hall", slot="s1")],
+        }
+    )
+    game = Game(case, responder_saying("Otto was with us in the study.", ["saw:otto@s1"]))
+    game.ask("vera", "Where was Otto?")
+    game.responder = responder_saying("The hall, the whole time.", ["self:s1"])
+    game.ask("otto", "Where were you?")
+    book = game.notebook()
+
+    assert book["conflicts"]
+    assert set(book["conflicts"][0]["who"]) == {"otto", "vera"}
+    assert any("otto" in c["who"] for c in book["conflicts"])
+
+
+def test_a_lead_carries_the_two_people_it_is_about():
+    """The same sentence means one thing on the page of the person whose story
+    is unconfirmed and another on the page of the person who could settle it, so
+    the page cannot be left to find a name inside the prose."""
+    game = Game(CASE, responder_saying("The study, all evening.", ["self:s1"]))
+    game.ask("vera", "Where were you?")
+    book = game.notebook()
+
+    assert book["unasked"], "her own word, nobody else asked yet"
+    lead = book["unasked"][0]
+    assert lead["of"] == "vera"
+    assert lead["ask"] != "vera"
+    assert "Vera" in lead["text"]
+
+
+def test_the_game_hands_the_character_their_own_ledger():
+    """End to end, on the destination (D-119). By the fifth question the first
+    answer is out of the verbatim window, and the only thing keeping the suspect
+    consistent is the ledger, so it has to be in the prompt the responder sees."""
+    seen: list[str] = []
+
+    def responder(system, question):
+        seen.append("".join(system))
+        return {"speech": "The study, all evening.", "used": ["self:s1"], "refused": False}
+
+    game = Game(CASE, responder)
+    for i in range(5):
+        game.ask("vera", f"Question {i}")
+
+    last = seen[-1]
+    assert "You have said you were in the Study at 21:00." in last
+    # And the early answers are no longer being paid for verbatim.
+    assert last.count("The study, all evening.") <= 3
+
+
+def test_the_live_route_sends_the_answer_in_pieces():
+    """End to end through the route the page uses (D-119, D-142). What matters
+    is that the browser can read text before the model has finished, and that
+    the statement is recorded exactly once at the end."""
+    from fastapi.testclient import TestClient
+
+    from mystery.web import build_app
+
+    def plain(system, question):
+        raise AssertionError("the stream should have been used")
+
+    def stream(system, question):
+        yield {"partial": '{"speech": "The '}
+        yield {"partial": '{"speech": "The study."'}
+        yield {"reply": {"speech": "The study.", "used": ["self:s1"], "refused": False}}
+
+    plain.stream = stream
+    game = Game(CASE, plain)
+    client = TestClient(build_app(game))
+
+    with client.stream("POST", "/ask/live", json={"who": "vera", "text": "Where?"}) as r:
+        events = [
+            json.loads(line[6:])
+            for line in r.iter_lines()
+            if line.startswith("data: ")
+        ]
+
+    assert "".join(e["text"] for e in events if "text" in e) == "The study."
+    assert events[-1]["done"] is True
+    assert events[-1]["notebook"]["people"]
+    assert len(game.transcript.statements) == 1, "recorded once, at the end"
+
+
+def test_a_spent_evening_is_refused_on_the_live_route_too():
+    """The budget is enforced by the server or it is not enforced (D-128), and
+    a second route is a second chance to forget that."""
+    from fastapi.testclient import TestClient
+
+    from mystery.web import build_app
+
+    game = Game(CASE, responder_saying("no", []))
+    client = TestClient(build_app(game, budget=1))
+    client.post("/ask", json={"who": "vera", "text": "One"})
+
+    with client.stream("POST", "/ask/live", json={"who": "vera", "text": "Two"}) as r:
+        events = [
+            json.loads(line[6:])
+            for line in r.iter_lines()
+            if line.startswith("data: ")
+        ]
+
+    assert events[0]["over"] is True
+    assert len(game.transcript.statements) == 1, "no model call, no statement"

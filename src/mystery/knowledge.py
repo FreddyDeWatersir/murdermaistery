@@ -32,6 +32,20 @@ class Observation:
     slot: SlotId
 
 
+@dataclass(frozen=True)
+class Sighting:
+    """A thing, seen somewhere, at some hour (D-131).
+
+    The object half of `Observation`. Derived exactly the same way and for the
+    same reason: co-location is mechanical and must never be invented. If you
+    were in the room, you saw what was in it.
+    """
+
+    thing: str
+    place: PlaceId
+    slot: SlotId
+
+
 @dataclass
 class Knowledge:
     """Everything one character can draw on when questioned."""
@@ -39,6 +53,8 @@ class Knowledge:
     character: CharacterId
     movements: dict[SlotId, PlaceId] = field(default_factory=dict)
     observations: list[Observation] = field(default_factory=list)
+    # What they saw of the objects, and when (D-131).
+    sightings: list[Sighting] = field(default_factory=list)
     conceals: list[str] = field(default_factory=list)
     aware_of: list[str] = field(default_factory=list)
 
@@ -145,6 +161,29 @@ def derive(mystery: Mystery) -> dict[CharacterId, Knowledge]:
                         continue
                     knowledge[observer].observations.append(
                         Observation(subject=subject, place=place, slot=slot.id)
+                    )
+
+    # What everybody saw of the objects. Same rule as people: you were in the
+    # room, so you saw what was in it (D-131). Nothing stops at the murder here
+    # — a stone head does not become a body — but a thing in the room with the
+    # victim after the killing is seen by nobody, because V10 keeps that room
+    # empty.
+    for thing in mystery.things:
+        for slot in ordered:
+            place = thing.where.get(slot.id)
+            if place is None:
+                continue
+            for character in mystery.characters:
+                dead = (
+                    character.id == mystery.victim
+                    and killed_at is not None
+                    and slot.index >= killed_at
+                )
+                if dead:
+                    continue
+                if mystery.placements.get(character.id, {}).get(slot.id) == place:
+                    knowledge[character.id].sightings.append(
+                        Sighting(thing=thing.id, place=place, slot=slot.id)
                     )
 
     for secret in mystery.secrets:

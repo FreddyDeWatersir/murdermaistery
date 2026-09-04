@@ -167,3 +167,87 @@ def test_the_entry_points_no_longer_default_to_a_gallery() -> None:
     for module in (cli, web):
         source = __import__("inspect").getsource(module)
         assert "default=\"a private view at a small art gallery\"" not in source
+
+
+# --- how they sound (D-127) --------------------------------------------------
+
+
+def test_the_cast_is_dealt_voices_as_well_as_manners() -> None:
+    """Two played cases, different casts, different countries, different
+    centuries: 531 and 612 characters an answer, 21.0 and 20.6 words a sentence,
+    two em-dashes an answer in both. One person in twelve costumes."""
+    from mystery.palette import draw
+
+    hand = draw(11, "a residency", "the_lie", cast_size=5)
+
+    assert len(hand.voices) == 5
+    assert len(set(hand.voices)) == 5, "two suspects were dealt the same voice"
+
+
+def test_voice_and_manner_are_independent() -> None:
+    """A blunt three-word answerer can still be the one who answers for
+    everybody else. They vary on different axes and must not be one deck."""
+    from mystery.palette import MANNERS, VOICES
+
+    assert not set(MANNERS) & set(VOICES)
+    assert len(VOICES) >= 12, "a deck this short repeats within a week"
+
+
+def test_the_voices_reach_the_prompt_as_an_assignment() -> None:
+    from mystery.palette import draw
+
+    brief = draw(3, "a gallery", "the_lie").brief()
+
+    assert "how they each sound" in brief
+    assert "same careful literate register" in brief
+
+
+def test_a_voice_is_a_shape_of_sentence_not_a_character() -> None:
+    """The D-075 rule the whole module exists for: hand over behaviours, never
+    characters, or every case is the same five people in different coats."""
+    from mystery.palette import VOICES
+
+    for voice in VOICES:
+        assert not any(
+            word in voice.lower() for word in ("young", "old man", "woman who", "nervous assistant")
+        ), voice
+
+
+# --- what they asked you for (D-129) -----------------------------------------
+
+
+def test_the_commission_is_sometimes_wrong() -> None:
+    """A commission that is always accurate is a briefing you can trust flatly,
+    which makes it furniture. Two in five wrong is often enough to matter and
+    rare enough that trusting it is not stupid."""
+    from mystery.palette import commission
+
+    wrong = sum(0 if commission(s)[1] else 1 for s in range(400))
+
+    assert 0.25 < wrong / 400 < 0.55
+
+
+def test_every_commission_knows_how_it_can_be_wrong() -> None:
+    from mystery.palette import COMMISSIONS
+
+    for brief, wrong in COMMISSIONS:
+        assert brief.strip() and wrong.strip()
+        assert len(wrong.split()) > 4, f"{brief[:40]}: no usable failure mode"
+
+
+def test_a_commission_reproduces_from_its_seed() -> None:
+    from mystery.palette import commission
+
+    assert commission(17) == commission(17)
+
+
+def test_the_clock_varies_per_case_and_stays_playable() -> None:
+    """A cap nobody reaches creates no scarcity; a cap that always bites is just
+    a shorter game. Two real evenings ran to 132 and 106 (D-129)."""
+    from mystery.palette import questions
+
+    drawn = {questions(s) for s in range(200)}
+
+    assert len(drawn) >= 6, "one number is a setting, not a property of a case"
+    assert min(drawn) >= 40, "an evening nobody can finish is not tense, it is broken"
+    assert max(drawn) >= 130, "most nights should have more time than anybody needs"

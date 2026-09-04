@@ -12,10 +12,15 @@ role (D-004).
 
 from mystery.agent import (
     ask,
+    ask_stream,
     build_brief,
     leaks,
+    render_covered,
+    render_history,
     render_segments,
     render_system,
+    showable,
+    speech_so_far,
     strip_citations,
 )
 from mystery.knowledge import derive
@@ -975,14 +980,34 @@ def test_the_stable_part_clears_the_models_cache_minimum() -> None:
     assert len(SYSTEM_STABLE) > 4096
 
 
-def test_breakpoints_go_on_every_segment_but_the_last() -> None:
+def test_only_the_stable_segment_carries_a_breakpoint() -> None:
+    """One breakpoint, not two (D-130).
+
+    A breakpoint on the history looked right — an append-only conversation
+    should cache incrementally — and a real evening's logs showed it rewriting
+    the whole prefix on every question, at the 2x write rate, growing as it went.
+    Three cents a question against one and two tenths with no caching: the
+    optimisation cost more than twice not doing it.
+
+    A breakpoint belongs on content that repeats. History accumulates.
+    """
     from mystery.agent import CACHE_TTL, cacheable
 
     blocks = cacheable(["stable", "history", "live"])
 
-    assert [b.get("cache_control") is not None for b in blocks] == [True, True, False]
+    assert [b.get("cache_control") is not None for b in blocks] == [True, False, False]
     assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": CACHE_TTL}
     assert [b["text"] for b in blocks] == ["stable", "history", "live"]
+
+
+def test_nothing_that_grows_every_turn_is_ever_cached() -> None:
+    """The rule the money is riding on. Anything after the first segment changes
+    between questions, so a breakpoint on it is a write rather than a read."""
+    from mystery.agent import cacheable
+
+    for n in (2, 3, 5, 9):
+        blocks = cacheable([f"part {i}" for i in range(n)])
+        assert sum(1 for b in blocks if "cache_control" in b) == 1
 
 
 def test_the_ttl_is_an_hour_because_players_rotate() -> None:
@@ -1011,3 +1036,217 @@ def test_never_more_than_the_four_breakpoints_the_api_allows() -> None:
     blocks = cacheable([f"part {i}" for i in range(9)])
 
     assert sum(1 for b in blocks if "cache_control" in b) <= 4
+
+
+def test_the_logged_cost_counts_writes_at_the_write_rate() -> None:
+    """The line that made the bug visible. A `usd` that priced every input token
+    at list would have read 0.008 while the real charge was 0.029, and nothing
+    would ever have looked wrong (D-130)."""
+    import inspect
+
+    from mystery.agent import CACHE_READ, CACHE_WRITE_1H, anthropic_responder
+
+    source = inspect.getsource(anthropic_responder)
+
+    assert "CACHE_WRITE_1H" in source and "CACHE_READ" in source
+    assert CACHE_WRITE_1H > 1 and CACHE_READ < 1
+
+
+def test_a_suspect_is_told_how_they_sound(monkeypatch) -> None:
+    """The one thing a player is inside for the whole evening (D-127)."""
+    from mystery.example import OPENING_NIGHT
+
+    mystery = Mystery.model_validate(OPENING_NIGHT)
+    first = mystery.characters[0]
+    mystery = mystery.model_copy(
+        update={
+            "characters": [
+                first.model_copy(update={"voice": "clipped and impatient"}),
+                *mystery.characters[1:],
+            ]
+        }
+    )
+    knowledge = derive(mystery)
+    system = render_system(build_brief(mystery, knowledge, first.id), [])
+
+    assert "How you talk: clipped and impatient" in system
+    assert "shape of your first sentence" in system
+
+
+def test_a_character_is_told_their_own_standing() -> None:
+    """Everybody else has had this since D-086 and the person themselves never
+    did, so in one played case five suspects knew the foreman had witnessed a
+    will and the foreman was the only man in the house who had not been told.
+    He denied it, correctly, for twenty questions (D-137)."""
+    case = CASE.model_copy(
+        update={
+            "characters": [
+                c.model_copy(update={"role": "The yard foreman, forty-one years"})
+                if c.id == "vera"
+                else c
+                for c in CASE.characters
+            ]
+        }
+    )
+    brief = build_brief(case, derive(case), "vera")
+    system = render_system(brief)
+
+    assert brief.role == "The yard foreman, forty-one years"
+    assert "The yard foreman, forty-one years" in system
+    # And fenced, so it does not become a licence to place people in rooms.
+    assert "not a claim about where anybody stood" in system
+
+
+def test_only_the_last_few_exchanges_are_kept_word_for_word() -> None:
+    """Everything older is a commitment rather than a conversation, and the
+    ledger holds commitments in a line each (D-140)."""
+    history = [(f"Question {i}", f"Answer {i}") for i in range(10)]
+    rendered = render_history(history)
+
+    assert "Answer 9" in rendered
+    assert "Answer 7" in rendered
+    assert "Answer 6" not in rendered
+
+
+def test_keeping_none_of_them_does_not_mean_keeping_all_of_them() -> None:
+    """`history[-0:]` is the whole list, which would turn the cheapest setting
+    into the most expensive one without a word of warning."""
+    import mystery.agent as agent_module
+
+    was = agent_module.RECENT
+    try:
+        agent_module.RECENT = 0
+        rendered = render_history([("Q", "A")])
+    finally:
+        agent_module.RECENT = was
+
+    assert "A" not in rendered.replace("all of it", "")
+
+
+def test_the_ledger_reaches_the_prompt() -> None:
+    """Assert on the destination, not on a helper being called (D-119). This
+    project's signature bug is a field that is computed, carried, and then never
+    printed."""
+    system = render_system(
+        build_brief(CASE, KNOW, "vera"),
+        history=[("Where?", "The study.")],
+        ledger=["You have said you were in the Study at nine."],
+    )
+
+    assert "You have said you were in the Study at nine." in system
+    assert "WHAT YOU HAVE ALREADY COMMITTED TO" in system
+
+
+def test_older_questions_survive_as_topics() -> None:
+    """The ledger says what they committed to and the window says what was just
+    said. Neither says the conversation has been going on, and a suspect who
+    cannot tell they have been asked the same thing four times answers the
+    fourth as though it were the first (D-141)."""
+    history = [(f"Question number {i} about the ledger", f"Answer {i}") for i in range(8)]
+    covered = render_covered(history)
+
+    assert "Question number 0 about the ledger" in covered
+    assert "Question number 4 about the ledger" in covered
+    # The last three are in the verbatim window instead, not here twice.
+    assert "Question number 7" not in covered
+    # And only the question side: the answers are what cost money.
+    assert "Answer 0" not in covered
+
+
+def test_a_long_question_is_trimmed_rather_than_dropped() -> None:
+    long = " ".join(f"word{i}" for i in range(40))
+    covered = render_covered([(long, "yes"), ("a", "b"), ("c", "d"), ("e", "f")])
+
+    assert "word0" in covered
+    assert "word39" not in covered
+    assert "..." in covered
+
+
+def test_nothing_has_been_covered_at_the_start() -> None:
+    assert "nothing before" in render_covered([("only", "one")])
+
+
+# --- streaming (D-142) -------------------------------------------------------
+
+
+def test_speech_is_readable_before_the_json_closes() -> None:
+    """A forced tool call has no text stream. What arrives is fragments of the
+    JSON object, and `speech` is first in the schema, so it is first out."""
+    assert speech_so_far('{"speech": "I was in the corr') == "I was in the corr"
+    assert speech_so_far('{"speech": "All of it.", "used": ["self:s1"]}') == "All of it."
+
+
+def test_nothing_is_shown_before_the_field_starts() -> None:
+    for fragment in ('{', '{"spe', '{"speech"', '{"speech": '):
+        assert speech_so_far(fragment) == ""
+
+
+def test_a_half_written_escape_is_not_shown_as_a_backslash() -> None:
+    assert speech_so_far('{"speech": "a line\\') == "a line"
+    assert speech_so_far('{"speech": "a line\\n') == "a line\n"
+    assert speech_so_far('{"speech": "one \\u26') == "one "
+    assert speech_so_far('{"speech": "one \\u2014 two') == "one — two"
+
+
+def test_a_quote_inside_the_speech_does_not_end_it() -> None:
+    assert speech_so_far('{"speech": "He said \\"no\\" and left') == 'He said "no" and left'
+
+
+def test_a_half_typed_citation_is_held_back_rather_than_flashed() -> None:
+    """A player must never watch "[self" appear and then vanish."""
+    more, shown = showable("I was in the study [se", "")
+    assert more == "I was in the study"
+    assert "[" not in more
+
+
+def test_a_finished_citation_is_stripped_and_the_rest_flows() -> None:
+    more, shown = showable("I was in the study", "")
+    more2, shown2 = showable("I was in the study [self:s1] all evening", shown)
+
+    assert "self:s1" not in more2
+    assert (more + more2).endswith("all evening")
+
+
+def test_only_the_new_characters_are_ever_sent() -> None:
+    first, shown = showable("The corridor", "")
+    second, shown2 = showable("The corridor, most of it", shown)
+
+    assert first == "The corridor"
+    assert second == ", most of it"
+
+
+def test_a_responder_without_a_stream_still_answers_in_one_piece() -> None:
+    """Streaming is a capability, not a second boundary. Every fake in the suite
+    keeps working and nothing has to know which kind it is holding."""
+    brief = build_brief(CASE, KNOW, "vera")
+    plain = lambda system, question: {"speech": "The study.", "used": [], "refused": False}  # noqa: E731
+
+    events = list(ask_stream(brief, "Where?", plain))
+
+    assert [e["text"] for e in events if "text" in e] == ["The study."]
+    assert events[-1]["reply"].speech == "The study."
+
+
+def test_a_streaming_responder_is_read_as_it_arrives() -> None:
+    brief = build_brief(CASE, KNOW, "vera")
+
+    def plain(system, question):
+        raise AssertionError("the stream should have been used")
+
+    def stream(system, question):
+        yield {"partial": '{"speech": "The '}
+        yield {"partial": '{"speech": "The study, '}
+        yield {"partial": '{"speech": "The study, all evening."'}
+        yield {
+            "reply": {
+                "speech": "The study, all evening.",
+                "used": ["self:s1"],
+                "refused": False,
+            }
+        }
+
+    plain.stream = stream
+    events = list(ask_stream(brief, "Where?", plain))
+
+    assert "".join(e["text"] for e in events if "text" in e) == "The study, all evening."
+    assert events[-1]["reply"].used == ["self:s1"]

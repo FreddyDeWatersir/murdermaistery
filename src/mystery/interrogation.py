@@ -33,7 +33,7 @@ import structlog
 
 from mystery.agent import Brief, Reply
 from mystery.knowledge import Knowledge
-from mystery.models import CharacterId, Mystery, PlaceId, SlotId
+from mystery.models import CharacterId, Mystery, PlaceId, SlotId, with_article
 
 log = structlog.get_logger()
 
@@ -250,6 +250,31 @@ def assertions_from(brief: Brief, reply: Reply) -> list[Assertion]:
     ]
 
 
+def _hour(label: str) -> str:
+    for dash in ("\u2014", "\u2013", " - "):
+        if dash in label:
+            return label.split(dash, 1)[0].strip()
+    return label
+
+
+def _handle(secret, fallback: str) -> str:
+    """A secret named short enough to be worth repeating.
+
+    The full summary is already in this character's brief, so the ledger only
+    has to say which one has come out. First sentence, capped, because a
+    generator writes summaries of any length and this line is here to save
+    tokens rather than spend them.
+    """
+    if secret is None:
+        return fallback.replace("_", " ")
+    text = secret.summary.strip()
+    for stop in (". ", "; "):
+        if stop in text[:120]:
+            text = text[: text.index(stop) + 1]
+            break
+    return text if len(text) <= 120 else text[:117].rstrip() + "..."
+
+
 @dataclass
 class Transcript:
     statements: list[Statement] = field(default_factory=list)
@@ -270,6 +295,78 @@ class Transcript:
 
     def asked(self, character: CharacterId) -> int:
         return sum(1 for s in self.statements if s.speaker == character)
+
+    def ledger(self, mystery: Mystery, character: CharacterId) -> list[str]:
+        """What this character has committed to, in one line each (D-140).
+
+        The prompt used to carry every answer this person had given, verbatim,
+        on every question. Measured on a played case that was a third of the
+        whole cost of the run, growing linearly, and quadratic over an evening.
+
+        It was also the long way round. A character does not need forty of their
+        own paragraphs to stay consistent; they need to know what they have
+        committed to, and this program already computes exactly that. Assertions
+        are what they said about who was where. `cited` says which secrets have
+        already left their mouth. Both are structured, both are already stored,
+        and neither needs a model to summarise it, which means nothing here can
+        drift away from what was actually said.
+
+        One line per position rather than one per statement, because a suspect
+        who has held the same story for ten questions has committed to one
+        thing, not ten. Latest wins: somebody who changed their story is bound
+        by the version they are standing on now, and the fact that they moved is
+        the notebook's business rather than theirs.
+        """
+        names = {c.id: c.name for c in mystery.characters}
+        names.update({t.id: t.name for t in mystery.things})
+        # Slot labels are written as "19:45 - power back, the last cousins
+        # leaving". The clause after the dash is scene-setting, which is worth
+        # having in the facts and is repeated waste here, where the line only
+        # has to identify the hour.
+        times = {s.id: _hour(s.label) for s in mystery.slots}
+        places = {p.id: p.name for p in mystery.places}
+
+        mine = [s for s in self.statements if s.speaker == character]
+        if not mine:
+            return []
+
+        placed: dict[tuple[str, str], str] = {}
+        given: list[str] = []
+        for statement in mine:
+            for assertion in statement.assertions:
+                placed[(assertion.subject, assertion.slot)] = assertion.place
+            for cited in statement.cited:
+                if cited.startswith(("secret:", "heard:")):
+                    given.append(cited.split(":", 1)[1])
+
+        lines = []
+        for (subject, slot), place in sorted(
+            placed.items(), key=lambda kv: (kv[0][0] != character, kv[0][1])
+        ):
+            where = f"in {with_article(places.get(place, place))} at {times.get(slot, slot)}"
+            if subject == character:
+                lines.append(f"You have said you were {where}.")
+            else:
+                lines.append(f"You have said {names.get(subject, subject)} was {where}.")
+
+        # The secret itself is already in their brief in full, so naming it is
+        # enough. Repeating the whole summary here would be paying twice for it.
+        secrets = {s.id: s for s in mystery.secrets}
+        for held in dict.fromkeys(given):
+            secret = secrets.get(held)
+            lines.append(f"You have already told them: {_handle(secret, held)}")
+
+        # How many questions they have taken is already in the live block, which
+        # says it better ("this is question nine, they keep coming back to you").
+        # A refusal is not counted anywhere else and changes how the next one
+        # lands, so that one line stays.
+        refused = sum(1 for s in mine if s.refused)
+        if refused:
+            lines.append(
+                f"You have refused to answer {refused} "
+                f"{'time' if refused == 1 else 'times'} already."
+            )
+        return lines
 
     def surfaced_secrets(self) -> set[str]:
         """Which secrets have actually come out.
@@ -315,25 +412,58 @@ class Transcript:
         comparison, because a speaker who changes their story is disagreeing with
         an earlier version of themselves.
         """
-        seen: dict[tuple[CharacterId, SlotId], tuple[CharacterId, PlaceId]] = {}
+        # One entry per *disagreement*, not per statement that repeats one
+        # (D-133). The old version kept the first claim for each (subject, slot)
+        # and appended a fresh contradiction every time any later statement
+        # differed from it, so a suspect who held their story across ten
+        # questions produced ten identical contradictions and the badge climbed
+        # for saying the same thing again. A contradiction is a property of the
+        # testimony, not an event in the transcript: asking twice cannot make the
+        # house more inconsistent than it is.
+        said: dict[tuple[CharacterId, SlotId], dict[CharacterId, PlaceId]] = {}
+        emitted: set[tuple] = set()
         found: list[Contradiction] = []
+
+        def note(subject, slot, first, second) -> None:
+            # Sorted, so A-disagrees-with-B and B-disagrees-with-A are one thing.
+            pair = (subject, slot, *sorted([first, second]))
+            if pair in emitted:
+                return
+            emitted.add(pair)
+            found.append(
+                Contradiction(subject=subject, slot=slot, first=first, second=second)
+            )
 
         for statement in self.statements:
             for assertion in statement.assertions:
                 key = (assertion.subject, assertion.slot)
-                previous = seen.get(key)
+                positions = said.setdefault(key, {})
+                mine = positions.get(statement.speaker)
 
-                if previous is None:
-                    seen[key] = (statement.speaker, assertion.place)
-                elif previous[1] != assertion.place:
-                    found.append(
-                        Contradiction(
-                            subject=assertion.subject,
-                            slot=assertion.slot,
-                            first=previous,
-                            second=(statement.speaker, assertion.place),
-                        )
+                if mine == assertion.place:
+                    # They have said this before. Repetition is not new evidence.
+                    continue
+
+                if mine is not None:
+                    # Changing your own story, which is the loudest kind and the
+                    # one that must survive the deduplication above.
+                    note(
+                        assertion.subject,
+                        assertion.slot,
+                        (statement.speaker, mine),
+                        (statement.speaker, assertion.place),
                     )
+
+                positions[statement.speaker] = assertion.place
+
+                for speaker, place in positions.items():
+                    if speaker != statement.speaker and place != assertion.place:
+                        note(
+                            assertion.subject,
+                            assertion.slot,
+                            (speaker, place),
+                            (statement.speaker, assertion.place),
+                        )
 
         return found
 

@@ -18,6 +18,7 @@ construct ourselves from data we already trust. Reach for Pydantic at the
 boundary, plain dataclasses inside it.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -543,7 +544,96 @@ def check_every_lie_covers_something(mystery: Mystery) -> list[Violation]:
     ]
 
 
+# A year in a role line. 1900-2099 is every date a case of this kind will use.
+YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def check_roles_are_roles_not_histories(mystery: Mystery) -> list[Violation]:
+    """V12: a `role` says what somebody is, not what they once did (D-137).
+
+    Protects against the language model, and against a specific failure that cost
+    a played case most of its second half. `role` is the one authored line that
+    is broadcast: every other character is handed it in their roster, and it is
+    printed under the portrait. It is not a fact. Nothing derives from it, nothing
+    checks it, and no character can cite it.
+
+    So a role that carries a dated event invents a fact for the whole house. One
+    case gave the foreman "he witnessed the will of 2011", and there was no will
+    of 2011 anywhere in the case: no secret, no constraint, no line of common
+    ground. Five suspects had been told it and improvised freely around it, the
+    man himself had not (that half is fixed separately) and denied it flatly, and
+    the player spent thirteen of seventy-one questions on a document that did not
+    exist, including the last three of the game.
+
+    Dated events belong in `secrets` or `common_ground`, where they are held by
+    somebody, gated, citable and true. A year in a role is the cheap mechanical
+    signature of one that is not, so that is what this looks for.
+    """
+    return [
+        Violation(
+            rule="V12",
+            message=(
+                f"{character.name}'s role mentions {', '.join(YEAR.findall(character.role))}. "
+                f"A role says what somebody is, not what they once did: nothing in "
+                f"the case derives from it and nobody can cite it, so a dated event "
+                f"here is a fact the whole house believes and nobody holds. Put the "
+                f"event in `common_ground` or in a secret, and leave the role as the "
+                f"standing it describes"
+            ),
+        )
+        for character in mystery.characters
+        if YEAR.search(character.role or "")
+    ]
+
+
+def check_the_commission_names_nobody(mystery: Mystery) -> list[Violation]:
+    """V13: the briefing does not name a suspect (D-138).
+
+    The commission is what the player is told before the first question: who
+    wants an account of tonight and what they want it to say. It is allowed to
+    carry a belief the house has already settled on, and that belief is allowed
+    to be wrong, which is the whole of D-129.
+
+    What it is not allowed to do is name the person. On a five-suspect case a
+    name in the opening screen is an enormous prior even when it is the wrong
+    one, and when it is the right one there is no case left: one played case
+    opened with the family having agreed it was Anand, and Anand had done it.
+
+    "They have already settled on one name between them" is a good briefing.
+    Which name is a thing to find out in the first ten questions, not a thing to
+    be handed. The victim is exempt: they are named everywhere already.
+    """
+    text = mystery.commission or ""
+    if not text.strip():
+        return []
+    named = sorted(
+        {
+            character.name
+            for character in mystery.characters
+            if character.id != mystery.victim
+            for word in character.name.split()
+            if len(word) > 2 and re.search(rf"\b{re.escape(word)}\b", text)
+        }
+    )
+    if not named:
+        return []
+    return [
+        Violation(
+            rule="V13",
+            message=(
+                f"the commission names {', '.join(named)}. The player reads this "
+                f"before the first question, and a name there decides the case "
+                f"before it starts. Say what the household believes without saying "
+                f"who they believe it about: 'they have already settled on one name "
+                f"between them' is the briefing, and which name is the game"
+            ),
+        )
+    ]
+
+
 PROPOSED_RULES = [
+    check_roles_are_roles_not_histories,
+    check_the_commission_names_nobody,
     check_every_lie_covers_something,
     check_references_exist,
     check_constraints_do_not_contradict,
@@ -553,6 +643,8 @@ PROPOSED_RULES = [
 
 # After the solver. Everything must hold.
 FINAL_RULES = [
+    check_roles_are_roles_not_histories,
+    check_the_commission_names_nobody,
     check_every_lie_covers_something,
     check_references_exist,
     check_constraints_do_not_contradict,

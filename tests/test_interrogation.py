@@ -302,3 +302,158 @@ def test_a_short_evening_gets_no_character_reading() -> None:
     heard = word_got_back(log, case, derive(case), "b")
 
     assert not any("apart" in line or "oversight" in line for line in heard)
+
+
+# --- a contradiction is a property, not an event (D-133) ---------------------
+
+
+def _claim(round_, speaker, subject, slot, place):
+    return Statement(
+        round=round_,
+        speaker=speaker,
+        question="where were you",
+        speech="...",
+        assertions=[Assertion(subject=subject, slot=slot, place=place)],
+    )
+
+
+def test_repeating_a_contradiction_does_not_add_a_new_one() -> None:
+    """From play: the count climbed every time somebody restated a position they
+    had already taken. Asking twice cannot make the house more inconsistent."""
+    t = Transcript()
+    t.record(_claim(1, "gerald", "maud", "s4", "gallery"))
+    for n in range(2, 12):
+        t.record(_claim(n, "maud", "maud", "s4", "library"))
+
+    assert len(t.contradictions()) == 1
+
+
+def test_the_same_disagreement_from_either_side_is_one_disagreement() -> None:
+    t = Transcript()
+    t.record(_claim(1, "gerald", "maud", "s4", "gallery"))
+    t.record(_claim(2, "maud", "maud", "s4", "library"))
+    t.record(_claim(3, "gerald", "maud", "s4", "gallery"))
+
+    assert len(t.contradictions()) == 1
+
+
+def test_a_third_person_with_a_third_answer_is_a_new_disagreement() -> None:
+    t = Transcript()
+    t.record(_claim(1, "gerald", "maud", "s4", "gallery"))
+    t.record(_claim(2, "maud", "maud", "s4", "library"))
+    t.record(_claim(3, "sidney", "maud", "s4", "chapel"))
+
+    assert len(t.contradictions()) == 3, "each pair genuinely disagrees"
+
+
+def test_a_third_person_agreeing_adds_nothing() -> None:
+    t = Transcript()
+    t.record(_claim(1, "gerald", "maud", "s4", "gallery"))
+    t.record(_claim(2, "maud", "maud", "s4", "library"))
+    t.record(_claim(3, "sidney", "maud", "s4", "library"))
+
+    assert len(t.contradictions()) == 2, "sidney disagrees with gerald and nobody else"
+
+
+def test_changing_your_own_story_still_counts() -> None:
+    """The loudest kind, and the one that must survive the deduplication."""
+    t = Transcript()
+    t.record(_claim(1, "maud", "maud", "s4", "library"))
+    t.record(_claim(2, "maud", "maud", "s4", "gallery"))
+
+    found = t.contradictions()
+
+    assert len(found) == 1
+    assert found[0].is_self_contradiction
+
+
+def test_changing_back_is_not_a_third_contradiction() -> None:
+    t = Transcript()
+    t.record(_claim(1, "maud", "maud", "s4", "library"))
+    t.record(_claim(2, "maud", "maud", "s4", "gallery"))
+    t.record(_claim(3, "maud", "maud", "s4", "library"))
+
+    assert len(t.contradictions()) == 1
+
+
+def test_agreeing_with_yourself_is_never_a_contradiction() -> None:
+    t = Transcript()
+    for n in range(1, 8):
+        t.record(_claim(n, "maud", "maud", "s4", "library"))
+
+    assert t.contradictions() == []
+
+
+# --- the ledger (D-140) ------------------------------------------------------
+
+
+def _spoke(who: str, question: str, speech: str, claims=(), cited=(), refused=False):
+    return Statement(
+        round=0,
+        speaker=who,
+        question=question,
+        speech=speech,
+        assertions=[Assertion(subject=s, slot=t, place=p) for s, t, p in claims],
+        cited=list(cited),
+        refused=refused,
+    )
+
+
+def test_a_held_story_is_one_line_not_ten() -> None:
+    """The point of the ledger. A suspect who says the same thing ten times has
+    committed to one thing, and the prompt used to carry all ten answers."""
+    t = Transcript()
+    for _ in range(10):
+        t.record(_spoke("vera", "Where were you?", "The study.", [("vera", "s1", "study")]))
+
+    lines = t.ledger(CASE, "vera")
+
+    assert len([x for x in lines if "study" in x.lower()]) == 1
+
+
+def test_the_version_they_are_standing_on_is_the_one_that_binds() -> None:
+    """Latest wins. That they moved is the notebook's business; what they are
+    committed to now is theirs."""
+    t = Transcript()
+    t.record(_spoke("vera", "Where?", "The study.", [("vera", "s1", "study")]))
+    t.record(_spoke("vera", "Really?", "The hall.", [("vera", "s1", "hall")]))
+
+    lines = t.ledger(CASE, "vera")
+
+    assert any("Hall" in x for x in lines)
+    assert not any("Study" in x for x in lines)
+
+
+def test_what_they_said_about_other_people_is_in_it_too() -> None:
+    t = Transcript()
+    t.record(_spoke("vera", "Who else?", "Otto was there.", [("otto", "s1", "hall")]))
+
+    assert any(x.startswith("You have said Otto was") for x in t.ledger(CASE, "vera"))
+
+
+def test_a_secret_is_named_rather_than_repeated_in_full() -> None:
+    """It is already in their brief. Printing the whole summary again is paying
+    twice for the same sentence."""
+    t = Transcript()
+    t.record(_spoke("vera", "And?", "Yes, alright.", cited=["secret:affair"]))
+
+    told = [x for x in t.ledger(CASE, "vera") if x.startswith("You have already told them")]
+
+    assert len(told) == 1
+    assert len(told[0]) < 200
+
+
+def test_refusals_are_counted_and_answers_are_not() -> None:
+    """The live block already says which question this is, and says it better."""
+    t = Transcript()
+    t.record(_spoke("vera", "Well?", "No.", refused=True))
+    t.record(_spoke("vera", "Well?", "Still no.", refused=True))
+
+    lines = t.ledger(CASE, "vera")
+
+    assert any("refused to answer 2 times" in x for x in lines)
+    assert not any("answered" in x for x in lines)
+
+
+def test_somebody_who_has_not_spoken_has_no_ledger() -> None:
+    assert Transcript().ledger(CASE, "vera") == []

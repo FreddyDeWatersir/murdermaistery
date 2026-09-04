@@ -277,16 +277,26 @@ def test_the_casting_note_reaches_the_prompt() -> None:
 def test_the_page_javascript_has_no_broken_escapes() -> None:
     """The embedded page is a Python string holding JavaScript, so a regex like
     /\\.$/ is an invalid Python escape: a warning today, an error on a later
-    Python (D-110). Cheap to assert, and it caught a real one."""
+    Python (D-110).
+
+    Compiles **the source file**, not the built string. The first version of this
+    test compiled `PAGE`, which is the value after Python has already swallowed
+    the bad escape, so it could never see one. It passed while a fresh
+    `SyntaxWarning` sat in the module, put there by the briefing screen a few
+    days later (D-128). A test that examines the output of the step that loses
+    the information cannot check that step.
+    """
     import warnings
+    from pathlib import Path
 
-    from mystery.web import PAGE
+    import mystery.web as web
 
+    source = Path(web.__file__).read_text(encoding="utf-8")
     with warnings.catch_warnings():
         warnings.simplefilter("error", SyntaxWarning)
-        compile(f"x = {PAGE!r}", "<page>", "exec")
+        compile(source, web.__file__, "exec")
 
-    assert "/\\.$/" in PAGE, "the JavaScript should still contain the regex itself"
+    assert "/\\.$/" in web.PAGE, "the JavaScript should still contain the regex itself"
 
 
 def test_the_draft_ceiling_is_above_what_a_draft_actually_writes() -> None:
@@ -343,3 +353,32 @@ def test_the_setting_guard_stops_the_cli_entry_point() -> None:
     from mystery.cli import main
 
     assert main(["--setting", "..."]) == 2
+
+
+def test_the_page_javascript_parses() -> None:
+    """The page is a Python string containing a program in another language, so
+    Python's own syntax check says nothing about it. Two escaping bugs shipped
+    to a browser this way in one afternoon: `\\'` and `\\n` written once too few
+    times, which Python swallowed happily and node did not.
+
+    Skipped rather than failed where node is absent, because the suite's promise
+    is that it runs anywhere with no network and no keys.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on this machine")
+
+    from mystery import web
+
+    script = web.PAGE.split("<script>")[1].split("</script>")[0]
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(script)
+        path = f.name
+
+    done = subprocess.run([node, "--check", path], capture_output=True, text=True)
+
+    assert done.returncode == 0, done.stderr

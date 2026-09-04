@@ -15,13 +15,15 @@ dependencies = [
     # Only needed for the browser version, mystery.web
     "fastapi>=0.115",
     "uvicorn>=0.32",
-    "openai>=3.5.0",
 ]
 
 [project.optional-dependencies]
-# Only for --portraits and --scenery. The game runs without either.
+# Only for --portraits. The game runs without it.
 portraits = ["openai>=1.50"]
-scenery = ["openai>=1.50"]
+# Only for running against AWS. A laptop needs none of it, and nothing in the
+# test suite imports boto3: S3Shelf builds its client lazily and the tests pass
+# a fake (D-118).
+aws = ["boto3>=1.35"]
 
 [build-system]
 requires = ["uv_build>=0.12.6,<0.13.0"]
@@ -29,10 +31,10 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "playwright>=1.62.0",
     "pytest>=9.1.1",
+    "requests>=2.34.2",
     "ruff>=0.16.4",
-    # fastapi.testclient needs it. Only the tests do, so it lives here.
-    "httpx>=0.28",
 ]
 
 [tool.pytest.ini_options]

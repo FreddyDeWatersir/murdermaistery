@@ -54,6 +54,103 @@ MANNERS = [
     "is calm in a way that costs visible effort",
 ]
 
+# How the words come out, as opposed to what the person does with the question.
+#
+# Measured across two played cases with different casts, different countries and
+# different centuries: 531 and 612 characters per answer, 21.0 and 20.6 words per
+# sentence, about two em-dashes per answer in both. That is one person talking in
+# twelve costumes, and it is the strongest sameness signal in the product,
+# stronger than plot structure, because it is what a player is inside for the
+# whole evening (D-127).
+#
+# `MANNERS` varies behaviour: who deflects, who over-explains. Nothing varied
+# register. Everybody was literate, measured and well punctuated. Nobody was
+# boring, nobody talked in fragments, nobody was exhausting to listen to.
+#
+# These are deliberately about **the shape of the sentences**, not about the
+# person. A voice here has to sit on any character the manner deck deals: a
+# bishop and a bouncer can both talk in short flat sentences.
+VOICES = [
+    "short flat sentences, rarely more than a dozen words, and no decoration",
+    "long winding sentences that arrive somewhere, but not by the direct route",
+    "starts sentences and abandons them halfway when a better one occurs",
+    "formal and slightly old-fashioned; full clauses, no contractions",
+    "very plain, small vocabulary, repeats the same handful of words",
+    "talks in questions, half of them not really questions",
+    "professional register: the vocabulary of their trade, used on everything",
+    "dry, understated, funny in a way that does not announce itself",
+    "warm and rambling, with digressions about people not in this house",
+    "clipped and impatient; answers in three words when three will do",
+    "precise about facts and vague about everything else, in the same breath",
+    "hedges constantly: probably, more or less, I think, as far as I know",
+    "blunt to the point of rudeness and unbothered by it",
+    "nervous overtalking, filling silence with detail nobody asked for",
+    "speaks slowly, with pauses you can feel, and means every word",
+    "quotes other people constantly, in their voices",
+    "sardonic, and the sarcasm is the only place the feeling shows",
+    "gentle, apologetic phrasing over completely immovable answers",
+]
+
+# What the player was asked to do, as opposed to what turns out to be true.
+#
+# Topology answers *how is the truth hidden*. This answers *what is this evening
+# asking*, which is a layer above it and composes with all seven shapes (D-129).
+# Every case so far has asked exactly one question — who killed this person —
+# and after four cases the activity is identical whatever the scenery.
+#
+# The pair is (what you are told, how that can be wrong). The commission is
+# stated to the player in the briefing, because being told what you are for is
+# not a spoiler; whether it was the right question is the case.
+COMMISSIONS = [
+    (
+        "The household want to know which of them did it, and want it settled "
+        "tonight rather than by whoever arrives in the morning",
+        "the plain version: nothing about the request misleads anybody",
+    ),
+    (
+        "They have already settled on one name between them, and what is wanted "
+        "from you is a confirmation that will hold up in the morning",
+        "the name they have settled on is the wrong one, and the reason they all "
+        "believe it is somebody's careful work",
+    ),
+    (
+        "A doctor has already called it a fall, or a seizure, or the stairs, and "
+        "one person in this house refuses to accept that and sent for you",
+        "the doctor is wrong and the one who sent for you is right, though not "
+        "for the reason they think",
+    ),
+    (
+        "You did not come about a death at all. You came for a document, a "
+        "payment or an object, and the death is standing between you and it",
+        "the thing you came for and the death turn out to be the same story, "
+        "which nobody will say out loud",
+    ),
+    (
+        "Somebody in this house wrote to you a fortnight ago saying they were "
+        "frightened, and would not say of what",
+        "the letter was not written by the person who died, and whoever wrote it "
+        "is still in the building",
+    ),
+    (
+        "One of them has already confessed, plainly and without being pressed, "
+        "and you are here because nobody quite believes it",
+        "the confession is false and the confessor knows exactly who they are "
+        "covering for",
+    ),
+    (
+        "The insurers, the family or the firm want a version of tonight they can "
+        "file, and would rather it were tidy than true",
+        "the tidy version and the true one name different people, and you will "
+        "have to choose which one to write down",
+    ),
+    (
+        "You were already here on other business when it happened, and are the "
+        "only person present whose reason for being here is written down",
+        "your own business and the killing turn out to touch, and one of them "
+        "knows that before you do",
+    ),
+]
+
 MOTIVES = [
     "the victim was about to take away the thing that made them who they are",
     "an old crime was going to be reopened, and the victim held the thread",
@@ -216,6 +313,7 @@ OCCASIONS = [
 @dataclass(frozen=True)
 class Palette:
     manners: list[str]
+    voices: list[str]
     motive: str
     intrigues: list[str]
     standing: str = ""
@@ -224,6 +322,7 @@ class Palette:
 
     def brief(self) -> str:
         manners = "\n".join(f"  - {m}" for m in self.manners)
+        voices = "\n".join(f"  - {v}" for v in self.voices)
         intrigues = "\n".join(f"  - {i}" for i in self.intrigues)
         return (
             f"MATERIAL FOR THIS CASE\n"
@@ -233,8 +332,12 @@ class Palette:
             f"names, the food, the weather, the money and how the building is "
             f"built. Do not write a travel brochure of it and do not make anybody "
             f"a type: it should show mostly in what people are called and what "
-            f"they take for granted. If the setting given below already names a "
-            f"country or a city, that wins and you ignore this line.\n\n"
+            f"they take for granted. **If the setting given below already implies "
+            f"a place, that wins and you ignore this line entirely** — and a "
+            f"period or a style implies one as surely as a country does. A "
+            f"Victorian castle is British, a dacha is Russian, a hacienda is "
+            f"Spanish-speaking. Only use the line above when the setting could "
+            f"honestly be anywhere.\n\n"
             f"Manners, one per suspect, in any order you like. Write them as these "
             f"people rather than as the phrases below, and let the manner shape "
             f"what they actually say:\n{manners}\n\n"
@@ -247,6 +350,15 @@ class Palette:
             f"The person asking the questions is {self.standing}. Work out who "
             f"that is in *this* building and write it into `investigator`. It is "
             f"the assignment, not a suggestion, and it is different next time.\n\n"
+            f"**And how they each sound**, which is a different question from "
+            f"how they behave. Deal these across the cast too, in any order, and "
+            f"write it into `voice`. A voice is the shape of the sentences: how "
+            f"long, how formal, how finished, how large a vocabulary. It has to "
+            f"survive contact with the manner above it, and the two are "
+            f"independent — a blunt three-word answerer can be the one who "
+            f"answers for everybody else. **Do not give them all the same "
+            f"careful literate register.** Somebody here should be tiring to "
+            f"listen to:\n{voices}\n\n"
             f"These threads also run under the evening, between people who did not "
             f"kill anybody. They are what the other suspects are being evasive "
             f"about, and at least one of them should be the thing that gates the "
@@ -264,6 +376,7 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
     rng = random.Random(f"{seed}|{setting}|{topology}")
     return Palette(
         manners=rng.sample(MANNERS, min(cast_size, len(MANNERS))),
+        voices=rng.sample(VOICES, min(cast_size, len(VOICES))),
         motive=rng.choice(MOTIVES),
         intrigues=rng.sample(INTRIGUES, 3),
         standing=rng.choice(STANDINGS),
@@ -275,6 +388,59 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
         # (D-111).
         where=random.Random(f"where|{seed}").choice(WHERE),
     )
+
+
+def questions(seed: int) -> int:
+    """How long before the police arrive, per case (D-129).
+
+    A single global forty was wrong twice over. It was too tight — two real
+    evenings ran to 132 and 106 questions and both were enjoyed — and the cost
+    argument leaning on it did not survive being checked: with prompt caching a
+    hundred question evening is about fifty four cents, not two euros.
+
+    A cap the player never reaches creates no scarcity, and a cap that always
+    bites is just a shorter game. So it is dealt, in a wide band, and said in the
+    briefing: most nights there is more time than anybody needs and occasionally
+    the cars are much closer than that. The evening having its own clock is a
+    property of the case rather than a setting somebody tuned.
+    """
+    return random.Random(f"clock|{seed}").choice(
+        [70, 80, 90, 100, 110, 120, 130, 140, 150, 45, 55]
+    )
+
+
+def commission(seed: int) -> tuple[str, bool, str]:
+    """What the player is told they are for, and whether it is true.
+
+    Returns the brief, whether it is sound, and how it is wrong when it is not.
+    Roughly two in five are mistaken, which is often enough that the briefing
+    cannot be trusted flatly and rare enough that trusting it is not stupid.
+    """
+    rng = random.Random(f"commission|{seed}")
+    brief, wrong = rng.choice(COMMISSIONS)
+    sound = rng.random() >= 0.4
+    return brief, sound, wrong
+
+
+def murder_slot(seed: int, slot_count: int = 5) -> int:
+    """Which slot the killing happens in, dealt from the seed (D-125).
+
+    Measured across twelve real cases: the murder was in slot four ten times and
+    slot five twice. Never earlier. Nothing asked for that; the model writes a
+    story and a story builds to its murder, so it lands near the end every time.
+
+    The cost is a rule of thumb that solves the game. The killer lies about the
+    slot they killed in, by construction, so "who is lying about the second to
+    last hour" walked straight to the killer in ten cases out of twelve. A player
+    found it without being told, and said so.
+
+    Dealt uniformly from the second slot onwards. The first is excluded because a
+    murder there leaves four fifths of the evening as aftermath, with the room
+    sealed by V10, and the case becomes a different game rather than a harder
+    one. Everything after that is fair, and **when** it happened stops being
+    something the player can assume.
+    """
+    return random.Random(f"murder|{seed}").randrange(2, slot_count + 1)
 
 
 def occasion(seed: int) -> str:

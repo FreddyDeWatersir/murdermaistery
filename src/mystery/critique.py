@@ -930,7 +930,246 @@ def the_building_hangs_together(mystery: Mystery) -> list[Advisory]:
     return found
 
 
+def the_murder_hour_is_not_a_giveaway(mystery: Mystery) -> list[Advisory]:
+    """A20: somebody innocent lies about the hour the killer lies about.
+
+    The killer lies about the slot they killed in, by construction. So if theirs
+    is the only lie covering that slot, the entire case collapses into one
+    question: who is lying about it. Measured across twelve real cases, five had
+    no other liar there at all, and a player found the shortcut unprompted and
+    reported the game had a rule of thumb that beat it (D-125).
+
+    This is A7's argument moved one level down. A7 protects the alibi from being
+    broken by a single witness; this protects the *lie* from naming one person.
+    """
+    claim = mystery.lie_by(mystery.killer)
+    if claim is None:
+        # Some shapes have the killer tell no lie at all, and in those the
+        # question this check asks does not arise.
+        return []
+
+    sharing = [
+        other.character
+        for other in mystery.false_claims
+        if other.character != mystery.killer and other.slot == claim.slot
+    ]
+    if sharing:
+        return []
+
+    return [
+        Advisory(
+            check="A20",
+            message=(
+                f"{mystery.killer!r} is the only person lying about {claim.slot!r}, "
+                f"which is the slot they killed in. That makes the whole case one "
+                f"question: who is lying about that hour. Somebody innocent has to "
+                f"be lying about it too, for their own reasons"
+            ),
+        )
+    ]
+
+
+def something_in_this_house_moved(mystery: Mystery) -> list[Advisory]:
+    """A21: at least one object has a path, and its path implicates somebody.
+
+    Until D-131 every claim the game could check reduced to person, place, slot.
+    One grid, one kind of lie, one kind of contradiction. An object that moves is
+    a second axis: the person who saw it in both rooms is the person who carried
+    it, and they are caught without ever being caught out about themselves.
+
+    A thing that never moves is scenery. A thing whose whole journey was watched
+    by everybody proves nothing about anybody.
+    """
+    if not mystery.things:
+        return [
+            Advisory(
+                check="A21",
+                message=(
+                    "Nothing in this house has a path. Every claim in the case is "
+                    "about where a person was, so there is one grid, one kind of "
+                    "lie and one kind of contradiction. Give the evening an object "
+                    "that started somewhere and ended somewhere else"
+                ),
+            )
+        ]
+
+    moving = [t for t in mystery.things if t.moves]
+    if not moving:
+        return [
+            Advisory(
+                check="A21",
+                message=(
+                    f"{len(mystery.things)} object(s) and not one of them moves. A "
+                    f"thing that sits in the same room all evening is furniture: "
+                    f"the evidence is the journey"
+                ),
+            )
+        ]
+
+    advisories = []
+    for thing in moving:
+        # Who was in a room with it while it was in two different rooms? That
+        # set is the reason this mechanic exists.
+        rooms: dict[str, set[str]] = {}
+        for slot, place in thing.where.items():
+            for character in mystery.characters:
+                if mystery.placements.get(character.id, {}).get(slot) == place:
+                    rooms.setdefault(character.id, set()).add(place)
+        both = [who for who, seen in rooms.items() if len(seen) > 1]
+        if not both:
+            advisories.append(
+                Advisory(
+                    check="A21",
+                    message=(
+                        f"the {thing.name!r} moves and nobody saw it in more than "
+                        f"one place, so its journey convicts nobody and the player "
+                        f"cannot reconstruct it from testimony at all"
+                    ),
+                )
+            )
+        elif len(both) >= len(mystery.characters) - 1:
+            advisories.append(
+                Advisory(
+                    check="A21",
+                    message=(
+                        f"everybody watched the {thing.name!r} travel, so knowing "
+                        f"its path narrows nothing. Put the journey in front of one "
+                        f"or two people"
+                    ),
+                )
+            )
+    return advisories
+
+
+def somebody_is_wrong_without_lying(mystery: Mystery) -> list[Advisory]:
+    """A22: at least one scene is described two ways, and at least one falsehood
+    in the case is an honest mistake rather than a lie.
+
+    Until D-132 every fact was true and every contradiction meant a liar, so
+    catching somebody out was an accusation and the player learned to treat a
+    collision as a verdict. A sincere, certain, wrong witness turns the same
+    collision into a question: one of you is wrong, and which is the interesting
+    part.
+    """
+    if not mystery.accounts:
+        return [
+            Advisory(
+                check="A22",
+                message=(
+                    "Nobody gives an account of anything. Every scene has one "
+                    "authoritative description the player never sees, so the only "
+                    "thing anybody can be wrong about is which room they stood in"
+                ),
+            )
+        ]
+
+    advisories = []
+    contested = [
+        scene
+        for scene in {a.constraint for a in mystery.accounts}
+        if len({a.true for a in mystery.accounts_of(scene)}) > 1
+    ]
+    if not contested:
+        advisories.append(
+            Advisory(
+                check="A22",
+                message=(
+                    "every account agrees with every other one. Accounts that "
+                    "never conflict are description, not evidence"
+                ),
+            )
+        )
+
+    wrong = [a for a in mystery.accounts if not a.true]
+    if wrong and not [a for a in wrong if a.honest]:
+        advisories.append(
+            Advisory(
+                check="A22",
+                message=(
+                    f"all {len(wrong)} false account(s) are deliberate lies. With "
+                    f"nobody honestly mistaken, a contradiction still means a liar "
+                    f"and the player is right to treat every collision as a verdict"
+                ),
+            )
+        )
+
+    # An account from somebody who was not in the room is not an account.
+    scenes = {c.id: c for c in mystery.constraints}
+    for account in mystery.accounts:
+        scene = scenes.get(account.constraint)
+        if scene and account.character not in scene.people:
+            advisories.append(
+                Advisory(
+                    check="A22",
+                    message=(
+                        f"{account.character!r} gives an account of "
+                        f"{account.constraint!r} and was not in that scene. That is "
+                        f"hearsay wearing a witness's clothes"
+                    ),
+                )
+            )
+    return advisories
+
+
+def not_every_journey_points_at_the_killer(mystery: Mystery) -> list[Advisory]:
+    """A23: the objects that move were not all moved by the killer (D-136).
+
+    A21 asked that something in the house move and that its journey be watched by
+    only one or two people. Taken alone that is a recipe for a signpost: one
+    object, it moves once, the killer carried it, and "who moved the thing" is a
+    shorter road to the answer than the timeline ever was. The mechanic was added
+    to give the player a second axis to reason on, and a second axis that always
+    resolves to the same name is not a second axis, it is a bigger arrow.
+
+    What makes an object's path evidence rather than an arrow is that objects
+    move for ordinary reasons. Somebody took the letters upstairs because they
+    did not want them read. Somebody moved the decanter because they were
+    drinking. The player has to work out which journey is the relevant one, and
+    that is the work.
+    """
+    moved = {
+        who
+        for thing in mystery.things
+        for who in thing.moved_by.values()
+        if who in {c.id for c in mystery.characters}
+    }
+    if not moved:
+        return []
+
+    if moved == {mystery.killer}:
+        return [
+            Advisory(
+                check="A23",
+                message=(
+                    "the only person who moves anything in this house is the "
+                    "killer, so 'who carried it' is a shorter road to the answer "
+                    "than the timeline. Give somebody innocent a reason to have "
+                    "picked something up and put it down somewhere else"
+                ),
+            )
+        ]
+
+    innocent = [t for t in mystery.things if t.moves and mystery.killer not in t.moved_by.values()]
+    if not innocent and len([t for t in mystery.things if t.moves]) == 1:
+        return [
+            Advisory(
+                check="A23",
+                message=(
+                    "exactly one object moves and the killer is one of the people "
+                    "who moved it. One journey, one culprit: a player who finds "
+                    "the journey is finished. A second thing that travels for an "
+                    "unrelated reason is what turns it into evidence"
+                ),
+            )
+        ]
+    return []
+
+
 ADVISORIES = [
+    somebody_is_wrong_without_lying,
+    something_in_this_house_moved,
+    not_every_journey_points_at_the_killer,
+    the_murder_hour_is_not_a_giveaway,
     wandering,
     alibi_breadth,
     everyone_conceals_something,

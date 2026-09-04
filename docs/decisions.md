@@ -2735,3 +2735,1190 @@ The second is a zero-byte object whose name is the entire payload. Two writes pe
 save so that both reads are cheap, which is the right trade when saves happen
 once a night and reads happen on every page load.
 **Status:** active
+
+## D-118 Two shelves, one protocol, and a fake bucket
+**Date:** 2026-09-01
+**The `Shelf` protocol has existed since D-081 with no implementations.** Only
+module functions the CLI and the web server called directly. Writing `S3Shelf`
+meant writing `FileShelf` too, and the point of the second one is that the first
+must keep working untouched: **a laptop runs this game with no AWS account, no
+credentials, and boto3 not installed.** If that ever stops being true we have
+done this wrong, and it is now asserted rather than intended.
+
+**The key layout, which is the whole design.** S3 is not a filesystem. It is a
+flat key/value store, the slashes are characters, and the single indexed
+operation is "list keys starting with X". There is no way to search from the
+right. So one naming scheme cannot serve both reads: `load` knows an id, `cards`
+wants everything in date order. Two prefixes, each shaped for exactly one:
+
+    cases/{id}.json          load(): one GET, key derived from the id
+    index/{saved}__{id}      cards(): one LIST, zero GETs, sorted by name
+
+The marker is a zero-byte object. It stores nothing; **writing it is how you
+write to an index when the index is the namespace.**
+
+**A shortcut rejected, and the reason is three months old.** The date could have
+come from each object's `LastModified` instead of a marker, saving a write per
+save. It is wrong: `LastModified` has one second of resolution, and D-094 was
+exactly about two cases made inside the same tick tying and losing their order.
+`_stamp()` is monotonic on purpose. **A field that exists because a clock was
+not fine enough cannot be replaced by a coarser clock.**
+
+**And a piece of luck worth naming, because it was not luck.** `--case
+the-brine` matching `the-brine-house-k3f9` is a local convenience implemented
+with `glob`. Putting the id at the front of the key so that `load` works at all
+is the same thing that makes a prefix search work, so the shorthand survived the
+move without being ported. `Card`'s docstring had already said the hot path
+needs "one request and no reads at all, rather than one request and three
+hundred" — the S3 cost model, derived from first principles on a filesystem
+months before there was a bucket. **Design pressure applied to a small local
+problem turned out to be the same pressure the distributed one applies.**
+
+**Write order is a durability decision, not a style one.** No transaction spans
+two objects. Case first, marker second: a failure between them leaves a case
+that is loadable by name but missing from the queue. The other order loses the
+case and leaves a listing entry that cannot be opened. **When you cannot have
+both, fail towards the harmless half**, and assert the order so a later tidy-up
+cannot quietly swap it.
+
+**Pagination is the bug that waits.** `list_objects_v2` returns at most a
+thousand keys plus a continuation token. Code that ignores the token is correct
+until the day there are a thousand and one objects and then silently stops
+seeing the newest, which is a horrible way to find out. The fake bucket in the
+tests paginates at two, so the loop is exercised on every run rather than
+assumed.
+
+**How it is tested, and the one thing tests cannot do.** `FakeS3` is a
+dictionary answering the three calls `S3Shelf` makes, in boto3's shapes. Same
+pattern as `Drafter` and `Responder` (D-002, D-027): the client is injected, the
+real one is built lazily on first use, and the suite touches no network and
+needs no credentials. Seventeen tests, milliseconds, no charges.
+
+But a fake can only be wrong in the same way twice. It cannot tell you the
+region is mismatched, the credentials are stale, the bucket policy says no, or
+that boto3 wants an argument you did not pass. So `scripts/s3_check.py` exists:
+run by hand against real AWS, it saves the example case, lists, loads, checks
+the round trip, and deletes both objects it created. **It is deliberately not
+part of `pytest`** — a test suite that costs money and needs credentials stops
+being run.
+
+**One environment variable, read in one place.** `MYSTERY_BUCKET` set means S3,
+unset or blank means the folder, and `shelf()` is the only line in the project
+that knows both exist. Set-but-blank falls back rather than building a client
+for a bucket named the empty string, because set-but-blank is how a deploy
+config goes wrong.
+**Status:** active
+
+## D-119 Written, and now reachable
+**Date:** 2026-09-01
+**`S3Shelf` passed seventeen tests and the game could not reach it.** Both entry
+points still called the module-level `load` and `save` directly, so setting
+`MYSTERY_BUCKET` would have done nothing at all and every case would have gone
+on landing in a folder. This project's characteristic failure, named nine times
+now, is a thing written with care, carried through the schema, and never wired
+to the place that needed it. **The tenth would have been the storage layer for a
+deployment**, and it would have been found in production.
+
+**Three call sites and two entry points.** `web.py` and `cli.py` each pick a
+shelf once, at the top of `main`, and everything below is handed the object.
+`entries`, `catalogue` and the rota's `waiting`, `todays_case` and `shortfall`
+all learned to take a shelf.
+
+**They still take a `Path` too, and that is on purpose.** `as_shelf` accepts a
+shelf, a path, or nothing: a path becomes a `FileShelf`, nothing becomes
+`shelf()`. This is the same accommodation `_rota` made in D-080, for the same
+reason written down there — *a boundary that breaks its callers on the day it
+lands does not get adopted*. Every test in the suite passes a folder, and not one
+of them had to change.
+
+**`--bundle` deliberately did not move.** It zips a case and its art off this
+machine to carry to another one. It is a local-disk operation by definition, and
+pointing it at a shelf would be a category error dressed as consistency. It keeps
+the folder.
+
+**How reachability is asserted, which is the part that matters.** Six new tests
+run the actual entry points — `cli.main(["--dry-run"])`, `web.main([...])` — with
+`pick_shelf` monkeypatched to a shelf in a temp directory, and then check that
+the case landed *in that shelf*. Not that the function was called; that a case
+arrived. A test that mocks the boundary and asserts the mock was invoked is the
+test that has been passing for nine of these failures.
+
+The visible end of the same wire: with `MYSTERY_BUCKET` set, both entry points
+print `Shelf: s3://...` before doing anything, and print nothing when it is
+unset. It costs one line and it means the question "which shelf am I actually
+using" is answered on screen rather than inferred.
+**Status:** active
+
+## D-120 A dry run that filled a bucket
+**Date:** 2026-09-01
+**The first real run against S3 found three things, and only one of them was
+about S3.** The transcript is worth keeping because it is the argument for
+running the thing rather than reading it.
+
+**`--dry-run` was saving.** It swaps the model for the case that ships in the
+repo, so it is a check on the pipeline and not a case. It has always kept what
+it made, which on a laptop was harmless clutter in `var/cases` and is now junk in
+storage somebody pays for: **the same example case, under a new id, every single
+run.** Two of them landed in the bucket within fifteen seconds of it existing.
+Both entry points now keep nothing on a dry run, and the web one serves under the
+id `dry-run` rather than minting one.
+
+The general shape: **behaviour that was merely untidy locally becomes wrong the
+moment the destination is shared, and nothing about the code changed** — only
+where it pointed. Worth looking for the others before Lambda: anything that
+writes on a path whose purpose is to check something.
+
+**The draws were announced by commands that never generate.** `--cases` printed a
+seed, a shape and an occasion and then listed the shelf. None of the three
+reached anything. They ran unconditionally after parsing, before the branches
+that return early. **A number nobody used is worse than no number, because it
+looks like provenance.** `_draw` is now a function called only by the paths that
+build a case.
+
+**And a dry run announced draws that were lies.** Seed, shape and occasion were
+printed, then the drafter ignored all three and returned Opening Night. Two
+consecutive dry runs printed different shapes and different occasions and
+produced byte-identical cases. Worse, the shape advisories then ran against the
+shape that had been drawn and not used, so `--dry-run` reported *"Nobody
+confesses. This was asked for as a false confession"* about a case nobody ever
+asked a model for. It now says what it is in one line, fills the fields silently
+because the request object needs them, and runs no shape advisories.
+
+**One bug introduced and caught by the tests in the same minute.** Making the
+draws conditional left `--case` building a `GenerationRequest` out of three
+`None`s, which pydantic refused. The fix is better than the original: inspecting
+a saved case now returns *before* anything is drawn, because a saved case has its
+own seed and shape from the night it was made and never needed new ones.
+
+**Two of my own tests failed, correctly, and had to be rewritten.** They proved
+"the shelf a process chose is where a case lands" by running `--dry-run`, which
+no longer saves. Rewritten to go down the real generating path with only
+`anthropic_drafter` swapped. **A save test built on a path that keeps nothing
+would have passed forever while testing nothing**, which is the same failure as
+mocking a boundary and asserting the mock was called.
+**Status:** active
+
+## D-121 The pictures had nowhere to go
+**Date:** 2026-09-01
+**Spotted while explaining what was actually in the bucket, which is its own
+argument for explaining things.** The cases were in S3 and `web.py` was still
+serving portraits straight off the filesystem with `FileResponse`. There is no
+filesystem on a Lambda, so the first deployed game would have rendered every
+face and every room as a blank, and the cause would have looked like an art
+problem rather than a storage one.
+
+**`gallery.py`, the fourth boundary of the same shape** as `Shelf`, `Sessions`
+and `Rota`. `FileGallery` is a folder and is what every test uses; `S3Gallery` is
+the same bucket under an `art/` prefix, beside `cases/` and `index/`. Pictures do
+not want a bucket of their own: one bucket is one thing to secure, one thing to
+pay for and one name to get right.
+
+**The interesting decision is that `S3Gallery` does not serve bytes.** A portrait
+here is about a megabyte and a half and six make a case, so reading them out of
+S3 into Python and returning them through the application would push nine
+megabytes of PNG through the compute layer on every cold visit: slow, billed per
+millisecond, and pressing on the six megabyte response ceiling for nothing.
+
+Instead `link()` returns a **presigned URL** and the route answers with a 307,
+so the browser fetches from S3 directly and the picture never touches the
+application. Two things worth knowing about presigned URLs, both of which sound
+wrong until you see why they are not. It works against a bucket with every
+public-access block switched on, because a presigned URL is **an authenticated
+request wearing a link's clothes**, not a hole in the policy. And generating one
+is arithmetic rather than a request: the string is signed locally with
+credentials this process already holds, so it costs nothing and takes no network.
+A test asserts no `get` reached the client while signing.
+
+**307 and not 302**, because the link expires in an hour and a cached redirect
+would hand somebody a dead URL later.
+
+`FileGallery.link` returns `None` and the same route falls through to reading the
+file, which is the right answer on a machine where the file is right there. One
+route body, two behaviours, decided by what the gallery can do rather than by a
+flag saying which world we are in.
+
+**An hour of life, and both ends are asserted.** Long enough that a page open in
+a tab survives a game; short enough that a link copied out of the page stops
+being a way in. A test pins it between ten minutes and a day, so a later tweak
+has to argue with both failure modes rather than one.
+
+**One bug this quietly fixed on the way past.** `_serve` asked the *folder*
+whether art already existed, in order to decide whether to generate. On a
+deployment that question has to be asked of the bucket, or a Lambda would have
+regenerated every picture on every cold start at about fifty cents a time. It now
+asks the gallery.
+
+**Generation still writes to disk first, deliberately.** The image API is the
+expensive part and the files are what is worth not losing, so a failed upload
+costs a retry rather than fifty cents of pictures. `put` is a no-op on a folder
+gallery, which is already looking at them.
+**Status:** active
+
+## D-122 The write the rota was written for
+**Date:** 2026-09-02
+**Two boundaries reached the implementation they were designed against.** Both
+had left a note.
+
+`Session.expires` has carried Unix epoch seconds since it was written, with the
+comment: *"an odd thing to carry until you know that DynamoDB expires a record by
+reading exactly this shape out of an attribute and deleting the row for free. A
+field written for a database that does not exist yet, because the alternative is
+a migration later."* TTL now points at it. No migration, no sweeper job.
+
+`FileRota` opens by admitting *"A file has no conditional write."* `claim` was
+specified in D-079 as *today's case is this one, unless somebody already decided,
+in which case tell me what they decided*, which a file can only approximate by
+re-reading immediately before writing and hoping. **`DynamoRota.claim` is one
+`put_item` with `ConditionExpression="attribute_not_exists(#d)"`:** either the
+item did not exist and the write lands, or it did and the write is refused with
+a named exception, and there is no moment in between for a second writer to
+occupy. Three tests pin it, including eight writers claiming one day and getting
+one answer. `#d` is a bound placeholder because `day` is one of DynamoDB's
+reserved words.
+
+**The record goes in as one JSON string, and that is a decision rather than
+laziness.** DynamoDB has no float. It has `Decimal`, and a single stray float
+anywhere in a nested structure fails the write with an error naming the type and
+not the field. A session is written by `to_record`, read by `from_record`, and
+never queried by its contents, so exploding it into native attributes buys
+nothing and costs a whole class of bug. Two things stay real attributes: `id`
+because it is the key, and `expires` because TTL reads it off the item.
+
+**The size ceiling, measured rather than guessed.** An item cannot exceed 400 KB.
+The played session came to **119 KB at 132 questions**, about nine tenths of a
+kilobyte per statement, so the wall sits near four hundred and forty questions.
+`save` logs `session.large` past three quarters, because the failure mode is a
+write that starts refusing mid-game and a notebook that silently stops keeping
+up. The escape hatch, written down rather than built: one item per statement,
+keyed by session and round, which needs a wider `Sessions` protocol than the four
+methods that exist to keep the deployed version from needing anything the local
+one does not.
+
+**Cost is not the constraint here and it is worth saying so.** Writes are billed
+per kilobyte, so a whole 132-question evening is about **one cent** of write
+units. On-demand capacity means an idle game costs nothing at all, which is the
+same reason Lambda was chosen.
+
+**Two tables rather than one.** Single-table design exists to make one query
+fetch related items across entity types, and there is no such query here. Two
+tables cost the same on-demand and each one is obvious.
+
+**A scan, kept, with the condition under which it stops being fine.**
+`DynamoRota.used()` reads the whole table, which is the operation you design
+never to do. The whole table is one small item per day: a year is three hundred
+and sixty five rows of two short strings. The number to watch is not the row
+count but the call site — it runs on `waiting()`, which runs when somebody
+visits, and if that becomes a real page load rate the answer is to cache it for a
+minute rather than to index it, because it changes once a day.
+
+**And the wiring, because writing it is not reaching it (D-119).** `_rota(None)`
+meant `FileRota()` flatly, which would have left `DynamoRota` unreachable however
+carefully it was written. It means `rota()` now. `web.py` asks `pick_sessions()`
+rather than constructing `FileSessions()`. The test for that runs the real entry
+point with only `uvicorn.run` replaced, then drives the built app through a
+`TestClient` and checks a session file arrived in the store the process chose —
+asserting on the destination rather than on a mock having been called.
+**Status:** active
+
+## D-123 A crash after the money was spent
+**Date:** 2026-09-02
+**A real run against S3, with `--art`, drafted a case for twenty nine cents,
+saved it to the bucket, and then died on `ModuleNotFoundError: No module named
+'openai'`.** The cause was ordinary: `uv sync --extra aws` installs that extra
+and removes the others, so the `portraits` extra went away when AWS arrived. A
+normal thing to do, with no warning at the time.
+
+**The bug is not the missing package.** `generate_portraits` has said this in its
+docstring since it was written: *"Failures are logged and dropped rather than
+raised. Half a cast with images and half drawn is a slightly odd-looking game; a
+crash is no game."* Every failure inside it is caught. The one failure it did not
+cover is the package not being there at all, because that happens on the `from
+openai import OpenAI` line above all the protection.
+
+**A promise made in a docstring is only kept where the code puts a `try` around
+it, and the case most likely to break is usually the one outside the block.**
+Both generators now catch `ImportError`, log `no_package` with the exact command
+that fixes it, and return nothing. The game plays without pictures, which is what
+the docstring always claimed.
+
+Two tests block `import openai` at the interpreter level and assert an empty
+result rather than an exception, and a third asserts the warning tells you how to
+fix it, because a warning that only says something is wrong costs the same to
+write and is worth less.
+
+**Nothing was actually lost, and that is D-073 working.** The case was saved
+before the art was attempted, so twenty nine cents of Opus was still on the shelf
+and replayable with `--case`. *Kept before anybody plays it* was written for a
+different failure and covered this one.
+
+**Two things the same run exposed that had nothing to do with the crash.**
+
+The setting was "a victorian castle" and the cast came back Moroccan. The `WHERE`
+deck said it yields when the setting "already names a country or a city", and a
+Victorian castle names neither, so the deck won and put the case on the Maghreb
+coast. **A period or a style implies a place as surely as a country does**: a
+dacha is Russian, a hacienda is Spanish-speaking. The rule now says so, with those
+examples, and only claims the case when the setting could honestly be anywhere.
+
+And A1 fired for **all six of the cast**, three or four moves each in five slots.
+The prompt has never said anything about staying put; it says place people for
+reasons, which the model reads as permission to keep placing them. It now says
+most people move once or twice at most, that somebody who never leaves the main
+room is a good character rather than a lazy one because their alibi is other
+people, and names this case as what the alternative looks like. `MAX_MOVES_PER_
+CHARACTER` stays an advisory rather than a rule, because a case that is otherwise
+good should not be thrown away over a wanderer.
+**Status:** active
+
+## D-124 The link Python could follow and a browser could not
+**Date:** 2026-09-02
+**Everything worked and no pictures appeared.** Six portraits generated, six
+uploaded, `gallery.uploaded` logged twice, the objects present in the bucket, and
+the page showed blanks where the faces go.
+
+`boto3.client("s3", region_name="eu-north-1")` signs against the **legacy global
+host**, `<bucket>.s3.amazonaws.com`, rather than the regional one. Outside
+us-east-1 that host answers a redirect, and boto3 follows it — so `put_object`,
+`get_object` and `list_objects_v2` all worked perfectly, the upload check passed,
+and nothing anywhere complained.
+
+**A browser cannot follow it.** A presigned signature is bound to the host it was
+computed for, so the redirected request arrives unsigned for its new host and is
+refused. The result is a link that fails in a page while the identical operation
+from Python succeeds, which is about the worst diagnostic shape available: the
+thing you would reach for to test it is the thing that cannot reproduce it.
+
+AWS is explicit about this for buckets in an account regional namespace, which is
+what D-117 chose: use the regional endpoint, the global one is a us-east-1
+backwards-compatibility shim.
+
+**The fix is a `Config`, in one place.** `s3_client()` in `library.py` builds
+every S3 client this project makes, with `addressing_style="virtual"` and
+`signature_version="s3v4"`, which resolves to
+`<bucket>.s3.eu-north-1.amazonaws.com`. The shelf and the gallery share it,
+because two clients that disagree about endpoints is the same bug twice.
+
+**Why nothing caught it, which is the part worth keeping.** The suite tests the
+gallery against a fake whose `generate_presigned_url` returns a made-up string,
+so it could assert the link was signed and expiring but never what host it named.
+`scripts/s3_check.py` ran against real AWS and still passed, because it verified
+the round trip **through boto3**. Both were testing the client that tolerates the
+mistake.
+
+**A boundary crossed by two different clients needs asserting for both.** The new
+tests build a real `S3Gallery` with fake credentials — signing is local
+arithmetic, so no network and no account is needed — and assert the host ends in
+the region. The by-hand check now fails loudly on a global-endpoint link and says
+what it means. The general form: when an artefact is produced by one client and
+consumed by another, test the artefact, not the producer.
+**Status:** active
+
+## D-125 The murder was always in the second to last hour
+**Date:** 2026-09-02
+**From play: "the rule of thumb of finding who's lying about where they were in
+second to last slot seems a little too effective in finding the killer."** He is
+right, and the measurement is worse than the complaint.
+
+Across all twelve cases on the shelf:
+
+| where the murder happened | cases |
+|---|---|
+| slot 4 of 5 | 10 |
+| slot 5 of 5 | 2 |
+| anywhere earlier | **0** |
+
+Nothing ever asked for that. A story builds to its murder, so the model puts it
+at the end, every time. And the killer lies about the slot they killed in by
+construction, so **"who is lying about the second to last hour" walked to the
+killer in ten cases out of twelve.** A player found it unprompted.
+
+Worse, in **five of the twelve nobody else was lying about that slot at all**, so
+the shortcut returned exactly one name. In the case he played there was one other
+liar there, and she was also the person who found the body, which explains itself
+away — so the shortcut still effectively named one person.
+
+**Two fixes, because it is two problems.**
+
+`murder_slot(seed)` deals the hour uniformly from the second slot onwards, the
+same way the topology, the occasion and the region are dealt (D-103, D-111,
+D-115), and the prompt carries a `WHEN IT HAPPENS` block naming it as not
+negotiable. The first slot is excluded: a murder there leaves four fifths of the
+evening as aftermath with the room sealed by V10, which is a different game
+rather than a harder one. **When it happened stops being something the player can
+assume**, which also makes the timeline worth reading rather than skimming.
+
+**A20** requires somebody innocent to be lying about the same slot as the killer.
+This is A7's argument one level down: A7 stops a single witness breaking the
+alibi, A20 stops a single lie naming the murderer. It fires on five of the twelve
+existing cases, which is the right number for a check that was missing.
+
+**The general shape, and it is the third time.** A rule that asks for a minimum
+gets the minimum (D-108). A rule that asks for a hub gets a wheel (D-109). And a
+free choice with a natural gradient always rolls the same way: nothing forbade an
+early murder, and there was never once one. **Anything left to the model that has
+an obvious answer is a constant, not a variable, and the fix is to deal it.**
+**Status:** active
+
+## D-126 What everybody knew and the player had to reconstruct
+**Date:** 2026-09-02
+**A briefing screen, from data that was all already in `/state`.** Who you are,
+what happened, who is in the house and what the whole household takes as read.
+The page had every field and was dribbling them into a one-line subtitle above
+the transcript.
+
+The asymmetry is the point. `common_ground` has been handed to every suspect
+verbatim since D-111, precisely so that five people cannot disagree about how
+many names are on a list. The player got none of it, and was reconstructing from
+five witnesses what anybody in the building would have told them at the door.
+Same for the investigator's standing, written in D-101 and shown as half a
+sentence, and for the discovery, whose full paragraph existed and was never
+displayed.
+
+**Nothing in it is a secret**, and a test asserts that: no secret's summary may
+appear in the title, the occasion, the shared ground, the discovery or the
+roster. It is the briefing, not a hint, and every word of it the suspects already
+have.
+
+Shown once per case rather than once ever, keyed on the title in local storage,
+because a different evening is a different briefing and a player coming back
+mid-case does not want it again. A **Briefing** button in the top bar reopens it,
+since the useful moment for "who is Sidney again" is question forty, not
+question zero.
+**Status:** active
+
+## D-127 One person in twelve costumes
+**Date:** 2026-09-02
+**Measured before it was asserted, and the numbers are flat.** Two played cases,
+different casts, different countries, different centuries:
+
+| | the sixth name | the third passage |
+|---|---|---|
+| characters per answer | 531 | 612 |
+| words per sentence | 21.0 | 20.6 |
+| em-dashes per answer | 1.89 | 2.26 |
+| top content words shared | **7 of 14** | |
+
+That is not two casts. That is one voice wearing twelve costumes, and it is the
+strongest sameness signal in the product — stronger than plot structure, because
+prose is what a player is inside for the entire evening and structure is
+something they meet twice.
+
+**`MANNERS` varies behaviour and nothing varied register.** Who deflects, who
+over-explains, who answers for other people: all covered, all orthogonal to how
+the sentences are actually shaped. So everybody came out literate, measured and
+well punctuated. Nobody was boring. Nobody spoke in fragments. Nobody was
+tiring to listen to.
+
+**`VOICES`, eighteen of them, dealt per suspect like the manners.** Deliberately
+about the shape of the sentences rather than the person: how long, how formal,
+how finished, how large a vocabulary. A voice has to survive contact with any
+manner the other deck deals, so a bishop and a bouncer can both talk in short
+flat sentences, and a blunt three-word answerer can still be the one who answers
+for everybody else. A test asserts the two decks do not overlap.
+
+The brief puts it above the manner in weight and says why: **a reader forgets
+what somebody deflected and never stops hearing how they sound.** The generator
+is told the measurement and told that somebody should be tiring.
+
+## D-128 The police were always an hour away and never arrived
+**Date:** 2026-09-02
+**The compliance model has said since D-101 that the police are coming and have
+not arrived.** Nothing counted. Nothing ran out. Two real evenings ran to 132 and
+106 questions.
+
+**A question that costs nothing is a question nobody has to think about.** The
+interesting move — deciding who is worth pressing, and on what — never has to be
+made, because you can press everybody about everything. Scarcity is what turns
+asking into choosing, and it was the one thing the design was pretending to have.
+
+`QUESTIONS = 40`, and forty is a guess. Both real sessions solved the case, and
+the second had the killer well before it ended. The number wants a playtest
+rather than an argument, so `--questions` exists.
+
+**The suspicious coincidence, named rather than hidden.** This is also the cost
+control from the deployment conversation: a played evening is voice calls, and
+the budget is the only number in the project that both improves the game and pays
+for it. Worth stating plainly, because a design decision that happens to save
+money should have to survive being looked at in that light.
+
+**Enforced on the server, and the refusal is free.** The page is not the
+authority on anything, and a budget the browser enforces is not a budget. Past
+the last question the endpoint returns `over` without calling a model at all, so
+an exhausted evening costs nothing. The accusation still works: the evening ends,
+the case does not.
+
+The badge counts **down** rather than up, because a number that only rises is a
+score and a number that falls is a decision. It goes amber twelve questions out
+and red when the cars are on the gravel.
+
+**And it caught D-110 recurring, in my own test.** The briefing screen added a
+JavaScript regex with `\\s` in a non-raw string. The test written in D-110 to
+catch exactly this compiled `PAGE` — the value *after* Python has already
+swallowed the bad escape — so it could never see one, and passed while a fresh
+`SyntaxWarning` sat in the module. It compiles the source file now. **A test that
+examines the output of the step that loses the information cannot check that
+step**, which is the same lesson as D-124 one week later and in a different
+disguise.
+**Status:** active
+
+## D-129 What they asked you for, and whether it was the right question
+**Date:** 2026-09-02
+**Two corrections and one new layer.**
+
+**The cost number was wrong and it was propping up a design decision.** D-128
+justified a forty question budget partly on spend. Re-measured with the caching
+from D-116 actually in place: **0.48 cents a question, fifty four cents for a
+hundred question evening**, and eighty seven cents to generate a case and play it
+once. Not two euros. A cost argument that does not survive being checked should
+not have been allowed to lean on a design choice, and this one was checked only
+after shipping.
+
+**And forty was too tight anyway.** Two real evenings ran to 132 and 106
+questions and both were enjoyed. `questions(seed)` now deals the clock per case
+from a wide band — forty five to a hundred and fifty — and the briefing states
+it. **A cap nobody reaches creates no scarcity and a cap that always bites is
+just a shorter game.** Dealt, most nights there is more time than anybody needs
+and occasionally the cars are much closer, which is where the interesting play
+is. `--questions` overrides it; left off, the evening has its own clock.
+
+**`COMMISSIONS`: what the evening is asking, which is a layer above topology.**
+Topology says *how the truth is hidden*, and there are seven. Every case ever
+generated has asked the same question — who killed this person — so after four
+cases the player's activity is identical whatever the scenery. That is
+**procedural** repetition, and the decks and the topologies address the surface
+and the structure and never touched it.
+
+Eight commissions, each a pair: what the player is told, and how that can be
+wrong. They have already settled on a name and want it confirmed. A doctor has
+called it a fall and one person will not have it. You came for a document and the
+death is in the way. Somebody wrote to you a fortnight ago saying they were
+frightened.
+
+**The commission is explicit and its accuracy is not.** Fully explicit —
+"this may not be a murder" — leaks the answer. Fully implicit punishes a player
+who does not notice they are in a different game. The honest middle is that the
+player is always told *what they were hired for* and never told whether that was
+the right question. **Roughly two in five commissions are wrong**, which is often
+enough that the briefing cannot be trusted flatly and rare enough that trusting
+it is not stupid. A test asserts the page never says which kind this is.
+
+Nobody lies to the player at the door: the household passes on what it honestly
+believes. The mistaken cases require a way to find out before the end, because a
+commission that cannot be checked is not a twist, it is a cheat.
+
+**This is the cheap tier and it is deliberately the cheap tier.** No schema
+change beyond one string, no validator work, and it composes with all seven
+shapes. The expensive tier — a case where nobody was killed at all — needs
+`Mystery.killer` to become optional and touches the validator, `solvable`, the
+reveal and every advisory that assumes a murderer. Worth doing, and worth doing
+after seeing whether varying the question changes how an evening feels.
+**Status:** active
+
+## D-130 The optimisation cost more than not doing it
+**Date:** 2026-09-02
+**From a real evening's logs, four consecutive questions to one character:**
+
+    cache_read=5144 cache_written=5070 ... usd=0.0293
+    cache_read=5144 cache_written=5508 ... usd=0.0302
+    cache_read=5144 cache_written=5831 ... usd=0.0312
+    cache_read=5144 cache_written=6126 ... usd=0.0327
+
+`cached_share` sat at 0.39 to 0.49 rather than the 0.85 D-116 predicted, and the
+number that matters is `cache_written`: **it grew on every single question.** Two
+cents of each three-cent question was the cost of re-caching a prefix that had
+changed since the last one. Against roughly 1.2 cents with no caching at all,
+**the optimisation was more than twice the price of not doing it.**
+
+**The cause is the second breakpoint, and the reasoning behind it was wrong in a
+specific and instructive way.** D-116 put one after the stable brief and one
+after the history, on the argument that an append-only conversation caches
+incrementally: turn N's prefix is turn N−1's plus one exchange, so the growing
+part should be read rather than rewritten. That is the standard multi-turn
+pattern and it is a good argument. It is not what happened. The write is billed
+on the whole prefix up to the breakpoint, so a breakpoint on something that grows
+buys a full-price rewrite every turn — at 2x, because the one-hour TTL that was
+right for the stable block is the worst possible rate for a block that changes.
+
+**A breakpoint belongs on content that repeats. History does not repeat, it
+accumulates.** One breakpoint now, on the stable segment only; history travels as
+ordinary input at 1x, which for a thousand tokens is a fraction of writing five
+thousand at double.
+
+**What actually saved this was the logging, and that was nearly not there.**
+D-116 added `cache_written`, `cache_read` and `cached_share` for a stated reason
+— that prompt caching fails silently — and computed `usd` with the real
+multipliers instead of pricing every input token at list. Had `usd` been the
+naive calculation it would have read 0.008 while the true charge was 0.029, the
+share would not have been printed at all, and this would have run for months.
+**The instrumentation caught a bug in the thing it was written to instrument**,
+and the guess it was hedging against was not the guess that was wrong.
+
+The honest sequence: predicted a 3x saving, shipped it, asserted it in a decision
+record, and was 2.5x wrong in the other direction until a player pasted his logs.
+A number that has not been measured after the change is a hypothesis wearing a
+decision's clothes.
+
+## D-131 A second thing that can be somewhere
+**Date:** 2026-09-02
+**Every claim the game could check reduced to *person, place, slot*.**
+`Constraint` and `FalseClaim` are both that shape, so the only lie anybody could
+tell was about which room they were in, the only contradiction was a collision on
+one grid, and the notebook was a spreadsheet with a story printed beside it.
+Everything else — `wants`, `manner`, `impressions` — is texture that cannot be
+wrong.
+
+**`Thing` is the second axis.** An id, a name a person would say, `where` slot by
+slot, `moved_by` for the hour it changes rooms, and `matters` for the reveal.
+Sightings derive exactly like observations do, by co-location, because that is
+the part that must never be invented: you were in the room, so you saw what was
+in it.
+
+**The mechanic, checked against the shipped case.** A stone head sits in the
+green room for three slots and is beside the body for the last two:
+
+| | what they saw |
+|---|---|
+| Ilse | nothing; never in either room |
+| Tomas | the green room only |
+| Wouter | **both rooms** |
+
+Wouter carried it, and the object's path says so **without him lying about his
+own whereabouts at all.** That is the oldest evidence in the tradition and the
+first kind this game has been able to represent: the weapon was on the newel post
+at nine and beside her at eleven, so somebody carried it, and the question stops
+being who was in the drawing room.
+
+A thing's fact is citable like any other, flows into assertions, and appears in
+the notebook as its own row — `Game.names` covers objects now, or the timeline
+prints a raw id where the murder weapon should be.
+
+**A21** wants at least one object, at least one that moves, its journey witnessed
+by somebody, and not by everybody. A thing that never moves is furniture; a
+journey the whole house watched narrows nothing.
+
+`Secret.evidence` is unchanged and is a different idea: a document produced to
+open a gate. This is an object that was somewhere.
+**Status:** active
+
+## D-132 Being wrong without lying
+**Date:** 2026-09-02
+**The third falsifiable axis, and the one that changes what a contradiction
+means.** Person-place-slot says who was in the room (always). Thing-place-slot
+says what was in it (D-131). Neither says **what happened there**: a scene was
+one authoritative `description` the player never saw, and `impressions` were
+opinions, which cannot be wrong.
+
+`Account` is a person's version of a scene they were actually in. Two people were
+in the library; each gives their version; the versions disagree. Catching
+somebody out no longer requires catching them in a room.
+
+**`honest` is the field the whole class exists for.** A false account is not
+automatically a lie. Somebody can be certain and wrong — about who spoke first,
+what was said, whether the door was open. **Until now every fact in this game was
+true and every contradiction meant a liar**, which made catching one an
+accusation and taught a player to read a collision as a verdict. With honest
+error in the room the same collision becomes a question: one of you is wrong, and
+which is the interesting part.
+
+**The brief must not let a mistaken person hedge.** Somebody honestly wrong does
+not know they are wrong, so their block says they are certain, tells them not to
+perform uncertainty they do not feel, and tells them that anybody who contradicts
+them is the one misremembering. A model given "this is false" and left to its own
+tone will hedge, and a player reads hedging instantly. `changes_when` is what
+would move them, and for an honest mistake they are *relieved* rather than
+caught, which is a different scene to play.
+
+Accounts are given freely rather than under the citation rule. They are not
+claims about position, so the hard line that governs FACTS does not cover them,
+and the block says outright that two honest people disagreeing about a room they
+shared is ordinary.
+
+**A22** wants accounts to exist, at least one scene described two ways, at least
+one falsehood that is an honest mistake rather than a lie, and nobody giving an
+account of a scene they were not in — which is hearsay wearing a witness's
+clothes.
+
+This is the falsifiable version of what the earlier design conversation called
+making `impressions` load-bearing, arrived at by a different route: an opinion
+cannot be wrong, so the thing to make checkable was never the opinion but the
+account of the moment the opinion came from.
+**Status:** active
+
+## D-133 A contradiction is a disagreement, not a sentence
+**Date:** 2026-09-02
+**Status:** active
+
+`Transcript.contradictions()` kept the first claim made about each
+`(subject, slot)` and appended a fresh `Contradiction` for every later statement
+that disagreed with it. So a suspect who held their story across ten questions
+produced ten identical contradictions, and the notebook's count went up every
+time somebody repeated themselves. Reported from play: "every time someone
+repeats a contradiction they already said, it adds up."
+
+The count was measuring how much the player had asked, not how much the accounts
+disagreed. That is the wrong quantity to put next to a name. A player watching it
+climb learns to re-ask rather than to ask well.
+
+It now keeps a map of `speaker -> place` per subject and slot, and an `emitted`
+set keyed on the subject, the slot and the two positions sorted. Restating a
+position you already gave is dropped before anything else happens: repetition is
+not new evidence. Changing your own story still counts, and is still reported as
+a contradiction between you and yourself, because it is one.
+
+The dedupe key is the *pair of positions*, not the pair of speakers, so two
+people who disagree twice about the same hour in two different ways are two
+findings, which is right, while the same disagreement restated is one.
+
+## D-134 Rooms that touch
+**Date:** 2026-09-02
+**Status:** active
+
+The map placed rooms on an ellipse and drew a line between any two with a door.
+That is a graph diagram wearing a floor plan's clothes: every building in every
+case came out as the same ring with the same spokes across the middle, and the
+plan told a player nothing about the house they were standing in.
+
+A plan is not in the data. `adjacent` is a door graph, and a door graph has no
+geometry, so a geometry has to be solved for.
+
+**The first attempt was a physics settle** — doors pull, rooms push, snap to a
+grid. It produced a tidy scatter: boxes floating a wall apart with dead air
+between them. Which is a graph again, just a better-looking one. What makes a
+drawing read as a building is not that the rooms are near each other. It is that
+they **touch**.
+
+So rooms are packed onto a lattice: one room per cell, neighbours take the cell
+next door, and a door is a break in the shared wall rather than a wire in the
+gap. Breadth-first from the busiest room (usually the hall everything hangs off),
+then a short strictly-downhill local search — every room tries every free cell
+around the footprint and every swap with another room, keeping a move only if the
+plan gets tidier, scoring stranded doors at 1000, total door distance at 10 and
+footprint area at 1. Fixed order, no randomness, so the same house draws the same
+way every time it is opened and a player's memory of the plan stays worth
+something.
+
+**Some doors cannot be drawn and the plan says so.** A lattice is bipartite; a
+triangle of rooms all connected to each other cannot be embedded in it at any
+size. Those doors get a short dashed stub on each room's facing wall rather than
+a line between the two centres, because a line between the centres would cross
+whatever rooms lie between it and would be a lie about the building's shape. The
+stub says there is a way through without pretending to draw the route.
+
+Room names moved inside the box, top left, uppercase mono, shrinking when the
+cell is narrow, which is where a name goes on a plan.
+
+## D-135 One page per person
+**Date:** 2026-09-02
+**Status:** active
+
+The notebook opened with a table of every claim anybody had made, grouped by
+subject. Nine tenths of it was person-place-slot, which is the axis the case is
+deliberately least decided by: D-125 stopped the murder hour being a giveaway
+precisely so that reading the grid would not be the whole game. Meanwhile the two
+axes added since (a thing's path, D-131, and an account of a scene, D-132) had
+nowhere at all to be read. The player was handed a spreadsheet and told the
+answer was not in the spreadsheet.
+
+So the notebook is built around the person now. A row of names is the spine, each
+carrying how many questions that person has taken, which is the one number that
+shows where the player has not been looking. The page under it answers the four
+questions a player actually holds in their head:
+
+- **What they admit.** Their own claims about their own evening, plus every
+  secret of theirs that has surfaced, marked by whether they gave it up or
+  somebody else did. Who told you is half of what a secret is worth and the
+  notebook has never distinguished them.
+- **What others say about them.** Other people's claims about their whereabouts,
+  and secrets about them that came out of somebody else's mouth.
+- **What they say about everyone else.** The same sentences read from the other
+  end. A claim is evidence on two pages and means something different on each.
+- **Where it does not add up.** The contradictions that touch them, the leads,
+  the refusals, and their own notes.
+
+Two supporting changes fall out of this. `Contradiction` entries now carry `who`:
+the subject and both speakers, because being the person two other people disagree
+about is the thing most worth seeing on your own page. And leads carry `of` and
+`ask` rather than being matched by fishing for a name inside their own prose,
+because the same sentence is "your story is unconfirmed" on one page and "you
+have not asked them" on another.
+
+The grid survives, one row deep, on the page of the person whose evening it is,
+and the whole-evening version is still under Map where it belongs.
+
+**A bug this turned up.** Objects were being drawn on the map as `??`. `names`
+had been extended with things so the notebook could print them (D-131), and
+`tags` had not, so every object sighting rendered as an unknown person. The
+signature failure of this project, for the eleventh time: a field carried all the
+way to the last line and dropped there. Things now get a word of their own name
+instead of initials, and their own line in the room, lower case and italic, above
+the people. An object in a room is not a sixth guest.
+
+## D-136 Not every journey points at the killer
+**Date:** 2026-09-02
+**Status:** active
+
+Raised from play before a case was even generated under it: *"will they not just
+be redundant extras? or become another easy heuristic for murderer if theres only
+one of em?"* The second half is right, and A21 as written made it likelier rather
+than less.
+
+A21 asked that at least one object move and that its journey be watched by one or
+two people rather than five. Taken alone that is a specification for a signpost:
+one object, it moves once, the killer carried it, and "who moved the thing" is a
+shorter road to the answer than the timeline ever was. The mechanic was added to
+give the player a second axis to reason on. A second axis that always resolves to
+the same name is not a second axis, it is a bigger arrow, and it would have
+replaced the slot-four tell with a worse one.
+
+What makes an object's path evidence rather than an arrow is that objects move
+for ordinary reasons. Somebody took the letters upstairs because they did not
+want them read. Somebody carried the decanter because they were drinking.
+Somebody put the key back because they had just used it for something they will
+not admit to. The player then has to work out **which** journey is the one that
+matters, and that work is the mechanic.
+
+So: the draft asks for two or three things, at least two of which move, and says
+outright that the killer must not be the person who moved all of them. **A23**
+fails a case where the only person who moves anything is the killer, and a case
+with exactly one moving object that the killer had a hand in. A house where
+nothing moves at all stays A21's problem: two checks, two jobs, and reporting the
+same fault twice teaches the drafter nothing.
+
+## D-137 A character is told who they are
+**Date:** 2026-09-04
+**Status:** active
+
+Found by playing. In `the-gold-bangle-nobody-counted`, Mohanan's `role` read
+"The yard's foreman, forty-one years with the family; he witnessed the will of
+2011 and the accusation of 2016." Thirteen of the player's seventy-one questions
+were about that will, including the last three of the game. There was no will of
+2011 anywhere in the case: no secret, no constraint, no line of common ground.
+The phrase occurs exactly once in the whole file, in that one string.
+
+Two independent faults met.
+
+**The first is this one.** Since D-086 every character is handed a roster of
+everybody else with their `role`, so that five models do not each invent a
+different relationship for the same woman. A character was never handed their
+own. So all five suspects had been told Mohanan witnessed a will in 2011, and
+Mohanan was the only person in the building who had not. Asked about it, he had
+no fact for it, and the FACTS rule did exactly what it should: he refused to
+invent one. His twenty questions of flat denial were the system working
+correctly on a poisoned seed, which is the worst kind of bug, because everything
+looks healthy from the inside.
+
+A character now gets their own `role` in their person block, fenced: public,
+ordinary, say it plainly, and explicitly **not** a claim about where anybody
+stood, so it cannot be read as a licence to place people in rooms.
+
+The second fault is D-138.
+
+## D-138 A role says what somebody is, not what they once did
+**Date:** 2026-09-04
+**Status:** active
+
+The other half of D-137, and the more important half. Handing Mohanan his own
+role would have fixed his denial by making the phantom will *canon* instead: five
+suspects and now the foreman too, all confirming a document the case does not
+contain and nobody can produce.
+
+`role` is the only authored line that is broadcast to the whole house. It is not
+a fact. Nothing derives from it, no check touches it, no character can cite it,
+and it is printed under the portrait before the first question. So an event
+mentioned there is a fact five people believe and the case does not hold.
+
+**V12** rejects a year in a role. It is a proxy rather than the property itself,
+because "dated event" is not machine-checkable and 1900-2099 is, and on the real
+case it fires on both roles that carried one. The prompt now says it directly: a
+role says what somebody is, never what they once did, and an old event that
+matters goes in `common_ground` or a secret, where somebody holds it, it is
+gated, and it is true. Duration stays legal: "twenty-two years in this building"
+is standing, not an event.
+
+Cost: it is a `PROPOSED_RULES` violation, so a draft carrying one is sent back to
+the model with the complaint and redrafted, which is a second Opus call. Worth it
+against losing a fifth of a case to a document that does not exist.
+
+## D-139 The briefing names nobody, and the objects come off the notebook
+**Date:** 2026-09-04
+**Status:** active
+
+Two changes from the same playtest, both cutting surface rather than adding it.
+
+**The commission stops naming a suspect (V13).** D-129 gave the player a reason
+to be in the building and let that reason be wrong forty per cent of the time.
+In this case it was drawn sound, so the opening screen said the family had
+settled on Anand, and Anand had done it. A name in the briefing is an enormous
+prior on a house of five even when it is the wrong one, and when it is the right
+one there is no case left. The framing is worth keeping: it is what gives the
+investigator standing and it is where "they want it tidy rather than true" comes
+from. The name is not. "They have already settled on one name between them" is
+the briefing; which name is the game. The victim is exempt.
+
+**Objects come off the timeline and the map (D-131 partially retired).** The
+numbers from the same run: five thing citations in seventy-one questions across
+two of three objects, and four player questions that ever named one, all after
+question fifty-seven. The one that landed was the bangle, and the player got it
+from the discovery text, not from the map.
+
+The axis did not fail as fiction. It failed because a player cannot ask about a
+thing they do not know exists. People are visible from the start in the cast row,
+places are visible on the map, and an object only entered the notebook once
+somebody had already cited it, so the loop never started. There is a fix for that
+(name one object in the briefing, the way the bangle was named by accident), but
+the game already has an object mechanic that works: `Secret.evidence`, which the
+player carries and puts in front of people. Two object systems, one of them
+invisible, is worse than one.
+
+So `Thing` stays in the model and in the briefs, where it costs nothing and a
+suspect can still say where the bangle was, and the notebook filters every claim
+down to the cast in one place at the top of `Game.notebook`, so the grid, the
+plan and the person pages cannot drift apart. A21 and A23 stay: the objects still
+have to be worth mentioning even if they are no longer tracked.
+
+## D-140 A ledger instead of a transcript
+**Date:** 2026-09-04
+**Status:** active
+
+Measured on a real played case (71 questions, `docs/costs.md`), the history block
+was 34.5% of the whole cost of a run and the only part that grew: every question
+re-sent everything that character had already said, uncached, at full rate, so
+total input over an evening was quadratic in questions.
+
+It was also the long way round. A character does not need forty of their own
+paragraphs to stay consistent. They need to know what they have committed to, and
+this program already computes exactly that: `Statement.assertions` is what they
+said about who was where, and `cited` says which secrets have left their mouth.
+Both are structured, both are already stored, and neither needs a model to
+summarise them, so nothing here can drift from what was actually said. That is
+D-038 applied to memory: facts are computed, only the voice is generated.
+
+`Transcript.ledger` renders one line per commitment, not one per statement,
+because a suspect who has held the same story for ten questions has committed to
+one thing rather than ten. Latest wins: somebody who changed their story is bound
+by the version they are standing on now, and the fact that they moved is the
+notebook's business rather than theirs.
+
+**Three exchanges stay verbatim.** The thing a transcript is uniquely good at is
+answering "and before that?" and "you just said", and that only reaches back a
+turn or two. Asked for by the player, and right: a ledger alone reads as somebody
+who remembers the file and not the conversation.
+
+Three details that came out of writing it. The question count left the ledger,
+because the live block already says which question this is and says it better;
+refusals stayed, because nothing else counts them and they change how the next
+one lands. Slot labels are cut at the dash ("19:45 - power back, the last cousins
+leaving" becomes "19:45"), since the clause after it is scene-setting that
+belongs in the facts and is repeated waste in a line whose whole job is to
+identify an hour. And `with_article` moved to `models.py`, because both this and
+the object facts in `agent.py` had to cope with a generator that writes both
+"hall" and "The central hall".
+
+**What it saves, measured, and why the headline number is small.**
+
+| questions | verbatim | ledger + 3 | saved |
+|---|---|---|---|
+| 45 | $0.50 | $0.48 | 4.5% |
+| 71 (the real run) | $0.78 | $0.68 | 12.9% |
+| 110 | $1.31 | $0.98 | 24.7% |
+| 150 (top of the budget band) | $2.02 | $1.30 | 36.0% |
+
+Twelve per cent on the case that motivated it, which is less than the twenty-nine
+the first estimate suggested, because that estimate had no verbatim window and
+underweighted the ledger's own lines. The number that matters is the shape rather
+than any one row: the growing term is gone, the history block peaks at 1,545
+tokens instead of 4,536, and a long case no longer costs three times a short one.
+
+`RECENT = 0` is guarded explicitly, because `history[-0:]` is the whole list and
+would silently turn the cheapest setting into the most expensive one. Found by
+measuring, which is the argument for measuring.
+
+This also closes D-130 rather than settling it. A second cache breakpoint was
+attractive because the history grew; a history that does not grow does not need
+caching.
+
+## D-141 The questions are the cheap half
+**Date:** 2026-09-04
+**Status:** active
+
+Raised as a worry about D-140 before it was played: with the transcript gone,
+does a suspect stop feeling like somebody you have been talking to.
+
+The worry is right and the fix is nearly free. Between the ledger and the
+three-exchange window, one thing a transcript gave away for nothing was lost:
+that this conversation **has been going on**. A suspect who cannot tell they
+have been asked about the ledger four times answers the fourth as though it were
+the first, and that is the tell that gives away a machine.
+
+Measured over the played case: questions average 81 characters and answers 704.
+The expensive half of a transcript is the half we already have in the ledger. So
+every older question is kept, trimmed to twelve words, question side only. For
+the most-questioned character in a 71-question run that is about 330 tokens at
+the end, against the 4,500 the full transcript wanted.
+
+| | 71 questions | 150 questions |
+|---|---|---|
+| Verbatim (before D-140) | $0.78 | $2.02 |
+| Ledger + last 3 | $0.68 | $1.30 |
+| **+ ground already covered** | **$0.70** | **$1.37** |
+
+Two cents on a normal run, seven on a long one, for the difference between
+somebody who remembers being pressed and somebody meeting you fresh every time.
+
+It also gives a suspect something they never had: being asked the same thing
+twice is now visible to them, which is a thing a person notices out loud and a
+thing this game's characters could not previously react to at all.
+
+**Still open, and deliberately not built yet:** the one texture neither the
+ledger nor the topic list can hold is what the character *did* socially, as
+opposed to what they claimed. "Got angry about the audit", "asked who told you
+that", "admitted disliking him". That is not derivable from assertions, so it
+would have to be generated: one extra field on the reply, a dozen words, which
+the character then carries as their own memory of the evening. It costs about
+three cents on a normal run and twelve on a long one, and it breaks the letter of
+D-038, since it is memory that is written rather than computed. The argument for
+it is that tone is not a fact and was never computable; the argument against is
+that a generated memory can drift from what was actually said, which is the exact
+failure the citation design exists to prevent.
+
+## D-142 The answer arrives while it is being spoken
+**Date:** 2026-09-04
+**Status:** active
+
+A suspect took four to eight seconds to answer and the page showed a single
+ellipsis for all of it, then typed the finished answer at a fixed seventeen
+milliseconds a character. Two waits, one after the other, and the second one was
+theatre: the words had already arrived and were being withheld to look like
+typing. That is where a game stops feeling expensive.
+
+**The obstacle was the schema.** Every answer is a forced tool call (D-038),
+which is what makes citation-based leak detection possible, and a forced tool
+call has no text blocks at all. There is nothing in `text_stream` to read. What
+does arrive is `input_json_delta`: fragments of the JSON object, in schema order,
+which puts `speech` first because that is where the schema puts it.
+
+So `speech_so_far` reads a half-written JSON object by hand. Not by waiting for
+it to parse, since not parsing is the entire situation. It finds the field, walks
+the string, decodes escapes as they complete and holds back a half-written one
+rather than showing a stray backslash. A pure function with nine tests, kept out
+of the network loop on purpose: the streaming responder yields raw fragments and
+the reading happens somewhere it can be tested.
+
+`showable` is the other half. A citation can arrive in pieces, so a player would
+otherwise watch `[self` appear and then vanish when it turned out to be
+bookkeeping. Anything that could still become a citation is withheld until the
+next fragment settles it.
+
+**Streaming is a capability, not a second boundary.** A responder with a
+`.stream` attribute is used through it; one without is called normally and its
+whole answer yielded at once. So every fake in the suite keeps working unchanged,
+`ask_stream` has one code path for both, and nothing has to know which kind it is
+holding. `/ask` stays exactly as it was, as the fallback and as what the tests
+use.
+
+**The typewriter now drains a queue** and the drain rate floats, aiming to empty
+in about a second. At a fixed rate it either falls behind a fast answer and is
+still typing long after the model stopped, or runs dry between fragments and
+stutters.
+
+One thing worth stating because it is a real risk: the page falls back to `/ask`
+when a stream breaks, but **only if no words arrived**. Once the server has
+started sending, it has already paid for the model call and will record the
+statement, so asking again would charge twice and put the same question in the
+transcript twice. A stale notebook is the cheaper failure.
+
+## D-143 The ending is played, not printed
+**Date:** 2026-09-04
+**Status:** active
+
+The reveal is the moment the whole hour was for, and it arrived as one panel: the
+verdict, the reason, the lies, the witnesses and the secrets you missed, all at
+once, in one typeface, in the order the code happened to build them. It read like
+a receipt.
+
+It is a sequence now. The verdict lands alone, against the face of whoever you
+charged, in forty-six point Bodoni, warm if you had it and red if you did not.
+Then what you wrote against what was true. Then the lies, then the people who
+could have broken them, then what you never found. Each act rises from fourteen
+pixels down over half a second, one every 1.1 seconds.
+
+A click takes the rest immediately. A player who wants the answer should never
+be made to wait for a transition, and the version of this that cannot be skipped
+is the version people learn to resent. `prefers-reduced-motion` drops the
+movement and keeps the pacing.
+
+## D-144 The case has a cover
+**Date:** 2026-09-04
+**Status:** active
+
+Every case has had an establishing shot since D-069 and it was only ever used as
+wallpaper: behind the interface, under a heavy vignette, at an opacity chosen so
+that text stays readable over it. A generated image nobody looks at.
+
+The briefing screen now opens with it as a picture. The case name over it in
+display type, the occasion beneath, and the cast in a row of small portraits
+under that, which is the shape a mystery paperback has had for a hundred years
+and is the first thing a player sees. It costs nothing: the image is already
+generated, already on S3, already served.
+
+When a case has no art the band collapses to the title rather than holding open
+two hundred pixels of nothing, because a missing picture should look like a
+choice and not like a broken image.
+
+Which changes the arithmetic on art. Portraits and scenery are a **one-time cost
+per case**, not per play: they live in the gallery and every player of that case
+sees the same ones. At the default cheap tier a case's art costs eight cents,
+once, however many people play it. Treating that as a running cost is what kept
+the tier low, and the tier is the cheapest premium available.
+
+## D-145 The page is a program in another language
+**Date:** 2026-09-04
+**Status:** active
+
+Two escaping bugs shipped to the browser in one afternoon, both the same shape:
+`\'` and `\n` written one backslash short, so Python swallowed them happily and
+the browser got a syntax error. The page is a Python string containing a program
+in another language, and `python -c "import mystery.web"` says nothing whatever
+about whether that program parses.
+
+D-110 already guards the reverse direction, where an invalid Python escape
+becomes a warning. That test cannot see this: `\'` is a perfectly valid Python
+escape and a broken JavaScript one.
+
+So the suite now runs `node --check` over the script block, and skips when node
+is not installed, because the suite's promise is that it runs anywhere with no
+network and no keys. Both of the afternoon's bugs fail it instantly.
+
+## D-146 The notebook is paper
+**Date:** 2026-09-04
+**Status:** active
+
+The room is dark and the thing in your hands is not. The notebook is the one
+surface in this game that belongs to the player rather than to the house, and it
+had been styled like everything else: a slightly lighter dark panel, the same
+type, the same greys. An hour of the game is spent looking at it.
+
+So the whole palette flips inside `#book`. Every token is redefined on that one
+selector, which means every component in the panel follows without knowing
+anything happened: the tabs, the person pages, the tables, the pins, the floor
+plan, the search field, the notes box. That is the payoff for having had tokens
+in the first place, and it took one block of CSS rather than a rewrite.
+
+Warm off-white rather than white. The grain is three offset gradients rather than
+an image, so nothing is downloaded and nothing can fail to load. The ruled margin
+is one faded red line down the left, the way it is on a legal pad, and the
+padding moved to make room for it. Restraint on purpose: a texture you notice is
+a texture that is too strong.
+
+`--contrast` is a new token and the only reason it exists: text that sits *on* an
+accent rather than beside it. A pin is a blue chip with dark text on the dark
+theme and a blue chip with pale text on paper, and there were four places
+hard-coding `#0b0d12` for that. Anything hard-coded is a place the flip does not
+reach.
+
+**A bug this turned up.** The timeline's `</table></div>` was being emitted
+inside an `if` that only runs once somebody has been placed somewhere, so on an
+empty notebook the table and its wrapper were left open and the browser hoisted
+the legend and the caption out past the grid, printing them in front of the thing
+they explain. Invisible after the first answer, and therefore visible only to a
+player who has not asked anything yet.

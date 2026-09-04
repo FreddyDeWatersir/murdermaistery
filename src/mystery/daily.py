@@ -26,6 +26,7 @@ decided in exactly one place or it drifts by a day depending on who is asking.
 """
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,7 +34,7 @@ from typing import Protocol
 
 import structlog
 
-from mystery.library import LIBRARY, Card, SavedCase, cards
+from mystery.library import Card, SavedCase, Shelf, as_shelf
 
 log = structlog.get_logger()
 
@@ -133,7 +134,7 @@ class FileRota:
         return set(self._read().values())
 
 
-def waiting(folder: Path = LIBRARY, rota: Rota | Path | None = None) -> list[Card]:
+def waiting(source: "Shelf | Path | None" = None, rota: Rota | Path | None = None) -> list[Card]:
     """Cases on the shelf that have never been anybody's day, oldest first.
 
     Cards rather than cases (D-081). This runs whenever somebody visits, and it
@@ -142,19 +143,28 @@ def waiting(folder: Path = LIBRARY, rota: Rota | Path | None = None) -> list[Car
     three hundred network round trips on object storage with three hundred.
     """
     used = _rota(rota).used()
-    return [card for card in cards(folder) if card.id not in used]
+    return [card for card in as_shelf(source).cards() if card.id not in used]
 
 
-def _rota(rota: Rota | Path | None) -> Rota:
+def _rota(book: Rota | Path | None) -> Rota:
     """A path is still accepted, because every caller in the project passes one
-    and a boundary that breaks its callers on day one does not get adopted."""
-    if rota is None:
-        return FileRota()
-    return FileRota(rota) if isinstance(rota, Path) else rota
+    and a boundary that breaks its callers on day one does not get adopted.
+
+    `None` means whatever this process is configured for, which is the table when
+    one is named and the file otherwise. It used to mean `FileRota()` flatly, and
+    leaving it that way would have made `DynamoRota` unreachable from the game
+    however carefully it was written, which is the failure this project keeps
+    having (D-119, D-122).
+    """
+    if book is None:
+        return rota()
+    return FileRota(book) if isinstance(book, Path) else book
 
 
 def todays_case(
-    day: str | None = None, folder: Path = LIBRARY, rota: Rota | Path | None = None
+    day: str | None = None,
+    source: "Shelf | Path | None" = None,
+    rota: Rota | Path | None = None
 ) -> SavedCase | None:
     """The case for today, drawn from the buffer the first time it is asked for.
 
@@ -164,15 +174,14 @@ def todays_case(
     empty this returns None and the caller says so, which is the honest failure
     and the one that gets noticed.
     """
-    from mystery.library import load
-
+    store = as_shelf(source)
     day = day or today()
     book = _rota(rota)
 
     already = book.case_for(day)
     if already:
         try:
-            return load(already, folder)
+            return store.load(already)
         except FileNotFoundError:
             # The record points at a case that is no longer on the shelf. Let go
             # of the day so it can be claimed again, rather than serving nothing
@@ -180,7 +189,7 @@ def todays_case(
             log.warning("rota.case_missing", day=day, case=already)
             book.release(day)
 
-    queue = waiting(folder, book)
+    queue = waiting(store, book)
     if not queue:
         log.error("rota.empty", day=day, detail="nothing left to serve. Run --fill")
         return None
@@ -197,14 +206,112 @@ def todays_case(
     try:
         # The one expensive read in the whole path, for the one case being
         # played, which is the shape D-081 was after.
-        return load(settled, folder)
+        return store.load(settled)
     except FileNotFoundError:
         log.error("rota.claimed_case_missing", day=day, case=settled)
-        return load(queue[0].id, folder) if settled != queue[0].id else None
+        return store.load(queue[0].id) if settled != queue[0].id else None
 
 
 def shortfall(
-    folder: Path = LIBRARY, rota: Rota | Path | None = None, want: int = BUFFER
+    source: "Shelf | Path | None" = None, rota: Rota | Path | None = None, want: int = BUFFER
 ) -> int:
     """How many cases the job should generate tonight. Zero most nights."""
-    return max(0, want - len(waiting(folder, rota)))
+    return max(0, want - len(waiting(source, rota)))
+
+
+ROTA_TABLE = "MYSTERY_ROTA_TABLE"
+
+
+class DynamoRota:
+    """The rota in a table, one item per day, and the write it was designed for.
+
+    D-079 wrote `claim` in this shape before there was anything that could
+    implement it properly: *today's case is this one, unless somebody already
+    decided, in which case tell me what they decided*. `FileRota` re-reads
+    immediately before writing, which narrows the window without closing it, and
+    says so in its own docstring.
+
+    DynamoDB closes it. `put_item` with a `ConditionExpression` is one atomic
+    operation: either the item did not exist and the write lands, or it did and
+    the write is refused with a named error. There is no moment in between for a
+    second writer to occupy. That matters here because the thing that will race
+    is several Lambdas waking at midnight against one table, which is not a
+    situation you can talk yourself out of the way you can with one laptop.
+    """
+
+    def __init__(self, table_name: str = "", table=None, region: str | None = None) -> None:
+        self.table_name = table_name
+        self._table = table
+        self._region = region
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource(
+                "dynamodb", region_name=self._region
+            ).Table(self.table_name)
+        return self._table
+
+    def claim(self, day: str, case_id: str) -> str:
+        """Win the day, or find out who did. Never both, never neither."""
+        try:
+            self.table.put_item(
+                Item={"day": day, "case_id": case_id},
+                # `day` is a reserved word in DynamoDB's expression language, so
+                # it cannot be written literally. `#d` is a placeholder bound
+                # below, which is the general fix for a name that collides with
+                # the fifty or so words the language keeps for itself.
+                ConditionExpression="attribute_not_exists(#d)",
+                ExpressionAttributeNames={"#d": "day"},
+            )
+            return case_id
+        except self.table.meta.client.exceptions.ConditionalCheckFailedException:
+            # Somebody else got there first. Their answer is the answer, and
+            # everybody has to agree, which is the whole point of the method.
+            settled = self.case_for(day)
+            log.info("rota.lost_the_race", day=day, ours=case_id, theirs=settled)
+            return settled or case_id
+
+    def release(self, day: str) -> None:
+        self.table.delete_item(Key={"day": day})
+
+    def case_for(self, day: str) -> str | None:
+        got = self.table.get_item(Key={"day": day})
+        item = got.get("Item")
+        return item.get("case_id") if item else None
+
+    def used(self) -> set[str]:
+        """Every case that has ever been somebody's day. A scan, on purpose.
+
+        A scan reads the whole table, which is the operation you design never to
+        do. Here the whole table is one small item per day: a year of running is
+        three hundred and sixty five rows of two short strings, well under a
+        megabyte. Building a secondary index to avoid a scan of that would be
+        more machinery than the thing it saves.
+
+        The number to watch is not the row count but where this is called from.
+        It runs on `waiting()`, which runs when somebody visits. If that ever
+        becomes a real page load rate, the answer is to cache it for a minute
+        rather than to index it, because it changes once a day.
+        """
+        found: set[str] = set()
+        start = None
+        while True:
+            page = self.table.scan(
+                ProjectionExpression="case_id",
+                **({"ExclusiveStartKey": start} if start else {}),
+            )
+            found.update(
+                item["case_id"] for item in page.get("Items", []) if item.get("case_id")
+            )
+            start = page.get("LastEvaluatedKey")
+            if not start:
+                return found
+
+
+def rota() -> "FileRota | DynamoRota":
+    """Which rota this process uses. One variable, read in one place (D-122)."""
+    table = os.environ.get(ROTA_TABLE, "").strip()
+    return DynamoRota(table) if table else FileRota()

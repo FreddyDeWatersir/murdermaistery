@@ -661,3 +661,76 @@ def test_the_shipped_case_gives_every_lie_a_reason() -> None:
     result = validate(solve(Mystery.model_validate(OPENING_NIGHT), seed=0))
 
     assert not [v for v in result.violations if v.rule == "V11"]
+
+
+# V12: a role says what somebody is, not what they once did
+
+
+def _with_role(mystery: Mystery, who: str, role: str) -> Mystery:
+    return mystery.model_copy(
+        update={
+            "characters": [
+                c.model_copy(update={"role": role}) if c.id == who else c
+                for c in mystery.characters
+            ]
+        }
+    )
+
+
+def test_rejects_a_dated_event_in_a_role(coherent_fragment: Mystery) -> None:
+    """The played failure: a foreman who "witnessed the will of 2011" in a case
+    containing no will of 2011. Every other character is handed that line and
+    repeats it, nobody holds it, and it cost a real run a fifth of its questions."""
+    dated = _with_role(coherent_fragment, "tomas", "The foreman; witnessed the 2011 will")
+    result = validate(dated)
+
+    assert "V12" in result.failed_rules
+    assert "2011" in result.violations[0].message
+    assert "Tomas" in result.violations[0].message
+
+
+def test_accepts_a_role_that_is_a_role(coherent_fragment: Mystery) -> None:
+    ordinary = _with_role(coherent_fragment, "tomas", "The yard foreman, forty-one years with them")
+
+    assert validate(ordinary).ok, validate(ordinary).violations
+
+
+def test_a_role_may_still_say_how_long(coherent_fragment: Mystery) -> None:
+    """Duration is standing, and standing is what a role is for. Only a date
+    invents an event."""
+    assert validate(_with_role(coherent_fragment, "tomas", "Twenty two years in this building")).ok
+
+
+# V13: the briefing names nobody
+
+
+def test_rejects_a_commission_that_names_a_suspect(coherent_fragment: Mystery) -> None:
+    named = coherent_fragment.model_copy(
+        update={"commission": "The family have settled on Wouter Damen and want it written down."}
+    )
+    result = validate(named)
+
+    assert "V13" in result.failed_rules
+    assert "Wouter" in result.violations[0].message
+
+
+def test_accepts_a_commission_that_withholds_the_name(coherent_fragment: Mystery) -> None:
+    """The briefing may carry the belief. Which name it is about is the game."""
+    vague = coherent_fragment.model_copy(
+        update={
+            "commission": "They have already settled on one name between them and want it to hold."
+        }
+    )
+
+    assert validate(vague).ok, validate(vague).violations
+
+
+def test_the_victim_may_be_named_in_the_commission(coherent_fragment: Mystery) -> None:
+    about = coherent_fragment.model_copy(
+        update={
+            "victim": "bram",
+            "commission": "Write a plain account of how Bram Kessels came to die.",
+        }
+    )
+
+    assert validate(about).ok, validate(about).violations

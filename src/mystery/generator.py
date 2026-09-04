@@ -37,6 +37,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
 from mystery.models import Mystery
+from mystery.palette import commission, murder_slot
 from mystery.palette import draw as draw_palette
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import get as get_topology
@@ -214,12 +215,23 @@ to hide is three cooperative witnesses and one obvious liar, and there is no \
 game.
 
 For every character fill in `role`, `gender`, `look`, `wants`, `manner`, \
-`under_pressure`, and `impressions`.
+`voice`, `under_pressure`, and `impressions`.
 
 `role` is one short public phrase: their job here and what they were to the \
 victim. "The stage manager, twenty two years in this building." "His \
 business partner." "The understudy." This is printed under their name before \
 the player has asked anything, so it must contain nothing they would hide.
+
+**A role says what somebody is, never what they once did. No dated events, and \
+no years.** This line is the only thing you write that the whole house is \
+handed: every other character gets it in their roster and repeats it as \
+background. Nothing in the case derives from it, nobody holds it and nobody can \
+cite it, so an event mentioned here is a fact five people believe and the case \
+does not contain. One draft gave a foreman "he witnessed the will of 2011"; \
+there was no will of 2011 anywhere in the case, and the player spent a fifth of \
+the game chasing it, including the last three questions they asked. If an old \
+event matters, it goes in `common_ground` or in a secret, where somebody holds \
+it and it is true.
 
 `wants` is the opposite: private, what they are actually after tonight. The \
 player never sees it written down and has to work it out.
@@ -239,6 +251,14 @@ all, so that working out who can be dealt with is itself part of the case.
 and how they are dressed this evening. Be concrete, and vary it. Not everyone \
 is elegant and in their forties. Somebody is over sixty. Somebody is under \
 twenty five.
+
+`voice` is how their sentences are shaped, and it is the one thing a player is \
+inside for the whole evening. Two cases measured side by side came back at 531 \
+and 612 characters an answer and twenty one words a sentence in both: one person \
+in twelve costumes. Take the voice you are dealt and make it audible in the \
+first line. Somebody should be short and flat, somebody should be tiring, \
+somebody should not finish their sentences, and nobody should sound like a \
+narrator.
 
 `manner` and `under_pressure` are how they behave when questioned, and they are \
 the whole difference between a witness reciting locations and a person. This \
@@ -316,6 +336,14 @@ be vouched for by somebody, the player stops thinking and asks "which liar has \
 no witness", and the answer is always the killer. Put at least one innocent \
 somewhere unobserved when they lied, so that test leaves two candidates and the \
 motive has to break the tie.
+
+**And one innocent must lie about the same slot the killer lies about.** The \
+killer lies about the hour they killed in, necessarily. So if theirs is the only \
+lie covering that hour, the whole case reduces to one question: who is lying \
+about it. In five real cases out of twelve nobody else was, and a player worked \
+that out unprompted and said the game had a rule of thumb that beat it. Somebody \
+innocent has to be lying about that same hour for their own reasons, so that \
+catching a liar there names two people and the player still has to choose.
 
 **Mark the killer's motive.** The killer holds two secrets: the background that \
 made them vulnerable, and the reason they killed. Set `is_motive` to true on the \
@@ -500,6 +528,15 @@ people wandering at random, and a player reconstructing it learns nothing.
 So place people for reasons, and use `description` on each constraint to say \
 what the reason was.
 
+**And most people stay where they are.** A gathering is not a corridor. Over five \
+slots a suspect should move **once or twice at most**, and somebody who never \
+leaves the main room all evening is a good character rather than a lazy one: \
+their alibi is other people, and breaking it means breaking them. One case came \
+back with all six of the cast moving three or four times and the whole grid read \
+as a random walk, which a player cannot reconstruct and therefore cannot use \
+(D-123). Move somebody when the case needs them somewhere, and leave them alone \
+otherwise.
+
 Hard requirements on the grid:
 - Every character has exactly one place in every slot. No gaps.
 - Every constraint you wrote must actually hold in the grid you produce. If you \
@@ -518,9 +555,67 @@ doing before anyone knew. Never write a constraint where someone finds the body.
 usually has an earlier private scene between those same two people, the one \
 where the victim says the thing that gets them killed, so which of the two is \
 the murder cannot be guessed from the outside. Say which.
+- **The murder happens in the slot named under WHEN IT HAPPENS, and not \
+wherever the story wants to put it.** If that is not the last slot, the evening \
+carries on around a room nobody goes into again, and the people who were with \
+the victim earlier are the ones with something to explain. Write the rest of the \
+evening as people who do not know yet.
 - Fill in `discovery`: who found the body, in which room, and a sentence about \
 how. This happened after the last slot and everybody knows it. Without it the \
 suspects cannot discuss the death they are being questioned about.
+- **Fill in `accounts`: what people say happened in the scenes they were in.**
+Two or three scenes are enough. For each one, an account from **every person who
+was there**, in their own voice, one or two sentences: what was said, who
+started it, what it was about.
+
+The point is that they do not all match. Mark `true` on the ones that are what
+happened. For the rest, `honest` decides the kind of wrongness, and this is the
+important field: **`honest: true` means the person is certain and simply wrong.**
+Not lying, not covering, wrong — about who spoke first, what was actually said,
+whether the door was open. Every fact in this game has been true until now and
+every contradiction has meant a liar, which makes catching one an accusation.
+With honest error in the room a contradiction becomes a question instead, and
+working out which of two sincere people is misremembering is a different and
+better job than working out who is lying.
+
+**At least one false account must be honest rather than a lie.** `changes_when`
+is what would move them: for a liar, what breaks them; for somebody honestly
+mistaken, what would jog it — being shown a thing, being told who else was there.
+They are relieved when it happens, not caught.
+
+- **Fill in `things`: two or three objects with paths of their own.** This is
+the second thing in the game that can be somewhere, and the only evidence a
+player can reconstruct without anybody lying about themselves. Give each one an
+`id`, a `name` a person would actually say, and `where`: the place it sat in
+every slot. At least one of them **moves**, and `moved_by` names who carried it
+in the slot where it changes rooms.
+
+The point is the gap between where a thing began and where it ended. The stone
+head was on the newel post at nine and beside her at eleven, so somebody carried
+it, and everybody who was in either room saw part of that journey. Nobody has to
+lie for this to convict: the person who saw it in both places is the person who
+took it, and they will have to explain that without ever being caught out about
+their own whereabouts.
+
+Three rules. A thing cannot be in a room that has nobody in it for the whole
+evening, or nobody ever saw it and it is furniture. The object that moves should
+not be the one everybody watched move: put its journey in front of one or two
+people, not five.
+
+And **at least two things move, and the killer is not the person who moved all of
+them.** This one matters more than it sounds. If the only thing that travels
+tonight is the thing the killer carried, then "who moved it" is a shorter road
+to the answer than the timeline ever was, and the second axis you were given
+collapses back into a signpost. Objects move for ordinary reasons: somebody took
+the letters upstairs because they did not want them read, somebody carried the
+decanter because they were drinking, somebody put the key back where it belonged
+because they had just used it for something they will not admit to. Give at
+least one journey to somebody innocent, with a reason that has nothing to do
+with the death, so that the player has to work out **which** journey is the one
+that matters. That work is the whole point of the mechanic.
+
+`matters` is one sentence on what its path is worth knowing, for the reveal.
+
 - Fill in `common_ground` with four to six plain sentences: the things about \
 this occasion that everybody in the building would say the same way. What the \
 gathering is, what happens in the morning, how long people have been here, who \
@@ -671,6 +766,65 @@ def _material(request: GenerationRequest) -> str:
     ).brief()
 
 
+def _commission(request: GenerationRequest) -> str:
+    """What the player was hired for, and whether it is the right question.
+
+    A layer above topology (D-129): the shape says how the truth is hidden, this
+    says what the evening is asking. Every case until now asked the same one.
+    """
+    brief, sound, wrong = commission(request.seed)
+    if sound:
+        turn = (
+            "**This commission is sound.** What they asked you to find out is "
+            "the thing that actually happened. The case is hard because the "
+            "house is hard, not because the question was wrong."
+        )
+    else:
+        turn = (
+            f"**This commission is mistaken, and here is how:** {wrong}. Write "
+            f"the case so that the commission is what any reasonable person in "
+            f"this house believes, and so that it is wrong. Nobody is lying to "
+            f"the player at the door: they are passing on what they think is "
+            f"true. The player should be able to get all the way to the end on "
+            f"the commission's terms and be wrong, and there must be a way to "
+            f"find out before they do."
+        )
+    return (
+        f"WHAT THEY ASKED YOU FOR\n"
+        f"The player is told this before they ask anybody anything, and it goes "
+        f"in `commission` in your own words, fitted to this house:\n"
+        f"  {brief}.\n\n{turn}\n\n"
+        f"**Name nobody in it.** The commission may say the household has "
+        f"settled on somebody, that a confession has been made, that a doctor "
+        f"has already called it an accident. It may not say who. A name in the "
+        f"opening screen is an enormous prior on a house of five even when it is "
+        f"the wrong one, and when it is the right one there is no case left. "
+        f"Which name they have settled on is the first thing the player finds "
+        f"out, not the first thing they are told. The victim may be named."
+    )
+
+
+def _when(request: GenerationRequest) -> str:
+    """Which slot the killing happens in, decided here rather than there (D-125).
+
+    Left to the model it was slot four ten times out of twelve and slot five the
+    other two, because a story builds to its murder. That regularity is a rule of
+    thumb that solves the game, since the killer necessarily lies about the hour
+    they killed in.
+    """
+    n = murder_slot(request.seed, request.slot_count)
+    where = {request.slot_count: "the last slot of the evening"}.get(
+        n, f"slot {n} of {request.slot_count}, with the evening carrying on after it"
+    )
+    return (
+        f"WHEN IT HAPPENS\n"
+        f"The killing happens in **slot {n}**: {where}. Not negotiable, and not "
+        f"wherever the story would rather put it. A murder that is always in the "
+        f"last hour or two makes the whole case answerable by asking who lies "
+        f"about the last hour or two."
+    )
+
+
 def _user_prompt(request: GenerationRequest) -> str:
     return (
         f"Setting: {request.setting}\n"
@@ -678,6 +832,8 @@ def _user_prompt(request: GenerationRequest) -> str:
         f"Places: {request.place_count} distinct rooms or areas.\n"
         f"Time: {request.slot_count} consecutive slots.\n"
         f"SHAPE OF THE SOLUTION\n{get_topology(request.topology).brief}\n\n"
+        f"{_when(request)}\n\n"
+        f"{_commission(request)}\n\n"
         f"{_casting(request.seed)}\n\n"
         f"{_material(request)}\n"
         f"Variation key {request.seed}: use it to take a different angle on this "
