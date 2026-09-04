@@ -54,11 +54,10 @@ from mystery.palette import questions as questions_for
 from mystery.session import InMemorySessions, Session, Sessions
 from mystery.session import sessions as pick_sessions
 from mystery.solvable import analyse, report
-from mystery.solver import solve
+from mystery.solver import solve_until_valid
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import LIBRARY, assess, drawn
 from mystery.topology import get as get_topology
-from mystery.validator import validate
 
 log = structlog.get_logger()
 
@@ -2737,11 +2736,17 @@ def main(argv: list[str] | None = None) -> int:
         print(failure)
         return 1
 
-    solved = solve(draft, seed=args.seed)
-    result = validate(solved)
-    if not result.ok:
-        print("That mystery came out broken. Try another seed.")
-        for violation in result.violations:
+    # A draft that solves badly is not a draft to throw away (D-147). Drafting
+    # is forty cents of the strongest model; solving is arithmetic and free, so
+    # the free half is the half to retry. Same seed order every time, so the
+    # command still reproduces the case.
+    solved, used, violations = solve_until_valid(draft, seed=args.seed or 0)
+    if used != (args.seed or 0):
+        print(f"  Arranged on the {used - (args.seed or 0) + 1}th try. "
+              f"Nothing was re-drafted and nothing was spent.")
+    if violations:
+        print("That mystery came out broken, on every arrangement tried.")
+        for violation in violations:
             print(f"  [{violation.rule}] {violation.message}")
         # The draft is cached, so re-running this exact command will fail the
         # same way for ever. Say where it is: a failure worth looking at is

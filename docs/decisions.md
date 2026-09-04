@@ -3922,3 +3922,55 @@ empty notebook the table and its wrapper were left open and the browser hoisted
 the legend and the caption out past the grid, printing them in front of the thing
 they explain. Invisible after the first answer, and therefore visible only to a
 player who has not asked anything yet.
+
+## D-147 The solver was walking people over the body
+**Date:** 2026-09-04
+**Status:** active
+
+Two runs, four Opus drafts, $1.51, and no playable case. Three of the four
+failures were V10: somebody standing in the murder room after the murder.
+
+**The rule was checked and never enforced.** V10 has been in `PROPOSED_RULES`
+since D-094, so the model's own grid is validated before the solver touches it,
+and both of those drafts passed. Then the solver put people in the room anyway:
+
+- `_fill_holes` gives every character a room for every slot they have no scene
+  in, chosen at random from the whole house. It did not know one room had a body
+  in it.
+- `_somewhere_else` clears people out of a scene that turned out to be private,
+  into a room chosen the same way, with the same gap.
+- `_room_for` refused to reschedule a scene involving the *victim* to after they
+  were dead, and happily rescheduled anybody else's scene into the room the
+  victim was lying in.
+
+So a draft could be correct and come out broken, and what the program printed
+was "That mystery came out broken. Try another seed", which is a program telling
+a person to pay forty cents again for its own bug. Found by a player, from a
+terminal log, after two attempts and the better part of two dollars.
+
+`_sealed` is now one function that says whether a room is closed to the living at
+a given hour, and all three places ask it. The victim is exempt and has to be:
+V7 requires the body to stay exactly where it fell.
+
+Both new tests fail on the old code at seed 0, with the same message the player
+saw.
+
+**And the expensive half stops paying for the cheap half's mistakes.** Drafting
+is the strongest model and about forty cents; solving is arithmetic and free. A
+draft that survives the proposed rules and fails the final ones is a bad
+*arrangement*, and there are more arrangements. `solve_until_valid` tries
+twenty-four seeds in order and returns the one that worked, so the case is still
+reproducible and the seed printed is still true. Nothing is re-drafted.
+
+**Two numbers were wrong and are now the API's own.** A draft was recorded as
+10,500 input tokens; it is 17,900. The estimate came from dividing characters by
+3.8, and dense markdown full of identifiers and json runs closer to 2.2, so it
+was out by seventy per cent on the one figure nobody had measured against a real
+call. A draft is 35 to 41 cents, not 26. `docs/costs.md` says so, and says that
+the play figures use the same method and are probably light for the same reason.
+
+Raising `TYPICAL_DRAFT` also tripped the D-110 ceiling test, which is exactly
+what it is for: real drafts write ten to thirteen thousand tokens against a
+sixteen thousand ceiling, and one of the four came back at 12,892. That is 1.4x
+headroom on a number where running out arrives disguised as a schema error.
+Raised to twenty-four thousand. A ceiling only costs what is written against it.

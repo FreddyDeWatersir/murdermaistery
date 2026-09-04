@@ -6,8 +6,9 @@ the specification, the validator checks the specification was met, and the
 solver is the thing under test.
 """
 
+from mystery.example import OPENING_NIGHT as SHIPPED_CASE
 from mystery.models import Character, Constraint, Mystery, Place, Slot
-from mystery.solver import solve
+from mystery.solver import solve, solve_until_valid
 from mystery.validator import validate
 
 CHARACTERS = [
@@ -221,3 +222,104 @@ def test_the_solver_moves_an_innocents_lie_somewhere_it_can_be_caught() -> None:
     assert lie.place != "attic", "an empty room is an unbreakable alibi"
     assert fixed.who_is_in(lie.place, lie.slot) - {"b"}, "somebody has to be able to deny it"
     assert lie.covers == "something", "the repair must not lose why they lied"
+
+
+# --- the murder room is sealed (D-147) ---------------------------------------
+
+
+def _with_holes_after_the_murder(case: Mystery) -> Mystery:
+    """Everybody's evening after the killing, blanked.
+
+    Which is what the filler is for, and what it used to get wrong: a hole in a
+    late slot could be filled with any room in the house, including the one with
+    the body in it.
+    """
+    order = {s.id: s.index for s in case.slots}
+    when = order[case.murder_scene.slot]
+    return case.model_copy(
+        update={
+            "placements": {
+                who: {slot: place for slot, place in where.items() if order[slot] <= when}
+                for who, where in case.placements.items()
+            }
+        }
+    )
+
+
+def test_nobody_is_ever_filled_into_the_room_with_the_body() -> None:
+    """Fifty seeds, because the bug was a random choice among five rooms: one
+    seed proves nothing and this one used to fail within the first handful.
+
+    Two real drafts died of this in one evening, at about forty cents each, and
+    what the program printed was "try another seed" (D-147)."""
+    thin = _with_holes_after_the_murder(Mystery.model_validate(SHIPPED_CASE))
+
+    for seed in range(50):
+        broken = [v for v in validate(solve(thin, seed=seed)).violations if v.rule == "V10"]
+        assert not broken, f"seed {seed}: {broken[0].message}"
+
+
+def test_the_victim_is_still_left_where_they_fell() -> None:
+    """The seal is for the living. V7 requires the body to stay put, and a seal
+    that forgot the exception would move it."""
+    case = Mystery.model_validate(SHIPPED_CASE)
+    solved = solve(_with_holes_after_the_murder(case), seed=3)
+    order = {s.id: s.index for s in solved.slots}
+    scene = solved.murder_scene
+
+    after = [s.id for s in solved.slots if order[s.id] > order[scene.slot]]
+    assert all(solved.placements[solved.victim][s] == scene.place for s in after)
+
+
+def test_a_scene_is_never_rehomed_on_top_of_the_body() -> None:
+    """The other half. `_room_for` refused to move a scene involving the victim
+    to after they were dead, and happily moved anybody else's scene into the
+    room the victim was lying in."""
+    case = Mystery.model_validate(SHIPPED_CASE)
+    loose = case.model_copy(
+        update={
+            "constraints": [
+                c.model_copy(update={"place": None, "slot": None})
+                if c.id != case.murder_scene.id
+                else c
+                for c in case.constraints
+            ]
+        }
+    )
+
+    for seed in range(30):
+        solved = solve(loose, seed=seed)
+        broken = [v for v in validate(solved).violations if v.rule == "V10"]
+        assert not broken, f"seed {seed}: {broken[0].message}"
+
+
+def test_a_bad_arrangement_is_re_solved_rather_than_re_drafted() -> None:
+    """Drafting is the strongest model and about forty cents; solving is
+    arithmetic and free. A draft that survives the proposed rules and fails the
+    final ones should cost another arrangement, never another draft (D-147)."""
+    thin = _with_holes_after_the_murder(Mystery.model_validate(SHIPPED_CASE))
+    solved, used, violations = solve_until_valid(thin, seed=0)
+
+    assert not violations
+    assert validate(solved).ok
+    assert used >= 0
+
+
+def test_it_says_which_arrangement_worked_so_the_case_can_be_had_again() -> None:
+    """Deterministic, or the seed printed to the player is a lie."""
+    thin = _with_holes_after_the_murder(Mystery.model_validate(SHIPPED_CASE))
+    first, used, _ = solve_until_valid(thin, seed=11)
+    again = solve(thin, seed=used)
+
+    assert first.placements == again.placements
+
+
+def test_giving_up_hands_back_the_reason_rather_than_nothing() -> None:
+    """When no arrangement works the violations come back, so the program can
+    say what is wrong instead of shrugging."""
+    impossible = Mystery.model_validate(SHIPPED_CASE).model_copy(
+        update={"characters": [], "placements": {}}
+    )
+    _, _, violations = solve_until_valid(impossible, seed=0, tries=2)
+
+    assert violations

@@ -4,20 +4,31 @@ Measured, not estimated. Everything here comes from one real drafted case
 (`the-gold-bangle-nobody-counted`, six characters, five slots, five places) and
 one real played session against it (71 questions, five suspects spoken to).
 
-Token counts are character counts divided by 3.8, which is close enough for
-English prose with json ids in it and is stated so the arithmetic can be
-rechecked rather than believed.
+Play figures are character counts divided by 3.8, which is stated so the
+arithmetic can be rechecked rather than believed. **Draft figures are the API's
+own numbers**, taken from four real drafts on 4 September, and they are the ones
+to trust.
 
 ## The three costs
 
 | | model | tokens | cost |
 |---|---|---|---|
-| Draft, one attempt | `claude-opus-5` | 10,500 in / 8,100 out | **$0.26** |
+| Draft, one attempt | `claude-opus-5` | 17,900 in / 10,400-12,900 out | **$0.35 to $0.41** |
 | Art, default tier | image, `low` | 6 portraits + 1 setting | **$0.08** |
 | Play, 71 questions | `claude-sonnet-5` | see below | **$0.65** |
 
-A full cold case, drafted, illustrated and played once: **about $1.00.** A draft
-rejected once by the validator and redrafted adds $0.26.
+A full cold case, drafted, illustrated and played once: **about $1.10.** A draft
+the validator sends back costs the same again, and the drafter is allowed three
+attempts, so a bad night can reach $1.20 before a single question is asked.
+
+**The draft figure here was wrong until 4 September, and by a lot.** It was
+estimated at 10,500 input tokens by dividing characters by 3.8; the API reports
+17,900. Dense markdown full of identifiers and json runs closer to 2.2 characters
+a token than 3.8, so the estimate was out by seventy per cent on the one number
+nobody had measured directly. The play figures use the same method and are
+probably light for the same reason: they should be replaced with logged
+`input_tokens` from a real session at the first opportunity, rather than trusted
+as they stand.
 
 ## Where the play cost actually goes
 

@@ -71,11 +71,13 @@ RATES = {
     "claude-sonnet-4-5": (3.0, 15.0),
 }
 
-# What one draft actually costs, from the logs. Re-measured after the prompt grew
-# (D-110): thirteen thousand in and seven and a half out, against eight and a
-# half and six when this was first written. The estimate printed before a run is
+# What one draft actually costs, from the API's own token counts rather than from
+# an estimate. Re-measured across four real drafts on 4 September (D-147): the
+# prompt has grown again, and the previous figure was a character count divided
+# by 3.8, which undercounted dense markdown by seventy per cent. Thirty five to
+# forty one cents a draft, not twenty six. The estimate printed before a run is
 # only honest if this is kept up to date with the prompt.
-TYPICAL_DRAFT = (13000, 7500)
+TYPICAL_DRAFT = (17900, 11500)
 
 
 def cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -894,7 +896,11 @@ def anthropic_drafter(
             # JSON was cut off mid-object and arrived as "title: Field required"
             # (D-110). Headroom is cheap and a truncated draft costs a whole
             # attempt.
-            max_tokens=16000,
+            #
+            # Raised again on 4 September (D-147). Real drafts now write ten to
+            # thirteen thousand, so sixteen was 1.4x the typical one and the test
+            # below said so. A ceiling only costs what is written against it.
+            max_tokens=24000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
             tools=[

@@ -256,6 +256,7 @@ def _settle(
     """Move only what breaks: put named people where their constraint says, then
     clear anyone else out of a room that is supposed to be private."""
     place_ids = [place.id for place in mystery.places]
+    sealed = _sealed(mystery, placed or {c.id: (c.place, c.slot) for c in bound if c.is_bound})
     live = [c for c in bound if c.is_bound or (placed and c.id in placed)]
 
     def cell_of(constraint: Constraint) -> Cell:
@@ -282,7 +283,7 @@ def _settle(
                 if person in constraint.people or grid[person].get(slot) != place:
                     continue
                 grid[person][slot] = _somewhere_else(
-                    person, slot, place_ids, grid, live, rng, cell_of
+                    person, slot, place_ids, grid, live, rng, cell_of, sealed
                 )
                 moved = True
 
@@ -298,6 +299,7 @@ def _somewhere_else(
     bound: list[Constraint],
     rng: random.Random,
     cell_of,
+    sealed=lambda place, slot: False,
 ) -> PlaceId:
     """Move someone out of a room they should not be in, as gently as possible.
 
@@ -305,7 +307,7 @@ def _somewhere_else(
     having moved rather than as teleportation; then any room no exclusive
     constraint has claimed; then anywhere.
     """
-    forbidden = set()
+    forbidden = {p for p in place_ids if sealed(p, slot)}
     for constraint in bound:
         place, at = cell_of(constraint)
         if constraint.exclusive and at == slot and person not in constraint.people:
@@ -313,7 +315,9 @@ def _somewhere_else(
 
     options = [p for p in place_ids if p not in forbidden]
     if not options:
-        return rng.choice(place_ids)
+        # Even with nowhere legal to stand, not on top of the body.
+        loose = [p for p in place_ids if not sealed(p, slot)]
+        return rng.choice(loose or place_ids)
 
     neighbours = [p for p in grid.get(person, {}).values() if p in options]
     return rng.choice(neighbours) if neighbours else rng.choice(options)
@@ -373,6 +377,41 @@ def _lay_the_body_to_rest(
             grid.setdefault(mystery.victim, {})[s.id] = place
 
 
+def _sealed(mystery: Mystery, placed: dict[str, Cell]):
+    """Is this room closed to the living at this hour? (D-147)
+
+    Once the killing has happened, the murder room has a body in it. The
+    discovery says nobody found that body until after the evening, so nobody can
+    be standing in there, and V10 rejects a case where anybody is.
+
+    That rule was being checked and never enforced. The model's own grid is
+    validated before the solver runs, so a draft that got this right still came
+    out broken: `_fill_holes` puts every character with a gap in their evening
+    into a room chosen at random, `_somewhere_else` clears people out of private
+    scenes into a room chosen at random, and neither of them knew that one room
+    was full. Two real drafts died this way in one evening, at about forty cents
+    each, and the advice printed was "try another seed", which is the program
+    telling a person to pay again for its own bug.
+
+    The victim is exempt, and has to be: V7 requires them to stay exactly where
+    they fell.
+    """
+    cell = _murder_cell(mystery, placed)
+    if cell is None:
+        return lambda place, slot: False
+
+    room, when = cell
+    index = {s.id: s.index for s in mystery.slots}
+    after = index.get(when)
+    if after is None:
+        return lambda place, slot: False
+
+    def sealed(place: PlaceId, slot: SlotId) -> bool:
+        return place == room and index.get(slot, -1) > after
+
+    return sealed
+
+
 def _room_for(
     constraint: Constraint,
     place: PlaceId,
@@ -384,11 +423,15 @@ def _room_for(
     anything already settled?"""
     people = set(constraint.people)
 
-    # Never reschedule a scene involving the victim to after they are dead.
+    # Never reschedule a scene involving the victim to after they are dead, and
+    # never reschedule any scene at all into the room the body is lying in
+    # (D-147). The second half used to be missing, so a perfectly good scene
+    # could be moved on top of the corpse.
     murder = _murder_cell(mystery, placed)
-    if murder is not None and mystery.victim in people:
+    if murder is not None:
         index = {s.id: s.index for s in mystery.slots}
-        if index.get(slot, -1) > index.get(murder[1], -1):
+        later = index.get(slot, -1) > index.get(murder[1], -1)
+        if later and (mystery.victim in people or place == murder[0]):
             return False
 
     for other in mystery.constraints:
@@ -558,6 +601,7 @@ def _fill_holes(
         if c.exclusive and c.id in placed
     }
     place_ids = [place.id for place in mystery.places]
+    sealed = _sealed(mystery, placed)
 
     for character in mystery.characters:
         previous: str | None = None
@@ -572,7 +616,8 @@ def _fill_holes(
                 place
                 for place in place_ids
                 if character.id in closed.get((place, slot.id), {character.id})
-            ] or place_ids
+                and not (character.id != mystery.victim and sealed(place, slot.id))
+            ] or [p for p in place_ids if not sealed(p, slot.id)] or place_ids
 
             if sticky and previous in options and rng.random() < STICKINESS:
                 chosen = previous
@@ -581,3 +626,40 @@ def _fill_holes(
 
             grid[character.id][slot.id] = chosen
             previous = chosen
+
+# How many arrangements to try before giving up on a draft (D-147).
+SOLVER_TRIES = 24
+
+
+def solve_until_valid(
+    mystery: Mystery, seed: int = 0, tries: int = SOLVER_TRIES
+) -> tuple[Mystery, int, list]:
+    """Solve, and if the result does not hold, solve it again differently.
+
+    The two halves of making a case cost wildly different amounts. Drafting is a
+    call to the strongest model and about forty cents; solving is arithmetic and
+    free. So a draft that survives the proposed rules and then fails the final
+    ones should never cost another draft: the arrangement is what failed, and
+    there are more arrangements.
+
+    Deterministic. Seeds are tried in order from the one asked for, so the same
+    command produces the same case, and the seed that worked is returned so it
+    can be said out loud.
+
+    Returns the solved mystery, the seed that produced it, and the violations of
+    the last attempt, which are empty exactly when it worked.
+    """
+    from mystery.validator import validate
+
+    worst: list = []
+    for offset in range(max(1, tries)):
+        solved = solve(mystery, seed=seed + offset)
+        result = validate(solved)
+        if result.ok:
+            if offset:
+                log.info("solver.reseated", tried=offset + 1, seed=seed + offset)
+            return solved, seed + offset, []
+        worst = result.violations
+
+    return solve(mystery, seed=seed), seed, worst
+
