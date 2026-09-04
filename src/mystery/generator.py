@@ -887,7 +887,14 @@ def anthropic_drafter(
                 f"problems and change nothing else."
             )
 
-        response = client.messages.create(
+        # Streamed, and not for the user's benefit: nobody watches a draft
+        # arrive. The SDK refuses a non-streaming request whose `max_tokens`
+        # implies it could run past ten minutes, and raising the ceiling to
+        # twenty-four thousand crossed that line (D-148). Streaming is the
+        # SDK's own answer to it, and it removes the wall rather than moving it,
+        # which matters because a draft already takes three minutes and this
+        # prompt has only ever grown.
+        with client.messages.stream(
             model=model,
             # The prompt has roughly doubled since this was set, and so has what
             # it asks the model to write: a floor plan, a web of secrets, layers,
@@ -911,7 +918,8 @@ def anthropic_drafter(
                 }
             ],
             tool_choice={"type": "tool", "name": "emit_mystery"},
-        )
+        ) as live:
+            response = live.get_final_message()
 
         log.info(
             "mystery.drafted",

@@ -382,3 +382,28 @@ def test_the_page_javascript_parses() -> None:
     done = subprocess.run([node, "--check", path], capture_output=True, text=True)
 
     assert done.returncode == 0, done.stderr
+
+
+def test_a_draft_that_big_has_to_be_streamed() -> None:
+    """The SDK refuses a non-streaming request whose `max_tokens` implies it
+    could run past ten minutes, client side, before anything is sent. Raising
+    the ceiling to twenty-four thousand crossed that line and the first real run
+    afterwards died on it (D-148).
+
+    Nothing in this suite touches the SDK, so the only thing that can be checked
+    is the shape of the call. Which is enough: the two numbers have to move
+    together, and this says so."""
+    import inspect
+
+    import mystery.generator as gen
+
+    source = inspect.getsource(gen.anthropic_drafter)
+    ceiling = int(source.split("max_tokens=")[1].split(",")[0])
+
+    if ceiling <= 8192:
+        return  # small enough that the SDK allows a plain call
+
+    assert "client.messages.stream(" in source
+    assert "client.messages.create(" not in source, (
+        f"max_tokens is {ceiling}, which the SDK will refuse without streaming"
+    )

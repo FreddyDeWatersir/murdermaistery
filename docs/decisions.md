@@ -3974,3 +3974,36 @@ what it is for: real drafts write ten to thirteen thousand tokens against a
 sixteen thousand ceiling, and one of the four came back at 12,892. That is 1.4x
 headroom on a number where running out arrives disguised as a schema error.
 Raised to twenty-four thousand. A ceiling only costs what is written against it.
+
+## D-148 A ceiling that high has to be streamed
+**Date:** 2026-09-04
+**Status:** active
+
+Raising `max_tokens` to twenty-four thousand (D-147) broke the next run before a
+single byte left the machine. The SDK computes how long a request could take
+from `max_tokens`, refuses any non-streaming call that could run past ten
+minutes, and raises client side:
+
+    ValueError: Streaming is required for operations that may take longer
+    than 10 minutes.
+
+Which is a good error, arriving at a bad moment: two hours after the change, in
+front of a player, with the fix one file away and not obvious from the traceback.
+
+The draft is streamed now. Not for anybody's benefit, since nobody watches a
+draft arrive: `get_final_message` is read at the end and everything downstream is
+unchanged. What it buys is that the wall is gone rather than moved. A draft
+already takes three minutes, and this prompt has only ever grown, so the
+alternative was to keep the ceiling below a limit that has nothing to do with
+this program and to rediscover it the next time the case got bigger.
+
+**The suite could not have caught it and now can.** Nothing here touches the SDK,
+by design, so the only checkable thing is the shape of the call. That is enough:
+the ceiling and the streaming have to move together, and there is now a test that
+reads both out of the source and says so. It fails immediately on a plain
+`messages.create` at this ceiling, which is exactly the mistake that was made.
+
+The same reasoning as D-145. A constraint that lives outside the code, in another
+language or in somebody else's client, is still a constraint the code has to
+respect, and the cheapest guard is usually to read the source and assert the
+shape.

@@ -111,9 +111,9 @@ timeline answered the case on its own (D-063).
 - `session.py` — a play-through, as a record, and what has been shown to whom
 - `daily.py` — the rota: claim a day, and the buffer behind it
 - `portraits.py` — optional generated faces, never load-bearing
-- Five hundred and ten tests green, ruff clean, no test calls an API
+- Five hundred and eleven tests green, ruff clean, no test calls an API
 - Architecture note: https://claude.ai/code/artifact/537fe482-a219-4b13-a108-062bff885a1f
-- One hundred and forty seven decisions in `docs/decisions.md`
+- One hundred and forty eight decisions in `docs/decisions.md`
 
 **Which model does what**
 
@@ -228,7 +228,7 @@ All invented. All at least visible. See D-025 and D-031.
 **How to check the state of things, cheapest first**
 
     uv sync                                   # httpx is new
-    uv run pytest                             # 510 tests, no network, no spend
+    uv run pytest                             # 511 tests, no network, no spend
     uv run ruff check .
     uv run python -m mystery.cli --topologies
     uv run python -m mystery.cli --material 3 --setting "a residency"  # what 3 seeds get dealt
