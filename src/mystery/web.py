@@ -55,7 +55,6 @@ from mystery.session import InMemorySessions, Session, Sessions
 from mystery.session import sessions as pick_sessions
 from mystery.solvable import analyse, report
 from mystery.solver import solve_until_valid
-from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import LIBRARY, assess, drawn
 from mystery.topology import get as get_topology
 
@@ -2580,10 +2579,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--topology",
-        default=DEFAULT_TOPOLOGY,
+        default=None,
         choices=sorted(LIBRARY),
         help="the shape of the solution. Different shapes are different puzzles, "
-        "which is what makes a second case worth playing (D-067)",
+        "which is what makes a second case worth playing (D-067). Drawn from the "
+        "seed when omitted, exactly like the setting",
     )
     parser.add_argument(
         "--model",
@@ -2628,6 +2628,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--cases", action="store_true", help="list the cases on the shelf and stop"
+    )
+    parser.add_argument(
+        "--score",
+        action="store_true",
+        help="solve and measure every draft you have already paid for, and stop. "
+        "No model, no network, no spend: it is the cheapest way to see what a "
+        "change to the checks or the solver did (D-152)",
     )
     parser.add_argument(
         "--daily",
@@ -2685,6 +2692,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cases:
         print(catalogue(store))
+        return 0
+
+    # Beside `--cases` and above every draw, because a command that generates
+    # nothing must not announce a seed and an occasion it is not going to use
+    # (D-120). Aliased on import: `report` is already the solvability one at
+    # module scope and a bare import would rebind it for the whole function.
+    if args.score:
+        from mystery.bench import report as scoreboard
+        from mystery.bench import sweep
+
+        print(scoreboard(sweep(CACHE)))
         return 0
 
     if args.daily:

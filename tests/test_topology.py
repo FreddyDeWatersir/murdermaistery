@@ -198,3 +198,43 @@ def test_the_mapping_is_stable_when_a_shape_is_added() -> None:
     from mystery.topology import LIBRARY, drawn
 
     assert drawn(2) == sorted(LIBRARY)[2 % len(LIBRARY)]
+
+
+def test_the_command_line_reaches_the_draw(monkeypatch, tmp_path) -> None:
+    """The shape is dealt by the seed, and for months nothing dealt it (D-154).
+
+    `_draw` asked `if args.topology is None`, and the parser handed it
+    `default=DEFAULT`, so the branch was never true and every case ever
+    generated from the command line was the plain shape. Thirty drafts in the
+    corpus, twenty-nine with the same three-liar structure, and the uniform
+    draw over seven shapes never happened once.
+
+    The two tests above prove `drawn` works. Neither of them could catch this,
+    because the thing that was broken was not the function, it was the wire.
+    This one runs the program and looks at what the generator was actually
+    asked for, which is the only place the truth was visible.
+    """
+    import mystery.web as web
+    from mystery.example import OPENING_NIGHT
+    from mystery.library import FileShelf
+    from mystery.topology import drawn
+
+    asked: list[str] = []
+
+    def spy(request, **kwargs):
+        asked.append(request.topology)
+        return Mystery.model_validate(OPENING_NIGHT)
+
+    monkeypatch.setattr(web, "pick_shelf", lambda: FileShelf(tmp_path))
+    monkeypatch.setattr(web, "generate", spy)
+    monkeypatch.setattr(web, "_serve", lambda *a, **kw: 0)
+
+    for seed in range(14):
+        web.main(["--dry-run", "--seed", str(seed)])
+
+    assert asked == [drawn(seed) for seed in range(14)]
+    assert len(set(asked)) > 1, "every seed asked for the same shape"
+
+    asked.clear()
+    web.main(["--dry-run", "--seed", "0", "--topology", "the_conspiracy"])
+    assert asked == ["the_conspiracy"], "an explicit shape must still win"

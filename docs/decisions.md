@@ -4007,3 +4007,310 @@ The same reasoning as D-145. A constraint that lives outside the code, in anothe
 language or in somebody else's client, is still a constraint the code has to
 respect, and the cheapest guard is usually to read the source and assert the
 shape.
+
+## D-149 Repair what has one right answer, complain about what does not
+**Date:** 2026-09-04
+**Status:** active
+
+A third run: three drafts, $1.10, no playable case. The failures were not new
+bugs, they were two instruments pointed the wrong way.
+
+**The briefing rule was rejecting when it should have been repairing.** D-139
+made "the commission names nobody" a validator rule. Two of the three drafts
+failed it, each rejection costing a fresh Opus call, and the model kept doing it
+because the sentence it is asked to write pulls the name in behind it: "they have
+already settled on one name" wants to say whose.
+
+A rule that rejects is for a fault only the model can fix. Taking a name out of
+one sentence has one right answer and no judgement in it, which makes it the
+solver's kind of problem, not the validator's (D-029). `unname_the_commission`
+substitutes a stand-in per person, whole names before single words so "Devika
+Menon" does not become "one of them that person", possessives as "their", and
+sentence starts recapitalised. It runs before validation and also on the way out
+of the cache, because a cached case is exactly the one nobody is going to pay to
+draft again. V13 stays as the guarantee and should now never fire.
+
+**The solvability analysis was fatal and silent.** `why_not` has always been
+advisory, on the argument that it is a necessary condition rather than a
+sufficient one and a rule built on it would eventually throw away a good case.
+Right about most of it, wrong about the part where the program *already* throws
+the case away: it prints "This case cannot be solved" and refuses to serve.
+
+So the third draft died at the end, after being paid for, for a reason the model
+was never told: the killer's motive was known to nobody but the killer, so the
+player could name him and never say why. The complaint loop now carries S2, S3
+and S4, the three findings that are pure structure and that the solver cannot
+change. Whether the killer's alibi can be broken stays out, because that depends
+on the grid and the grid is the solver's to repair.
+
+**Nothing in this touches the prompt, on purpose.** `cache_key` hashes the
+prompt, so any edit to it invalidates every draft ever cached. Tonight three
+seeds were paid for and two of them are cached; changing a word of the prompt
+would have thrown that away. Seed 296454 in particular now solves for free under
+D-147, because the draft that died of the solver bug is still on disk under
+exactly the key the request produces.
+
+The prompt is the thing to look at next, and not by adding to it. It is
+seventeen thousand nine hundred tokens and has grown with every decision here,
+and first-attempt success is now close to zero on faults as basic as naming a
+character who is not in the cast. That is a cut, not another paragraph, and it
+wants doing deliberately rather than at the end of an evening that has already
+cost two and a half dollars.
+
+## D-150 A citation without its prefix is still a citation
+**Date:** 2026-09-22
+**Status:** active
+
+Found by reading a played session rather than by thinking about it. Over
+forty-six questions, twelve citations arrived without their prefix. A suspect
+asked where she had been all evening answered `s1 s2 s3 s4 s5` instead of
+`self:s1` and so on, twice. Another cited two secrets by bare id, and one cited a
+constraint id that means nothing at all.
+
+**Every one of them was dropped in silence.** `assertions_from` looks ids up in a
+dict and a miss is just a miss; `leaks` cannot flag an id it does not recognise;
+`surfaced_secrets` needs the prefix to see a secret at all. Nothing logged,
+nothing counted, and the player was never told.
+
+What that cost in one real evening, measured against the session file:
+
+- **ten of twenty-six assertions**, so over a third of the timeline never reached
+  the notebook, including most of one suspect's own account of her evening after
+  the player asked for it explicitly, twice;
+- **one of the two secrets in the case carrying an object**, so the player
+  finished a forty-six question game having never once had anything to put in
+  front of anybody. `shown` was empty for the whole session and it looked like a
+  choice.
+
+Every prefix is unambiguous on its own. A slot id is only ever `self:` or
+`truth:`, a secret id only ever `secret:` or `heard:`, a constraint id only ever
+`said:`. So a bare id has one right answer, which makes this D-149's rule again:
+repair what has one right answer, and only complain about what does not.
+
+An id that still matches nothing is **kept** rather than dropped, because it is
+something the character said they were drawing on and both the leak detector and
+the log are better off seeing it, and it is now counted in
+`agent.unknown_citation`. Whether this is a prompt problem or a model problem is
+a question about a rate, and a rate needs a log.
+
+Replayed against the session that found it: twenty-six assertions become
+thirty-six, two surfaced secrets become three, and the day book ends up in the
+player's hands. One citation out of forty-six answers remains genuinely
+unrecognisable, and is now loud instead of invisible.
+
+## D-151 The shape governs, and it was losing
+**Date:** 2026-09-22
+**Status:** active
+
+A player asked how many of the seven solution shapes he had actually seen. The
+answer turned out to be: possibly one, whatever the seed dealt.
+
+Seed 296454 drew **`the_frame`**, whose brief opens *"the killer's protection is
+that somebody else looks guilty, and the killer themselves does not lie about
+anything. Give the killer no entry in `false_claims`."* The case that came back
+has the killer lying about the ringing chamber at s2, and the shape's own checks
+both failed:
+
+```
+F1  'callum' tells a false claim, and in a frame they should not.
+F2  Nobody is carrying enough to be framed.
+```
+
+**Why it lost is structural, not luck.** The shape was a paragraph on the fifth
+line of the user prompt, after the cast size, worth about 3% of the request.
+Meanwhile the standing instructions contained this, verbatim:
+
+> **Three people lie about where they were, and only one of them is the killer.**
+> This is the most important instruction here.
+
+That sentence contradicts four of the seven shapes and calls itself the most
+important instruction in the request. The prompt argued with itself and the
+bigger, earlier, more emphatic side won every time. Which is the best single
+explanation this project has ever had for cases feeling the same: **they were
+the same case, because one shape's doctrine had leaked into the standing
+instructions and was being applied to all seven.**
+
+The fingerprint was there to read and nobody read it. `the_lie` had the shortest
+brief of the seven by a factor of three (474 characters against 1,084 to 1,516),
+precisely because the system prompt was doing its work for it.
+
+**The fix is a move, not a rewrite.**
+
+- Three blocks of lying doctrine (about 1,400 characters) left the standing
+  instructions and went into `the_lie`, where they were always true and nowhere
+  else. Its brief is now 1,460 characters and the seven are comparable.
+- What stayed is what holds whatever the shape: the killer must not be the only
+  person whose account is wrong, and a falsely claimed room must hold somebody
+  who can contradict it. Those are about the game, not about a shape.
+- The shape now **opens** the request, above the setting, with one line saying it
+  wins any argument with the standing instructions.
+- Every shape is now required to say who appears in `false_claims`, because the
+  doctrine that used to fill that silence is gone. `the_finder` and
+  `false_confession` were relying on it and now say it themselves.
+
+**And the objects block went** (2,036 characters, about 1,260 tokens a draft).
+D-139 took objects off the notebook and the map three weeks ago; the prompt went
+on asking for two or three of them with reconstructable paths, and A21 went on
+complaining when one of them was unwatchable. A21 and A23 are retired from the
+advisory list, kept in the module against the weapon work bringing the mechanic
+back in a form somebody can see.
+
+| | before | after |
+|---|---|---|
+| system prompt | 34,399 | **31,397** |
+| whole request | 39,941 | **38,163** |
+| shortest shape brief | 474 | **1,181** |
+
+About 800 tokens off every draft, four features' worth of contradiction removed,
+and four tests that fail if the shape ever loses its authority again.
+
+**Unmeasured, and the next thing to look at.** Whether the shape now survives
+contact with a real draft is unknown until a case is generated under it. The
+cache is invalidated by this change, so the next run pays for a fresh draft
+either way, and the thing to check is F1 and F2 on a case that drew `the_frame`.
+
+## D-152 Score the corpus, not the case
+**Date:** 2026-09-22
+**Status:** active
+
+Asked directly: how do you test the engine without playing a case. Most of the
+answer is that **you do not need the model to test the thing the model is judged
+by.** A draft is a file. Validation, solving, solvability and all twenty-one
+advisories are arithmetic over that file, so every draft ever cached is a test
+case that costs nothing to run again. Twenty-five of them were sitting in
+`var/mysteries` doing nothing.
+
+`--score` solves and measures the lot and prints a scoreboard. No model, no
+network, no spend. It paid for itself on the first run, twice.
+
+**It found a bug the suite could not.** Two drafts of twenty-five failed V10
+after solving, which the seal from D-147 was supposed to have made impossible.
+The seal covers the three places the solver *chooses* a room. It did not cover
+the one place the solver does not choose but obeys: a scene the model had bound
+into the murder room after the murder, which `_settle` faithfully wrote into the
+grid. `_resolve_clashes` now frees such a scene like any other clash and it is
+rehomed elsewhere. Twenty of twenty-five drafts now solve cleanly, up from
+eighteen, and both V10 failures are gone.
+
+That is the argument for a corpus in one paragraph. The suite tests against two
+hand-built cases and the shipped example, all three designed by somebody who
+already knew what the code did. Twenty-five real drafts are twenty-five shapes
+nobody designed.
+
+**It made the thresholds arguable.** Base rates across the corpus:
+
+| | fires on | |
+|---|---|---|
+| A1 people move too much | **96%** | not a check, a complaint |
+| A22 somebody is wrong without lying | **96%** | not a check, a complaint |
+| A17 enough secrets gated | 84% | |
+| A16 enough of them look guilty | 72% | |
+| A8 everyone has an unwitnessed moment | 68% | |
+| A19 a web and not a wheel | 60% | |
+| A5, A6, A12 | 4% | cheap guarantees, worth keeping |
+
+An advisory that fires on nearly every case has stopped carrying information,
+and the report says so in the margin rather than leaving it to be noticed.
+
+Two of those are worth acting on and are deliberately not acted on here. **A1's
+threshold of two moves in five slots was taken from the hand-built prototypes**,
+which is an ideal rather than an achievable distribution: the real spread across
+125 suspects is 0:6, 1:8, 2:46, 3:42, 4:23, mean 2.54, so the line sits at the
+median and flags half of everybody. **A22 at 96% means `accounts` are barely
+being written at all**, which is the same fate objects had: a whole mechanic
+from D-132 that never landed and nobody noticed because its check was one line in
+a wall of them.
+
+And it settles how difficulty thresholds get chosen. A16 already fails 72% of
+drafts at three damning suspects; a "hard" band asking for four would fail almost
+everything, at 38 cents a discovery. **Bands come from the distribution or they
+are guesses with a price tag.**
+
+What a sweep cannot see is whether a case is any fun, and nothing here pretends
+otherwise. It measures properties; a person measures the evening.
+
+## D-153 A report you cannot read is not a report
+**Date:** 2026-09-22
+**Status:** active
+
+The first real `--score` run, over thirty-seven drafts, arrived under about six
+hundred lines of `solver.relocated_lie`. The scoreboard was at the bottom and the
+first thing the player saw was a wall.
+
+Two fixes, both about the difference between one case and forty.
+
+**The solver is quiet during a sweep.** It narrates every relocation, which is
+exactly what you want when a single case is being solved and is noise when
+thirty-seven are, each trying up to twenty-four arrangements. `sweep` raises the
+log level for its duration and puts it back, with a test that it puts it back,
+because a context manager that leaks its silence turns off the logs for the rest
+of the process and gets found three days later.
+
+**Drafts from before `secrets` existed are left out of the base rates.** The
+corpus goes back to August and includes skeletons with no secrets at all. They
+still exercise the solver, so they stay in the table, but counting them in the
+statistics drags every rate towards "everything is broken": A6 read 30% with them
+in and 4% with them out, A14 41% against 11%, A10 27% against nothing. A base
+rate computed over cases the check cannot apply to is worse than no base rate,
+because it looks like evidence. The report says how many it left out and why.
+
+The corrected rates over the 27 comparable drafts are the ones D-152 quotes, and
+they barely moved: A1 and A22 still fire on 96%, A17 on 85%, A16 on 67%.
+
+## D-154 The shape was dealt and nothing ever dealt it
+**Date:** 2026-09-22
+**Status:** active
+
+Seven topologies, drawn uniformly from the seed by `drawn(seed)`, tested twice in
+`test_topology.py`, printed in the banner, documented in `engine.md`. And never
+once used.
+
+`_draw` asked:
+
+```python
+if args.topology is None:
+    args.topology = drawn(args.seed)
+```
+
+and the parser answered:
+
+```python
+parser.add_argument("--topology", default=DEFAULT_TOPOLOGY, ...)
+```
+
+`DEFAULT_TOPOLOGY` is `"the_lie"`. It is never `None`. So the branch was dead,
+the draw never happened, and **every case ever generated without typing
+`--topology` by hand was the plain shape.**
+
+The corpus says it plainly, and said it before anybody noticed. Of the thirty
+drafts with secrets: three liars in twenty-nine of them, two innocent liars in
+twenty-eight, three separately covered secrets in twenty-eight, and the killer
+lying in twenty-nine. That is not a uniform draw over seven shapes with one
+common outcome. That is one shape, thirty times, and it was sitting in the
+`--score` output as a structural regularity nobody had asked the corpus about.
+
+It also poisons two things that were read as evidence. D-152's advisory base
+rates are base rates **for `the_lie`**, not for the engine, and the only reason
+A6 and A20 look tolerable is that every draft measured was a shape where the
+killer lies by construction. And the `--score` corpus mixes prompt eras with no
+way to tell them apart: the only two drafts carrying `accounts` are the only two
+carrying `things`, which dates them to one prompt version rather than proving the
+model ignores D-132. A draft should record the prompt version that made it. It
+does not. That is open.
+
+The fix is `default=None`. The interesting part is the test.
+
+**A unit test of `drawn` could never have caught this**, and two of them were
+passing the whole time. What was broken was not the function, it was the wire
+from the command line to the function, and the only place the truth was visible
+was what `generate` was actually asked for. So the new test runs `main` under
+`--dry-run` over fourteen seeds, with a spy in place of `generate`, and asserts
+the sequence of shapes it was asked for equals `[drawn(n) for n in range(14)]`
+and contains more than one distinct value. It fails on the old code.
+
+This is the sixth instance of the same failure: D-119 named it, D-135, D-137,
+D-147, D-150 and D-151 are the others. A field written with care, carried
+through the schema, and never wired to the place that needed it. The pattern in
+all six is the same and is now worth stating as a rule: **a feature is not
+finished when it is correct and tested, it is finished when something proves the
+program reaches it.**
