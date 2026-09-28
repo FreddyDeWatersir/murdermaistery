@@ -1140,6 +1140,54 @@ def ask(
     return _finish(brief, raw, history)
 
 
+# The prefixes a citation can carry, in the order a bare id is tried against
+# them. Every one is unambiguous on its own: a slot id is only ever `self:` or
+# `truth:`, a secret id is only ever `secret:` or `heard:`, and a constraint id
+# is only ever `said:`. So a citation missing its prefix has one right answer,
+# and being handed the bare id is not a reason to throw the claim away (D-150).
+PREFIXES = ("self:", "truth:", "secret:", "heard:", "said:", "thing:", "saw:")
+
+
+def repair_citations(brief: Brief, used: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Citations as the character could have made them, and the ones left over.
+
+    Found by reading a played session rather than by thinking about it. Over
+    forty-six questions twelve citations arrived without their prefix: a suspect
+    asked where she had been all evening answered `s1 s2 s3 s4 s5` instead of
+    `self:s1` and so on, twice. Every one of them was dropped in silence, because
+    `assertions_from` looks ids up in a dict and a miss is just a miss, `leaks`
+    cannot flag an id it does not recognise, and `surfaced_secrets` needs the
+    prefix to see a secret at all.
+
+    The cost of that silence in one real evening: ten of twenty-six assertions,
+    so a third of the timeline never reached the notebook, and one of the two
+    secrets in the case carrying an object, so the player finished a
+    forty-six-question game having never once had anything to put in front of
+    anybody.
+    """
+    licensed = brief.licensed
+    kept: list[str] = []
+    unknown: list[str] = []
+
+    for citation in used:
+        if citation in licensed:
+            kept.append(citation)
+            continue
+        mended = next(
+            (p + citation for p in PREFIXES if p + citation in licensed), None
+        )
+        if mended is not None:
+            kept.append(mended)
+            continue
+        # Kept rather than dropped: an id nobody recognises is still something
+        # the character said they were drawing on, and the leak detector and the
+        # logs are both better off seeing it.
+        kept.append(citation)
+        unknown.append(citation)
+
+    return kept, unknown
+
+
 def _finish(brief: Brief, raw: dict[str, Any], history: Sequence[tuple[str, str]]) -> Reply:
     """One raw answer, cleaned up and logged. Shared by both ways of asking."""
     spoken = str(raw.get("speech", ""))
@@ -1149,9 +1197,15 @@ def _finish(brief: Brief, raw: dict[str, Any], history: Sequence[tuple[str, str]
         # prompt needs work; if it is rare the strip is enough.
         log.info("agent.cited_aloud", character=brief.character)
 
+    used, unknown = repair_citations(brief, list(raw.get("used", [])))
+    if unknown:
+        # Counted rather than swallowed. Whether this is a prompt problem or a
+        # model problem is a question about a rate, and a rate needs a log.
+        log.info("agent.unknown_citation", character=brief.character, ids=unknown)
+
     reply = Reply(
         speech=clean,
-        used=list(raw.get("used", [])),
+        used=used,
         refused=bool(raw.get("refused", False)),
     )
 

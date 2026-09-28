@@ -631,6 +631,67 @@ def check_the_commission_names_nobody(mystery: Mystery) -> list[Violation]:
     ]
 
 
+def check_the_victim_has_time_to_live(mystery: Mystery) -> list[Violation]:
+    """V14: the victim is not wanted in more scenes than he has hours (D-158).
+
+    The failure this exists to *name*, rather than the failure it exists to
+    catch. V7 and the solver already stop a scene that sits after the murder, but
+    what they say about it is "'c_meal_landing' involves the victim at 's3'" or,
+    worse, "'c_meal_landing' was never placed: place=None, slot=None". Neither
+    tells the model what is wrong, so a redraft rearranges the same
+    impossibility into a different scene and costs another forty cents.
+
+    What is wrong is arithmetic. A scene with the victim can only happen at or
+    before the murder, so with the murder at slot k he has k hours, and a private
+    scene takes a whole one. Measured over the corpus the model writes 3.56
+    scenes with the victim and does not count: two drafts wanted more of him than
+    existed, and thirteen more filled every hour he had exactly, so one more
+    scene anywhere would have broken them.
+
+    **This is a diagnosis of the draft's intent, not a proof about the
+    arrangement**, and it is deliberately in `PROPOSED_RULES` only. Two private
+    scenes with the same people in the same room can technically share an hour,
+    so the count is not a theorem; and since D-157 the accept/reject decision
+    belongs to the solve, which means a rule here costs nothing when it is wrong
+    and earns its keep by making the complaint legible when it is right. Putting
+    it in `FINAL_RULES` would be a real mistake: it would fail a case the solver
+    had successfully arranged.
+    """
+    killed_at = murder_slot(mystery)
+    if killed_at is None:
+        return []
+
+    index = {slot.id: slot.index for slot in mystery.slots}
+    after = index.get(killed_at)
+    if after is None:
+        return []
+
+    alive = sorted(
+        (slot.id for slot in mystery.slots if index[slot.id] <= after),
+        key=lambda s: index[s],
+    )
+    scenes = [c.id for c in mystery.constraints if mystery.victim in c.people]
+    if len(scenes) <= len(alive):
+        return []
+
+    return [
+        Violation(
+            rule="V14",
+            message=(
+                f"The victim is in {len(scenes)} scenes and alive for "
+                f"{len(alive)} hours ({', '.join(alive)}), so at least "
+                f"{len(scenes) - len(alive)} of them cannot happen: "
+                f"{', '.join(scenes)}. The victim is dead from {killed_at!r} onward, and "
+                f"a private scene takes a whole hour to itself. Cut them down to "
+                f"{len(alive)} scenes including the murder, and put what they were "
+                f"doing to the rest of them into secrets instead, which cost no "
+                f"time at all. Moving a scene later does not work: later is after "
+                f"they are dead"
+            ),
+        )
+    ]
+
+
 PROPOSED_RULES = [
     check_roles_are_roles_not_histories,
     check_the_commission_names_nobody,
@@ -639,6 +700,12 @@ PROPOSED_RULES = [
     check_constraints_do_not_contradict,
     check_exclusive_scenes_do_not_collide,
     check_the_body_is_not_stepped_over,
+    # Both about the victim's timeline, and both here rather than only at the
+    # final gate so that the complaint the model reads names the real problem
+    # rather than the solver's symptom of it (D-158). Neither costs a draft on
+    # its own any more: the solve decides (D-157).
+    check_the_victim_stays_dead,
+    check_the_victim_has_time_to_live,
 ]
 
 # After the solver. Everything must hold.

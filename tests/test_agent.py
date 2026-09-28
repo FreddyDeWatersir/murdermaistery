@@ -19,6 +19,7 @@ from mystery.agent import (
     render_history,
     render_segments,
     render_system,
+    repair_citations,
     showable,
     speech_so_far,
     strip_citations,
@@ -1250,3 +1251,61 @@ def test_a_streaming_responder_is_read_as_it_arrives() -> None:
 
     assert "".join(e["text"] for e in events if "text" in e) == "The study, all evening."
     assert events[-1]["reply"].used == ["self:s1"]
+
+
+# --- citations that lost their prefix (D-150) --------------------------------
+
+
+def test_a_slot_id_without_its_prefix_is_still_a_claim() -> None:
+    """Read out of a played session: a suspect asked where she had been all
+    evening answered `s1 s2 s3 s4 s5` instead of `self:s1` and so on, twice, and
+    every one was dropped in silence. Ten of that evening's twenty-six
+    assertions went that way."""
+    brief = build_brief(CASE, KNOW, "vera")
+    kept, unknown = repair_citations(brief, ["s1", "s2"])
+
+    assert kept == ["self:s1", "self:s2"]
+    assert not unknown
+
+
+def test_a_secret_without_its_prefix_still_surfaces() -> None:
+    """The one that cost the most: the bare id was one of two secrets in the
+    case carrying an object, so the player never had anything to show anybody."""
+    brief = build_brief(CASE, KNOW, "vera")
+    kept, unknown = repair_citations(brief, ["affair"])
+
+    assert kept == ["secret:affair"]
+    assert not unknown
+
+
+def test_a_citation_already_in_order_is_left_alone() -> None:
+    brief = build_brief(CASE, KNOW, "vera")
+    kept, unknown = repair_citations(brief, ["self:s1", "secret:affair"])
+
+    assert kept == ["self:s1", "secret:affair"]
+    assert not unknown
+
+
+def test_an_id_nobody_recognises_is_kept_and_reported() -> None:
+    """Kept rather than dropped: an id nobody recognises is still something the
+    character said they drew on, and the leak detector and the logs are both
+    better off seeing it."""
+    brief = build_brief(CASE, KNOW, "vera")
+    kept, unknown = repair_citations(brief, ["c_ringing_alibi"])
+
+    assert kept == ["c_ringing_alibi"]
+    assert unknown == ["c_ringing_alibi"]
+
+
+def test_the_repair_reaches_the_notebook() -> None:
+    """On the destination, not on the helper (D-119). A repaired citation has to
+    become an assertion, or the whole thing was decoration."""
+    from mystery.interrogation import assertions_from
+
+    brief = build_brief(CASE, KNOW, "vera")
+    reply = ask(brief, "Where were you?", lambda system, question: {
+        "speech": "The study.", "used": ["s1"], "refused": False
+    })
+
+    assert reply.used == ["self:s1"]
+    assert assertions_from(brief, reply), "a bare slot id used to reach nothing"

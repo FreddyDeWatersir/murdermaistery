@@ -4314,3 +4314,281 @@ through the schema, and never wired to the place that needed it. The pattern in
 all six is the same and is now worth stating as a rule: **a feature is not
 finished when it is correct and tested, it is finished when something proves the
 program reaches it.**
+
+## D-155 Coverage, not randomness, and the shelf is the deck
+**Date:** 2026-09-22
+**Status:** active
+
+With D-154 fixed the shape is genuinely random per run. `fresh_seed` is
+`secrets.randbelow(1_000_000)`, a CSPRNG rather than the clock, and over 70,000
+real seeds every shape lands between 14.05% and 14.43% against an expected
+14.29%. The one imperfection is that a million is not divisible by seven, which
+gives one residue class one extra value in a million.
+
+Random is not what a person with seven shapes and one played evening actually
+wants. Independent uniform draws need **7 x (1 + 1/2 + ... + 1/7) = 18.2 drafts**
+to show all seven, at about forty cents each, and leave a 1 in 7 chance that any
+run repeats the shape of the run before it. Dealing without replacement needs
+seven. That is $2.66 against $6.90 for the same information.
+
+So `--topology unplayed`, beside the seven names rather than replacing the
+default.
+
+**The shelf is the deck.** `SavedCase` has carried `topology` since the shelf
+existed and `--cases` has printed it in a column all along, so "which shapes have
+I played" is a question the program can already answer. Nothing new is stored: no
+deck file, no counter, no state that can drift from reality if a case is deleted
+by hand, and nothing to initialise on a fresh machine. `unplayed(played, seed)`
+is a pure function, and with an empty set it *is* `drawn`, so the first case
+somebody generates is the same whichever flag they typed.
+
+Three costs, all accepted deliberately.
+
+**It reads the shelf, which opens every case.** `Card` carries an id and a date
+(D-081), so the shape is only in the body. The rule stays: this is the cold path
+and a page load may never call it. It is the right trade exactly here, because
+it runs once from a command about to spend forty cents and three minutes.
+
+**It spends some of D-103.** `--seed N` alone no longer reproduces a case dealt
+this way, because what came back depended on the shelf. The banner therefore
+prints the full reproduction command, `--seed N --topology X`, at the moment it
+deals.
+
+**It is machine-local.** `var/cases` is gitignored, so two people running the
+same command get different shapes. For a single player that is the point rather
+than a defect.
+
+Not added to `cli.py`. `--fill` builds several cases in one loop and "one I have
+not played" is a question about a single draw; resolving it once would hand every
+case in the batch the same shape. The fill loop already varies shape per case
+through `drawn(seed)`.
+
+## D-156 Ask the free question before paying for the expensive one
+**Date:** 2026-09-22
+**Status:** active
+
+An evening cost $1.20 and produced nothing. Three drafts of `the_frame`, six
+rejections, and five of the six were V6: the model had put the same person in
+two rooms at the same hour. The sixth was V4: a scene set in `back_room`, which
+was not a place in the mystery. The complaints were fed back each time and the
+model made the same class of mistake on all three attempts, so the loop was not
+only expensive, it was not teaching anybody anything.
+
+V6's own docstring said:
+
+> The set is then unsatisfiable and no repair exists, so this has to be caught
+> and reported rather than handed to the solver, which would otherwise thrash
+> between the two.
+
+That has been false since `_resolve_clashes` was written. Unbinding the less
+important of two clashing scenes and rehoming it is exactly what that function
+does. Measured rather than asserted: taking every draft in the corpus, finding
+two scenes that share a person, and forcing them into the same slot in different
+rooms, the solver repaired **32 of 33**. The one real failure was one draft; the
+other five that came back dirty were already broken before the clash was added.
+
+So the proposed gate was rejecting, at about forty cents a time, a class of
+problem the free arithmetic downstream fixes in 97% of cases.
+
+Three changes, all one principle.
+
+**The solver gets a free second opinion before a redraft is bought.** Not by
+deleting V6 from the proposed gate, because a rejection there does buy a redraft
+and a redraft sometimes works. Instead: when a draft is rejected and the
+complaints are all validator violations, run `solve_until_valid` with the seed
+the caller will use. If the solved case satisfies the **final** rules, accept the
+draft and spend nothing. The final rules are strictly stronger than the proposed
+ones, so this is not a relaxation: it replaces "does the draft satisfy the weaker
+gate" with "is there an arrangement of it that satisfies the stronger one", which
+is the question that actually matters. Solving is milliseconds; a redraft is
+forty cents.
+
+Solvability findings (S2, S3, S4) are excluded and go straight back to the model.
+The solver rearranges a grid. It cannot reach a secret that nothing unlocks.
+
+**Half of V4 becomes a repair.** A constraint set in a room that does not exist
+is a constraint that does not know its room, and binding constraints that do not
+know their room is the solver's entire job, so `unbind_the_imaginary` drops the
+invented place and keeps everything else. Same for an invented slot. A constraint
+naming a **person** who is not in the cast stays fatal forever, because nobody
+can know who the model meant, and dropping the name would silently rewrite the
+story rather than repair it. That is the D-149 test applied twice to one rule and
+getting different answers, which is the point of the test.
+
+**Rejected drafts are kept.** `var/rejected/<key>-<attempt>.json` holds the raw
+draft, the complaints, the seed, the setting and the shape. Every measurement of
+this engine so far has been taken over `var/mysteries`, which contains only the
+drafts that passed, so the corpus structurally could not answer what the gate
+rejects or how often, which is the number that decides whether a gate pays for
+itself. $1.20 of evidence about exactly that existed for nine minutes and then
+only in a terminal window. Unparseable drafts are kept too, and those are the
+ones you most want back, since nothing else in the pipeline ever sees them.
+
+Replayed against the evening that prompted this: one draft, $0.47, a playable
+case.
+
+## D-157 A draft is accepted on whether it can be arranged, not on whether it looks fine
+**Date:** 2026-09-22
+**Status:** active
+
+The retry after D-156 cost 37 cents and also produced nothing, in a new way.
+
+```
+attempt_had_complaints=0            <- the proposed gate was happy
+...
+That mystery came out broken, on every arrangement tried.
+  [V7] Constraint 'c_meal_landing' involves the victim at 's3', after they were killed at 's2'
+  [V1] Constraint 'c_meal_landing' has 'fotini' in 'landing' at 's3', but the timeline places them in 'courtyard'
+```
+
+The model had sat the dead man down to a communal meal an hour after killing
+him. V7 is a **final** rule only, so the proposed gate waved the draft through,
+`generate` cached it and returned it, and `web.py` then failed all twenty-four
+arrangements and stopped **with two paid attempts still unspent**. Nobody asked
+for a redraft, because as far as `generate` was concerned the draft was fine.
+
+That is the hole D-156 left. It ran the free solve only on drafts the proposed
+gate had already complained about, which is precisely backwards: a complained-at
+draft often solves, and a clean-looking one can be impossible.
+
+**The solve now runs on every draft, and is the acceptance test.** Not "does this
+satisfy the weaker gate" but "is there an arrangement of it that satisfies the
+stronger one". If there is not, the violations go back to the model as
+complaints and it redrafts, which is what the attempts are for. Solvability
+findings (S2, S3, S4) still bypass it, because rearranging a grid cannot reach a
+secret nothing unlocks.
+
+**The same question is asked of a cache hit.** A cached draft that cannot be
+arranged is worse than a cache miss: that seed fails identically forever and
+never redrafts. Drafts cached before today include some of those, including the
+one that prompted this. A hit that will not solve is logged and passed over.
+
+**And the solver learned the rule it was missing.** D-152 frees a scene the model
+bound into the room the body is lying in. Nothing freed a scene bound to the
+*body*: the solver pinned the corpse where it fell and then kept a scene that
+still required him at the table, which is where both the V7 and the V1 came
+from. `_room_for` already refuses to reschedule a victim scene past the murder,
+so freeing it is enough. Measured by dragging a victim scene past the murder in
+twenty-seven healthy corpus drafts: **6 of 27 repaired before, 27 of 27 after.**
+
+The draft that started this is still impossible and the 37 cents is gone. Its
+victim had two slots left alive and both were private scenes with the killer, so
+the meal could not exist at any hour. That is the correct outcome for that draft;
+what was wrong was paying for it and then not asking for another.
+
+**Logging.** One failing draft printed about ninety lines of
+`solver.relocated_lie` and `solver.unbreakable_lie` and buried the error at the
+bottom. `_quiet` moves out of `bench` and into `solver` as `quietly`, now at
+ERROR rather than WARNING, and two callers use it: `solve_until_valid` narrates
+its first arrangement and silences the other twenty-three, and `generate`'s probe
+is silent throughout, since `web.py` runs the same arrangement again afterwards
+and narrates it there.
+
+## D-164 The evening gets its own colour
+**Date:** 2026-09-28
+**Status:** active
+
+Every case rendered in the same near-black ground with the same gold accent,
+whether the evening was a Baltic port, inland Andalusia in the last heat of the
+year, or a Japanese farmhouse that has been in one family too long. The screen
+was the only part of the pipeline that learned nothing about the case.
+
+Three accent tokens now come from the region the seed drew, one palette per entry
+in `WHERE`, sent in `/state` and applied to the document root on boot.
+
+**Derived from the region rather than sampled from the generated backdrop**,
+which is the opposite of what I argued for yesterday and the reason is the
+playtest: the art is the weakest thing in the build right now, and sampling would
+make the colour of an evening depend on whether the picture came out well, which
+is the one thing about a case nobody can predict. A dealt palette also works with
+`--art` off, which is most runs and all of the tests, and it is one more deck,
+which is how everything else in this engine varies.
+
+**Ground, paper and text do not move.** Only `warm`, `cool` and `bad` are dealt,
+`bad` stays roughly red in every set because it means contradiction, and the
+notebook keeps its own paper palette and overrides all three on itself.
+Legibility is not a thing to deal from a seed: no case can arrive unreadable
+however its region was drawn, and a test asserts the dealt set is exactly those
+three keys.
+
+## D-165 Nobody was ever simply already there
+**Date:** 2026-09-28
+**Status:** active
+
+Asked why the cases still feel alike, a player named three things: there is
+always a technical person, always a guest who does not usually come, and the
+victim is always an old person who died falling down something. All three are
+real and all three are measurable.
+
+Twenty eight distinct cases, read end to end.
+
+**The victim was the proprietor in twenty two.** Owner of the estate, master of
+the boat, president of the co-operative, chief instructor and majority
+shareholder, the woman who signed everyone here off. The cast then writes itself,
+because the people around a proprietor are the people who work for one: `estate`
+appears in twenty suspect roles, `cellar` in ten, `manager` in seven, `foreman`
+in seven. The prompt now says plainly that the victim does not have to own the
+place, and that a case is more interesting when the person everybody has to talk
+about is not the person who was paying them.
+
+**And the murder is staged the same way every single time.** In twenty three of
+twenty eight the killer asked, took, brought or followed the victim somewhere,
+over half of those downstairs, and in **zero** was the victim already there for
+their own reasons. Every murder in this engine is therefore premeditated.
+
+That last number explains something that had been puzzling since D-161. A
+premeditated murder needs a reason to act *tonight*, which is a deadline, which
+is why the new motive registers kept getting rewritten into announcements however
+plainly the deck dealt them. The deadline was not coming from the motive
+instruction at all. It was coming from the staging.
+
+The cause is structural and worth naming: the murder is an `exclusive`
+constraint, so somebody has to produce solitude, and the cheapest way to produce
+it is to have the killer arrange it. The prompt now lists the others. The victim
+goes somewhere alone every night of their life. A room empties for two minutes
+and nobody planned it. The killer walks in and is not expecting to. And the line
+that ties it back to D-161: **somebody who has been carrying a thing for eleven
+years does not need a pretext, they need an opportunity.**
+
+## D-166 A batch is only worth buying if it can be told apart from the next one
+**Date:** 2026-09-28
+**Status:** active
+
+Asked whether a pile of cases could be generated for statistics without playing
+them, and whether to do that before or after changing the decks. `--fill N`
+already does the generating. Two things had to be fixed first or the money would
+have been wasted.
+
+**Every case in a batch was getting the same occasion.** The same fault as D-163
+and D-120: `_draw` fills in whatever was left off the command line, once, from
+the first seed, and `_fill` then passed that one setting into every case. A
+buffer of twelve was twelve evenings at the same party, which is useless as a
+buffer and worse than useless for measuring what the occasion deck does, since
+the occasion is the deck a batch is mostly bought to measure. It now draws one
+per case when none was given, exactly as the shape already did.
+
+**And nothing recorded which instructions made a draft.** `Mystery.built_with`
+now carries the first eight characters of the hash of the system prompt, stamped
+by `generate` after parsing, and `--score` groups by it and says so in the
+margin when a corpus holds more than one.
+
+This is the fix D-154 asked for and nobody did, and the cost of not having it is
+on the record: "A22 fires on 97% of drafts" turned out to mean "28 of the 30
+predate the instruction A22 checks". Every base rate quoted in this log before
+today was measured over a corpus mixing several sets of instructions. The current
+52-draft corpus reports as `before the stamp x52`, which is the honest label.
+
+**Order of work, which was the actual question.** Decks first, then one batch.
+The deck edits worth making need no evidence: `OLD_BUSINESS` has twelve entries
+and eleven are an institutional cover-up, and no number is going to make that
+more true. The prompt changes of the last three days are the opposite: four of
+them are shipped and completely unmeasured. So a batch bought now would measure
+instructions that are about to change again, and a batch bought after the deck
+work measures everything at once for the same money.
+
+Sizing it: the properties in question are near-binary per draft, so eight is
+enough to tell "22 of 28" from "roughly half", which is the size of the change
+being looked for. Eight drafts is about $3.20 and one evening.
+
+Not to be done: running the batch on a cheaper model. It would cost a quarter as
+much and measure a model nobody plays with.

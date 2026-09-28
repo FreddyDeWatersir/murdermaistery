@@ -7,7 +7,7 @@ rejects everything, which passes the suite and is useless.
 
 from conftest import CHARACTERS, COHERENT_GRID, MURDER, PLACES, SLOTS
 
-from mystery.models import Constraint, Mystery
+from mystery.models import Character, Constraint, Mystery, Place, Slot
 from mystery.validator import validate
 
 # V1: bound constraints must agree with the timeline
@@ -734,3 +734,101 @@ def test_the_victim_may_be_named_in_the_commission(coherent_fragment: Mystery) -
     )
 
     assert validate(about).ok, validate(about).violations
+
+
+def _victim_wanted_everywhere() -> Mystery:
+    """A victim in more scenes than he has hours to be in (D-158).
+
+    Taken from a real draft: the murder was dealt slot 2 of 5, and the model wrote
+    a private tally with the killer at s1, the murder at s2, and a communal meal
+    at s3, by which time he had been dead an hour.
+    """
+    return Mystery(
+        title="Two Hours To Live",
+        killer="manolis",
+        victim="stelios",
+        murder="murder",
+        characters=[
+            Character(id=c, name=c.title())
+            for c in ("stelios", "manolis", "fotini", "irini")
+        ],
+        places=[Place(id=p, name=p.title()) for p in ("counting_room", "landing")],
+        slots=[Slot(id=f"s{i}", label=f"2{i}:00", index=i) for i in range(1, 6)],
+        constraints=[
+            Constraint(
+                id="tally",
+                people=["stelios", "manolis"],
+                exclusive=True,
+                place="counting_room",
+                slot="s1",
+            ),
+            Constraint(
+                id="murder",
+                people=["stelios", "manolis"],
+                exclusive=True,
+                place="counting_room",
+                slot="s2",
+            ),
+            Constraint(
+                id="meal",
+                people=["stelios", "fotini"],
+                place="landing",
+                slot="s3",
+            ),
+        ],
+    )
+
+
+def test_v14_says_the_victim_has_run_out_of_hours() -> None:
+    """The point of this rule is the sentence, not the catch (D-158).
+
+    V7 and the solver already stop this draft. What they say about it is that one
+    named constraint is in the wrong slot, or that it was never placed, and a
+    model told either of those rearranges the same impossibility somewhere else
+    for another forty cents. This says what is actually wrong.
+    """
+    broken = [v for v in validate(_victim_wanted_everywhere(), phase="proposed").violations]
+    v14 = [v for v in broken if v.rule == "V14"]
+
+    assert v14, "three scenes and two hours alive should be reported"
+    message = v14[0].message
+    assert "3 scenes" in message and "2 hours" in message
+    assert "secrets" in message, "it has to say where the cut material should go"
+
+
+def test_v14_is_quiet_when_the_victim_fits() -> None:
+    fits = _victim_wanted_everywhere()
+    without_the_meal = fits.model_copy(
+        update={"constraints": [c for c in fits.constraints if c.id != "meal"]}
+    )
+
+    assert not [
+        v for v in validate(without_the_meal, phase="proposed").violations if v.rule == "V14"
+    ]
+
+
+def test_v14_never_runs_after_the_solver() -> None:
+    """It is a diagnosis of the draft's intent, not a property of an arrangement.
+    Two private scenes with the same people in the same room can share an hour, so
+    the count is not a theorem, and a rule like that in FINAL_RULES would throw
+    away a case the solver had successfully arranged.
+    """
+    from mystery.validator import FINAL_RULES, PROPOSED_RULES
+
+    names = {rule.__name__ for rule in PROPOSED_RULES}
+    assert "check_the_victim_has_time_to_live" in names
+    assert "check_the_victim_has_time_to_live" not in {r.__name__ for r in FINAL_RULES}
+
+
+def test_the_victim_being_alive_after_death_is_caught_before_the_solver() -> None:
+    """V7 used to be a final rule only, so a draft that sat the dead man down to
+    dinner passed the proposed gate, was cached, and then failed every arrangement
+    with two paid attempts unspent (D-157, D-158)."""
+    from mystery.validator import PROPOSED_RULES
+
+    assert "check_the_victim_stays_dead" in {rule.__name__ for rule in PROPOSED_RULES}
+    assert [
+        v
+        for v in validate(_victim_wanted_everywhere(), phase="proposed").violations
+        if v.rule == "V7"
+    ]

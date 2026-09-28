@@ -12,6 +12,7 @@ function that returns a fixed line.
 """
 
 import json
+import re
 
 from test_agent import CASE
 
@@ -821,3 +822,111 @@ def test_a_spent_evening_is_refused_on_the_live_route_too():
 
     assert events[0]["over"] is True
     assert len(game.transcript.statements) == 1, "no model call, no statement"
+
+
+# --- the session that would not stick (D-159) ---------------------------------
+
+
+def _streaming_client():
+    """A client whose responder streams, so questions go through `/ask/live`."""
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    def answering(system, question):
+        return {"speech": "I was in the green room.", "used": [], "refused": False}
+
+    answering.stream = lambda system, question: iter(
+        [{"text": "I was in the green room."}]
+    )
+
+    case = Case(solve(CASE, seed=0), id="sticky")
+    who = next(c.id for c in case.mystery.characters if c.id != case.mystery.victim)
+    return TestClient(build_app(case, answering)), who
+
+
+def test_the_streaming_route_hands_back_the_cookie_it_was_given() -> None:
+    """A route that builds its own Response drops the injected one's headers, so
+    the cookie `player()` set was thrown away on every question (D-159).
+
+    In a real playtest that made seven sessions in fourteen minutes, six of them
+    holding exactly one question, and every suspect answering with no memory of
+    the last thing they had said.
+    """
+    client, who = _streaming_client()
+
+    with client.stream(
+        "POST", "/ask/live", json={"who": who, "text": "Where were you?"}
+    ) as streamed:
+        streamed.read()
+
+    assert "mystery_session" in streamed.cookies, (
+        "the first streamed answer has to name the session it just created"
+    )
+
+
+def test_two_streamed_questions_land_in_one_session() -> None:
+    """The symptom, rather than the mechanism: ask twice, get one transcript."""
+    client, who = _streaming_client()
+
+    for text in ("Where were you?", "And before that?"):
+        with client.stream("POST", "/ask/live", json={"who": who, "text": text}) as s:
+            s.read()
+
+    notebook = client.get("/state").json()["notebook"]
+    asked = sum(person["asked"] for person in notebook["people"])
+    assert asked == 2, f"the second question started a new evening (notebook holds {asked})"
+
+
+def test_the_cookie_outlives_nothing_the_session_store_keeps() -> None:
+    """The cookie was twelve hours and the record is forty-eight, so an evening
+    picked up the next day found a session that still existed and a browser that
+    could no longer name it."""
+    from mystery.session import KEEP
+    from mystery.web import COOKIE
+
+    client, who = _streaming_client()
+    client.get("/state")
+
+    jar = [c for c in client.cookies.jar if c.name == COOKIE]
+    assert jar, "no session cookie was set at all"
+    assert jar[0].expires is not None, "a session cookie dies when the browser does"
+    assert KEEP.total_seconds() >= 48 * 60 * 60
+
+
+# --- the evening's own colour (D-164) -----------------------------------------
+
+
+def test_the_state_carries_a_palette_for_this_case() -> None:
+    """Every case rendered in the same near-black and gold whether it was a
+    Baltic port or inland Andalusia, so the screen was the one part of the
+    pipeline that learned nothing about the case."""
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    case = Case(solve(CASE, seed=0), id="coloured", seed=657043)
+    client = TestClient(build_app(case, lambda s, q: {"speech": "", "used": []}))
+
+    hues = client.get("/state").json()["hues"]
+
+    assert set(hues) == {"warm", "cool", "bad"}
+    assert all(re.fullmatch(r"#[0-9a-f]{6}", value) for value in hues.values())
+
+
+def test_two_regions_do_not_get_the_same_colour() -> None:
+    """A palette that does not vary is decoration with extra steps."""
+    from mystery.palette import hues
+
+    assert len({hues(seed)["warm"] for seed in range(400)}) > 5
+
+
+def test_only_the_accents_move() -> None:
+    """Legibility is not a thing to deal from a seed. Ground and text stay fixed
+    everywhere, so no case can arrive unreadable however its region was drawn."""
+    from mystery.palette import hues
+
+    for seed in range(200):
+        assert set(hues(seed)) == {"warm", "cool", "bad"}

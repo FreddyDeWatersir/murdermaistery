@@ -238,3 +238,69 @@ def test_the_command_line_reaches_the_draw(monkeypatch, tmp_path) -> None:
     asked.clear()
     web.main(["--dry-run", "--seed", "0", "--topology", "the_conspiracy"])
     assert asked == ["the_conspiracy"], "an explicit shape must still win"
+
+
+def test_unplayed_deals_only_shapes_not_on_the_shelf() -> None:
+    """Coverage, not randomness (D-155). Uniform draws need 18.2 cases to show
+    all seven shapes; dealing without replacement needs seven."""
+    from mystery.topology import LIBRARY, unplayed
+
+    seen = {"the_lie", "the_frame"}
+    for seed in range(60):
+        assert unplayed(seen, seed) not in seen
+        assert unplayed(seen, seed) in LIBRARY
+
+
+def test_unplayed_reaches_every_remaining_shape() -> None:
+    """A deck that only ever deals the alphabetically first card left is a deck
+    that deals one card."""
+    from mystery.topology import LIBRARY, unplayed
+
+    seen = {"the_lie"}
+    assert {unplayed(seen, n) for n in range(40)} == set(LIBRARY) - seen
+
+
+def test_unplayed_falls_back_once_they_have_all_been_played() -> None:
+    """No special case at the call site, and no empty-sequence crash: when the
+    shelf holds all seven this is a uniform draw, which is correct then."""
+    from mystery.topology import LIBRARY, drawn, unplayed
+
+    assert unplayed(set(LIBRARY), 483102) == drawn(483102)
+
+
+def test_unplayed_with_an_empty_shelf_is_the_ordinary_draw() -> None:
+    """The first case somebody ever generates must not be a different shape
+    depending on which flag they typed."""
+    from mystery.topology import drawn, unplayed
+
+    assert [unplayed((), n) for n in range(14)] == [drawn(n) for n in range(14)]
+
+
+def test_the_command_line_deals_an_unplayed_shape(monkeypatch, tmp_path) -> None:
+    """The wire again, and for the same reason as D-154: a draw nothing calls
+    is a draw that does not happen."""
+    import mystery.web as web
+    from mystery.example import OPENING_NIGHT
+    from mystery.library import FileShelf
+    from mystery.models import Mystery
+
+    shelf = FileShelf(tmp_path)
+    example = Mystery.model_validate(OPENING_NIGHT)
+    shelf.save(example, "an opening night", "the_lie", 1)
+    shelf.save(example, "an opening night", "the_frame", 2)
+
+    asked: list[str] = []
+
+    def spy(request, **kwargs):
+        asked.append(request.topology)
+        return example
+
+    monkeypatch.setattr(web, "pick_shelf", lambda: shelf)
+    monkeypatch.setattr(web, "generate", spy)
+    monkeypatch.setattr(web, "_serve", lambda *a, **kw: 0)
+
+    for seed in range(12):
+        web.main(["--dry-run", "--seed", str(seed), "--topology", "unplayed"])
+
+    assert asked, "nothing was generated"
+    assert not {"the_lie", "the_frame"} & set(asked), "dealt a shape already on the shelf"

@@ -46,16 +46,16 @@ from mystery.interrogation import (
     word_got_back,
 )
 from mystery.knowledge import analyse_alibi, derive
-from mystery.library import S3Shelf, catalogue
+from mystery.library import S3Shelf, catalogue, played
 from mystery.library import shelf as pick_shelf
 from mystery.models import Mystery
-from mystery.palette import occasion
+from mystery.palette import hues, occasion
 from mystery.palette import questions as questions_for
-from mystery.session import InMemorySessions, Session, Sessions
+from mystery.session import KEEP, InMemorySessions, Session, Sessions
 from mystery.session import sessions as pick_sessions
 from mystery.solvable import analyse, report
 from mystery.solver import solve_until_valid
-from mystery.topology import LIBRARY, assess, drawn
+from mystery.topology import LIBRARY, UNPLAYED, assess, drawn, unplayed
 from mystery.topology import get as get_topology
 
 log = structlog.get_logger()
@@ -150,6 +150,11 @@ class Case:
         # How long before the police arrive, dealt from the case's own seed
         # (D-129), so it is a property of the evening rather than a setting.
         self.budget = budget or questions_for(seed)
+        # The three accents for this evening, keyed to the region the seed drew
+        # (D-164). Every case used to render in the same near-black and gold
+        # whether it was a Baltic port or inland Andalusia, so the screen was
+        # the one part of the pipeline that learned nothing about the case.
+        self.hues = hues(seed)
         self.portraits = portraits or {}
         self.scenery = scenery or {}
         self.knowledge = derive(mystery)
@@ -805,10 +810,36 @@ def build_app(
 
         if found is None:
             found = store.create(the_case.id)
+            # Matched to `session.KEEP` rather than guessed (D-159). The record
+            # lives 48 hours and the cookie used to live 12, so an evening picked
+            # up the next day found a session that still existed and a browser
+            # that could no longer name it.
             response.set_cookie(
-                COOKIE, found.id, httponly=True, samesite="lax", max_age=60 * 60 * 12
+                COOKIE,
+                found.id,
+                httponly=True,
+                samesite="lax",
+                max_age=int(KEEP.total_seconds()),
             )
         return Game(the_case, answer, session=found, budget=budget)
+
+    def _carrying_the_cookie(streamed: Response, response: Response) -> Response:
+        """Move any cookie `player` just set onto a response we built ourselves.
+
+        FastAPI merges the injected `Response`'s headers only when the handler
+        returns something it has to wrap up. A route that builds its own
+        `Response` gets those headers silently dropped, so on `/ask/live` the
+        cookie was set and thrown away on every single question (D-159).
+
+        What that looked like: a session per question, each one with no history,
+        no notebook and nobody remembering the previous answer. Seven sessions in
+        fourteen minutes in a real playtest, six of them holding exactly one
+        question.
+        """
+        for key, value in response.raw_headers:
+            if key.lower() == b"set-cookie":
+                streamed.raw_headers.append((key, value))
+        return streamed
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -883,6 +914,7 @@ def build_app(
             # five are wrong about something, which the player is not told.
             "commission": game.mystery.commission,
             "occasion": game.setting,
+            "hues": game.case.hues,
             "notebook": game.notebook(),
         }
 
@@ -949,8 +981,11 @@ def build_app(
         game = player(request, response)
         if game.out_of_time:
             body = json.dumps({"over": True, "notebook": game.notebook()})
-            return StreamingResponse(
-                iter([f"data: {body}\n\n"]), media_type="text/event-stream"
+            return _carrying_the_cookie(
+                StreamingResponse(
+                    iter([f"data: {body}\n\n"]), media_type="text/event-stream"
+                ),
+                response,
             )
 
         def events():
@@ -965,10 +1000,13 @@ def build_app(
             done = {"done": True, "left": game.left, "notebook": game.notebook()}
             yield f"data: {json.dumps(done)}\n\n"
 
-        return StreamingResponse(
-            events(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        return _carrying_the_cookie(
+            StreamingResponse(
+                events(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            ),
+            response,
         )
 
     @app.post("/show")
@@ -1787,6 +1825,12 @@ function showBrief(){paintBrief();$('brief').classList.add('on')}
 
 async function boot(){
   S=await (await fetch('/state')).json();
+  /* The evening's own colour (D-164). Ground and text are fixed everywhere and
+     only the three accents move, so nothing here can make the page unreadable
+     whatever it is handed. The notebook keeps its own paper set and overrides
+     these on itself, which is why they go on the root rather than on body. */
+  if(S.hues)for(const k of ['warm','cool','bad'])
+    if(S.hues[k])document.documentElement.style.setProperty('--'+k,S.hues[k]);
   if(S.scene)showScene(S.scene,'');
   $('title').textContent=S.title;
   /* The player's own position, stated (D-100). It is load-bearing now: the
@@ -2539,18 +2583,35 @@ def _estimate(mystery, quality: str, faces: bool, rooms: bool) -> float:
     return total
 
 
-def _draw(args, announce: bool = True) -> None:
+def _draw(args, store=None, announce: bool = True) -> None:
     """Fill in whatever was left off the command line, and say what was drawn.
 
     Called only by the branch that actually builds a case. `--cases`, `--daily`
     and `--case` announced a seed, a shape and an occasion that reached nothing,
     which reads like provenance and is not (D-120).
+
+    `store` is only consulted for `--topology unplayed`, and is optional so that
+    every other path stays a pure function of the seed (D-155).
     """
     if args.seed is None:
         args.seed = fresh_seed()
         if announce:
             print(f"  Seed {args.seed}. Pass --seed {args.seed} for this case again.")
-    if args.topology is None:
+
+    if args.topology == UNPLAYED:
+        seen = played(store) & set(LIBRARY)
+        args.topology = unplayed(seen, args.seed)
+        if announce:
+            left = len(LIBRARY) - len(seen)
+            print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
+            print(
+                f"  Dealt from the {left} shape{'' if left == 1 else 's'} "
+                f"you have not played."
+                if left
+                else "  You have played all seven. Drawn from the seed instead."
+            )
+            print(f"  Pass --seed {args.seed} --topology {args.topology} for this case again.")
+    elif args.topology is None:
         args.topology = drawn(args.seed)
         if announce:
             print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
@@ -2580,10 +2641,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--topology",
         default=None,
-        choices=sorted(LIBRARY),
+        choices=[*sorted(LIBRARY), UNPLAYED],
         help="the shape of the solution. Different shapes are different puzzles, "
         "which is what makes a second case worth playing (D-067). Drawn from the "
-        "seed when omitted, exactly like the setting",
+        f"seed when omitted, exactly like the setting. {UNPLAYED!r} deals one that "
+        "is not on your shelf yet, which reaches all seven in seven cases instead "
+        "of about eighteen (D-155)",
     )
     parser.add_argument(
         "--model",
@@ -2720,7 +2783,7 @@ def main(argv: list[str] | None = None) -> int:
         saved = store.load(args.case)
         return _serve(saved.mystery, saved.id, saved.setting, saved.title, args)
 
-    _draw(args, announce=not args.dry_run)
+    _draw(args, store, announce=not args.dry_run)
     if args.dry_run:
         print("  Dry run: the shipped example case. No model, no spend, nothing kept.")
 

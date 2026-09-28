@@ -172,6 +172,26 @@ MOTIVES = [
     "a debt the victim had bought up specifically in order to hold it",
     "the victim was about to hand somebody else the thing the killer had earned",
     "the killer's part in an old death the victim had begun asking about again",
+    # --- everything above is one sentence: the victim was about to take
+    # something away or say something out loud, and the killer moved first
+    # (D-161). Twenty six real motives, twenty four of them that. The registers
+    # below are the ones the engine never once produced, and most of them are
+    # about what has already happened rather than what is about to.
+    "the killer loved the victim and had just been told it was never returned",
+    "the victim was taking somebody the killer loves away, and had every right to",
+    "the killer loves somebody else here, and the victim was in the way",
+    "an affair between two other people, and whose child it makes the killer's",
+    "the victim had been quietly cruel to somebody the killer feels responsible for",
+    "the killer believed the victim was about to hurt somebody else, with reasons",
+    "a grief the victim caused years ago and mentioned lightly tonight",
+    "the victim asked the killer to help them die, was refused, and found somebody else",
+    "the killer did help somebody die, and the victim had worked out which death",
+    "a conviction the killer holds absolutely, which the victim made unactionable",
+    "years of protecting the victim from something that turned out never to have existed",
+    "an old humiliation the victim has forgotten and the killer thinks about weekly",
+    "the victim is still being thanked for a kindness the killer did",
+    "the victim simply has the life the killer was meant to have, and said so lightly",
+    "the killer had decided against it weeks ago, and the victim undid the decision",
 ]
 
 INTRIGUES = [
@@ -307,6 +327,27 @@ OCCASIONS = [
     "an inheritance being counted, physically, room by room, over one night",
     "the final rehearsal before an opening that several people need to fail",
     "a hospital, hotel or school being handed to new owners at first light",
+    # --- Everything above is a transaction (D-162). Fourteen of the eighteen
+    # are a night when something changes hands: a vote, a sale, a will, an
+    # audit, a handover, a season's money being divided. So every case came out
+    # as the same evening with different weather, and the cast came out as an
+    # employer, a bookkeeper, a technician and an outsider, because that is who
+    # attends a transaction. The occasions below have nothing at stake but the
+    # people.
+    "a walking or climbing week, the last night, weather closing in",
+    "a birthday nobody wanted to hold and everybody came to",
+    "the night before somebody emigrates, with the house half in boxes",
+    "a choir, band or team's twentieth anniversary, in the room they started in",
+    "a vigil at a bedside that has gone on four days longer than expected",
+    "a language school or summer course, the evening after the last class",
+    "a religious festival in a house where only half of them still believe",
+    "friends who rented a place together and have discovered they no longer like it",
+    "a memorial swim, walk or climb for somebody who died doing it",
+    "a dig, survey or field season packing up a week early",
+    "a divorce being told to the family, over dinner, as agreed",
+    "a christmas or new year nobody could get out of",
+    "a group of strangers put together by weather, a delay or a road",
+    "the night a long illness is finally named out loud",
 ]
 
 
@@ -439,8 +480,73 @@ def murder_slot(seed: int, slot_count: int = 5) -> int:
     sealed by V10, and the case becomes a different game rather than a harder
     one. Everything after that is fair, and **when** it happened stops being
     something the player can assume.
+
+    **Not earlier than the third slot** (D-158). Dealing from the second was the
+    original rule and it made a quarter of all cases impossible to write: the
+    victim can only appear at or before the murder, so a murder at slot 2 of 5
+    gives him two hours to exist in, while the request asks for a private scene
+    with the killer, usually an earlier one with the same pair, and a victim who
+    "should have been working on all of them tonight". Measured over the corpus
+    the model writes 3.56 victim scenes and does not reduce that when the murder
+    is early, so at slot 2 the draft is born unsatisfiable. Slot 3 of 5 still
+    breaks the "who lies about the second to last hour" shortcut, which is what
+    this function exists for, and leaves the victim a life.
+
+    The floor is `min(3, slot_count)` so a short evening still returns a legal
+    slot rather than an empty range.
     """
-    return random.Random(f"murder|{seed}").randrange(2, slot_count + 1)
+    return random.Random(f"murder|{seed}").randrange(
+        min(3, slot_count), slot_count + 1
+    )
+
+
+# One palette per region, and the region is drawn from the seed like everything
+# else (D-164). Every case looked identical: the same near-black with the same
+# gold, whether the evening was a Baltic port or inland Andalusia in the last
+# heat of the year. The screen never learned anything about the case.
+#
+# Derived from the region rather than sampled from the generated backdrop, for
+# two reasons. It works with `--art` off, which is most of the time and all of
+# the tests; and sampling makes the colour of the evening depend on whether the
+# image came out well, which is the one thing about a case nobody can predict.
+#
+# Ground and text stay fixed everywhere. Only the three accents move, because
+# legibility is not a thing to deal from a seed: `warm` is the one that carries
+# the case's temperature, `cool` is what the interface uses for its own voice,
+# and `bad` is reserved for contradiction and stays roughly red in every set.
+PALETTES: dict[str, tuple[str, str, str]] = {
+    "Dutch or Flemish": ("#c8b27a", "#7fa9ee", "#d9726b"),
+    "Italian north": ("#c9a05c", "#8fa6c4", "#c4655c"),
+    "coastal Portugal": ("#d8a15c", "#6fa8b8", "#d0685f"),
+    "Scottish borders": ("#b9a878", "#89a2b4", "#c06a62"),
+    "inland Andalusia": ("#e0a44e", "#a89466", "#cc5f4e"),
+    "Bohemian or Moravian": ("#b39a6a", "#7e93ad", "#b8635c"),
+    "Aegean": ("#e3b45e", "#6f9fc4", "#d4685c"),
+    "Quebec or the Maritimes": ("#c4a06a", "#7d9dc0", "#c66a63"),
+    "Japanese countryside": ("#c2a878", "#7d9b8e", "#b5615a"),
+    "Argentine litoral": ("#d9a24e", "#8aa88f", "#c9655b"),
+    "Baltic port": ("#b8ad86", "#84a5ae", "#bc6760"),
+    "Maghreb coast": ("#dfae5d", "#6f9eb0", "#cf6353"),
+    "Kerala or the Konkan": ("#d9a556", "#75a58c", "#c66253"),
+    "Anatolian plateau": ("#c9a05a", "#93a17f", "#c2655a"),
+    "alpine valley": ("#bfa97a", "#88a0b8", "#bf6a61"),
+    "American upper midwest": ("#bda878", "#8098b4", "#c2685f"),
+}
+
+
+def hues(seed: int) -> dict[str, str]:
+    """The three accents for this case, keyed to the region it is set in.
+
+    Falls back to the shipped gold and blue rather than raising, because a
+    palette is decoration and a case that cannot be coloured must still be
+    playable.
+    """
+    region = random.Random(f"where|{seed}").choice(WHERE)
+    for name, colours in PALETTES.items():
+        if region.startswith(name) or name.lower() in region.lower():
+            warm, cool, bad = colours
+            return {"warm": warm, "cool": cool, "bad": bad}
+    return {"warm": "#d9a24e", "cool": "#7fa9ee", "bad": "#e0736b"}
 
 
 def occasion(seed: int) -> str:

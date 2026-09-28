@@ -26,22 +26,33 @@ adding a draw does not shift the others (`palette.py`).
 | standing, old business | 12 each | one each |
 | where | 16 kinds of building | one |
 | **question budget** | `[70, 80, 90, 100, 110, 120, 130, 140, 150, 45, 55]` | one |
-| **murder slot** | `randrange(2, slot_count + 1)` | never the first slot |
+| **murder slot** | `randrange(min(3, slot_count), slot_count + 1)` | never before the third: the murder slot is the size of the victim's life (D-158) |
 | **commission** | 8 briefs | one, and `sound` with probability **0.6** |
-| **topology** | 7 shapes | `sorted(LIBRARY)[seed % 7]`, unless `--topology` names one |
+| **topology** | 7 shapes | `sorted(LIBRARY)[seed % 7]`, unless `--topology` names one or says `unplayed` |
 
 Two of those are load-bearing and worth knowing by heart. The **murder slot** is
 dealt rather than left to the model, because left alone the model put the murder
 in slot four ten times out of twelve and the killer necessarily lies about the
 hour they killed in, so "who is lying about the second to last hour" solved the
-game (D-125). The **commission** is wrong 40% of the time, so what the house
-tells you at the door is not reliably what happened (D-129).
+game (D-125). It is floored at the third slot because **the murder slot is also
+the size of the victim's life**: he can only appear at or before it, and a murder
+at slot 2 of 5 gave him two hours while the request asked for a private scene
+with the killer, usually an earlier one with the same pair, and a victim who was
+working on all of them tonight. Fifteen of twenty-seven corpus drafts have no
+slack there at all and two were impossible on arrival (D-158). The **commission**
+is wrong 40% of the time, so what the house tells you at the door is not reliably
+what happened (D-129).
 
 The **topology** is the third worth knowing, and until D-154 it was dealt and
 then thrown away: the parser handed `--topology` a default, so the `is None`
 branch that calls `drawn` was dead and every case ever generated was `the_lie`.
 Any base rate measured over drafts from before that fix is a base rate for one
 shape, not for the engine.
+
+`--topology unplayed` deals a shape that is not on your shelf yet, which reaches
+all seven in seven cases instead of the 18.2 that independent uniform draws need
+(D-155). No deck is stored: the shelf already records the shape of every case it
+holds.
 
 ## 2. The prompt is built, and hashed
 
@@ -57,7 +68,10 @@ every seed keeps returning its old answer.
 
 ## 3. The cache is checked
 
-A hit returns immediately and costs nothing. On the way out the commission is
+A hit is solved before it is trusted, and a cached draft that cannot be arranged
+is passed over and redrafted rather than handed back, because that seed would
+otherwise fail identically forever (D-157). An arrangeable hit returns
+immediately and costs nothing. On the way out the commission is
 run through `unname_the_commission` again, so drafts cached before that repair
 existed are still repaired (D-149).
 
@@ -77,9 +91,12 @@ output is rejected by the API before it reaches us.
 
 ## 5. Parsed and repaired
 
-Three repairs, all free, all deterministic. `_unwrap` undoes a degenerate wrapper
+Four repairs, all free, all deterministic. `_unwrap` undoes a degenerate wrapper
 if the model nested the whole case under one key. Pydantic parses. Then
-`unname_the_commission` takes any suspect's name out of the briefing.
+`unname_the_commission` takes any suspect's name out of the briefing, and
+`unbind_the_imaginary` drops a place or slot that does not exist, which turns an
+invented conservatory into an ordinary unbound scene for the solver to place
+(D-156). An invented *person* is not repaired and never will be.
 
 The principle these follow, and the one worth taking away:
 **repair what has exactly one right answer; complain only about what does not.**
@@ -94,9 +111,10 @@ Only three things can stop a case. Everything else is reported.
 
 ## Gate 1: the proposed rules
 
-Seven checks run on the model's own draft, before any arithmetic touches it. A
-failure sends every complaint back to the model and it redrafts. **This is the
-expensive gate: each failure costs about 38 cents.**
+Nine checks run on the model's own draft, before any arithmetic touches it. Since
+D-157 none of them rejects anything on its own: they produce the complaint the
+model reads if the solve then fails, which is why it is worth having a rule here
+whose whole value is the wording (V14).
 
 | | what it requires | protects against |
 |---|---|---|
@@ -107,14 +125,28 @@ expensive gate: each failure costs about 38 cents.**
 | V11 | every lie names the secret it covers | a dead end the player cannot tell from a live one |
 | V12 | no year in a `role` | a fact five people believe and the case does not contain (D-138) |
 | V13 | the commission names no suspect | the answer handed over before question one (D-139) |
+| V7 | nothing involving the victim after the murder | a dead man at dinner, named here rather than after the solve (D-158) |
+| V14 | the victim is in no more scenes than he has hours | a draft that cannot be arranged, complained about in words the model can act on (D-158) |
 
 Three solvability findings ride along in the same complaint list, because the
 program already treats them as fatal and used to throw the case away without ever
 telling the model (D-149): **S2** a secret that can never surface, **S3** a motive
 that can never be reached, **S4** a lie covering a secret that can never surface.
 
-On success the draft is cached. A draft that fails all three attempts raises and
-nothing is kept.
+**These rules do not decide anything on their own.** Every draft is solved with
+the seed the caller will use, and the real gate is whether the result satisfies
+the *final* rules, which are strictly stronger. So the question asked is never
+"does the draft satisfy this gate" but "is there an arrangement of it that
+satisfies the stronger one" (D-156, D-157). It cuts both ways: V6 is repaired by
+the solver in 32 of 33 measured cases and no longer costs a redraft, and a draft
+that passes everything here can still have no valid arrangement at all, which
+now buys a redraft instead of killing the run three minutes later. The
+solvability findings below are excluded, because rearranging a grid cannot reach
+a secret nothing unlocks.
+
+On success the draft is cached. A draft that fails all three attempts raises,
+and every rejected attempt is written to `var/rejected/` with its complaints, so
+what the gate refuses is measurable instead of lost (D-156).
 
 ## Gate 2: the final rules
 
@@ -177,6 +209,12 @@ One rule cuts across all of it: from the murder slot onward the murder room is
 by the solver for months, which is how two paid drafts died in one evening
 (D-147).
 
+Two scenes are freed before anything else is arranged: one bound into the room
+the body is lying in (D-152), and one bound to the **body**, meaning any scene
+after the murder that the victim is in (D-157). Dragging a victim scene past the
+murder in twenty-seven healthy drafts, the solver repaired 6 before the second
+rule existed and 27 after.
+
 ---
 
 ## Testing it without playing a case
@@ -194,7 +232,7 @@ you thought.
 
 What it cannot see is whether a case is any fun.
 
-## The advisories: 21 checks that never block
+## The advisories: 23 checks that never block
 
 These are the quality layer. They measure the case and print. Nothing here stops
 a run, which is deliberate: a rule that fails a case on a judgement call
@@ -215,6 +253,8 @@ fire on 96% of cases, which means they have stopped carrying information.
 | **A17** | secrets behind a gate | at least **40%**, and one chain **2** deep |
 | **A18** | suspects with both a reason and the chance | at least **3** |
 | **A19** | secrets about another suspect rather than the victim | at least **30%** |
+| **A24** | the deepest damning chain pointing at an innocent | **at least as deep as the killer's motive** (D-160) |
+| **A25** | the innocent's damning chain has a non-damning secret behind it | present at all |
 
 **The structural ones**, which are true or false rather than counted: A2 (someone
 was alone at the murder hour), A3 (everyone conceals something), A5 (the motive is

@@ -741,3 +741,128 @@ def test_a_web_passes() -> None:
     )
 
     assert the_cast_is_a_web_not_a_wheel(web) == []
+
+
+# --- rival chains (D-160) -----------------------------------------------------
+
+
+def _with_secrets(*secrets: Secret) -> Mystery:
+    """A case whose only interesting feature is the shape of its secret graph."""
+    return _structured(list(secrets))
+
+
+def _killer_chain() -> list[Secret]:
+    """The killer's motive behind two gates, which is what every draft writes."""
+    return [
+        Secret(
+            id="k_open", holder="b", about="v",
+            summary="A thing anybody gets.", evidence="A note.",
+        ),
+        Secret(
+            id="k_mid", holder="c", about="a", summary="Behind the first.",
+            revealed_by="k_open", evidence="A ledger.",
+        ),
+        Secret(
+            id="k_motive", holder="a", about="v", summary="Why he did it.",
+            revealed_by="k_mid", is_motive=True, damning=True,
+        ),
+    ]
+
+
+def _fires(mystery: Mystery, check: str) -> list[str]:
+    return [a.message for a in critique(mystery) if a.check == check]
+
+
+def test_a24_fires_when_the_killer_is_the_only_deep_thing() -> None:
+    """The rule of thumb this breaks: follow whatever keeps going. It worked in
+    33 of 36 real drafts, and it beat a real playtest on the second evening."""
+    flat_herring = Secret(
+        id="b_debt", holder="b", about="b",
+        summary="B owed the victim money.", damning=True,
+    )
+
+    assert _fires(_with_secrets(*_killer_chain(), flat_herring), "A24")
+
+
+def test_a24_is_quiet_when_an_innocent_chain_runs_as_deep() -> None:
+    """Breadth was never the problem: three people carry something damning in
+    most drafts. Depth was."""
+    rival = [
+        Secret(
+            id="r_open", holder="c", about="b",
+            summary="A first thread.", evidence="A receipt.",
+        ),
+        Secret(
+            id="r_mid", holder="b", about="b", summary="Behind it.",
+            revealed_by="r_open", evidence="A key.",
+        ),
+        Secret(
+            id="r_damning", holder="b", about="b",
+            summary="B was about to lose everything.", revealed_by="r_mid", damning=True,
+        ),
+    ]
+
+    assert not _fires(_with_secrets(*_killer_chain(), *rival), "A24")
+
+
+def test_a24_says_nothing_about_a_case_whose_motive_is_not_gated() -> None:
+    """A5 already complains about that, and two checks shouting about one fault
+    is how a report stops being read."""
+    ungated = Secret(
+        id="k_motive", holder="a", about="v",
+        summary="Why he did it.", is_motive=True, damning=True,
+    )
+
+    assert not _fires(_with_secrets(ungated), "A24")
+
+
+def test_a25_wants_the_herring_to_have_a_way_out() -> None:
+    """A deep chain with no floor is not a red herring, it is a second murderer
+    the case forgot to convict."""
+    accused = [
+        Secret(
+            id="r_open", holder="c", about="b",
+            summary="A first thread.", evidence="A receipt.",
+        ),
+        Secret(
+            id="r_damning", holder="b", about="b",
+            summary="B was about to lose everything.", revealed_by="r_open", damning=True,
+        ),
+    ]
+
+    assert _fires(_with_secrets(*_killer_chain(), *accused), "A25")
+
+    explained = [
+        *accused,
+        Secret(
+            id="r_floor", holder="b", about="b",
+            summary="He was covering for his sister, which is worse to admit.",
+            revealed_by="r_damning",
+        ),
+    ]
+    assert not _fires(_with_secrets(*_killer_chain(), *explained), "A25")
+
+
+def test_a24_does_not_count_a_rival_standing_on_the_killers_road() -> None:
+    """The first draft written against the new instructions did exactly this: put
+    the innocent's damning secret one link inside the chain to the motive, so
+    pulling on him walked the player to her (D-162)."""
+    chain = [
+        Secret(
+            id="k_open", holder="b", about="v",
+            summary="A thing anybody gets.", evidence="A note.",
+        ),
+        Secret(
+            id="k_mid", holder="c", about="c",
+            summary="C took the money twenty years ago.",
+            revealed_by="k_open", damning=True, evidence="A ledger.",
+        ),
+        Secret(
+            id="k_motive", holder="a", about="v", summary="Why she did it.",
+            revealed_by="k_mid", is_motive=True, damning=True,
+        ),
+    ]
+
+    assert _fires(_with_secrets(*chain), "A24"), (
+        "a herring on the road to the motive is a signpost, not a herring"
+    )

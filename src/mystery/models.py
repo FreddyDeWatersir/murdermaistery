@@ -383,6 +383,17 @@ class Mystery(BaseModel):
     # thing that can be wrong, and the first that can be wrong innocently.
     accounts: list[Account] = Field(default_factory=list)
 
+    # Which instructions produced this draft: the first eight characters of the
+    # hash of the system prompt (D-166). Not content, and the model never writes
+    # it; `generate` stamps it after parsing.
+    #
+    # Every base rate quoted in the decision log so far has been measured over a
+    # corpus that mixes prompt versions with no way to tell them apart, which is
+    # how "A22 fires on 97% of drafts" turned out to mean "28 of the 30 drafts
+    # predate the instruction". A batch of drafts bought to measure something is
+    # only worth the money if it can still be told apart from the next batch.
+    built_with: str = ""
+
     def accounts_of(self, constraint: str) -> list[Account]:
         return [a for a in self.accounts if a.constraint == constraint]
 

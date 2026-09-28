@@ -17,6 +17,8 @@ A constraint that cannot be satisfied either way is left unbound rather than
 raising, so the failure arrives through rule V3 with the constraint named.
 """
 
+import contextlib
+import logging
 import random
 
 import structlog
@@ -27,6 +29,31 @@ Grid = dict[str, dict[str, PlaceId]]
 Cell = tuple[PlaceId, SlotId]
 
 log = structlog.get_logger()
+
+
+@contextlib.contextmanager
+def quietly():
+    """Raise the log level for the duration, and put it back.
+
+    The solver narrates every relocation, which is what you want when one case
+    is being solved and noise when the same case is being solved twenty-four
+    times, or forty cases once each. Lives here rather than in `bench` because
+    the noise is made here and two callers now want it turned down.
+
+    Puts the level back in a `finally`, because a context manager that leaks its
+    silence turns off the logs for the rest of the process and gets found three
+    days later.
+    """
+    before = structlog.get_config()["wrapper_class"]
+    # ERROR rather than WARNING: `solver.unbreakable_lie` is a warning, is worth
+    # reading once, and printed twenty-four times is the same wall of text by a
+    # different name. The probe returns its findings, so nothing is lost.
+    structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.ERROR))
+    try:
+        yield
+    finally:
+        structlog.configure(wrapper_class=before)
+
 
 # How often a character with no constraint governing them stays where they were,
 # on the build-from-nothing path. Without it the grid is valid and reads as a
@@ -231,7 +258,46 @@ def _resolve_clashes(mystery: Mystery) -> tuple[list[Constraint], list[Constrain
     freed: list[Constraint] = [c for c in mystery.constraints if not c.is_bound]
     claimed: dict[tuple[str, str], str] = {}
 
+    # Where the body will be lying, and from when. A scene the model bound into
+    # that room after that hour has to be rescheduled like any other clash
+    # (D-152). The seal added in D-147 covers the three places the solver
+    # *chooses* a room; this is the one place it does not choose, it obeys, and
+    # a corpus sweep found two drafts in twenty-five where obeying was the bug.
+    scene = mystery.murder_scene
+    order = {slot.id: slot.index for slot in mystery.slots}
+    after = order.get(scene.slot, -1) if scene is not None and scene.is_bound else None
+
     for constraint in ranked:
+        if (
+            after is not None
+            and scene is not None
+            and constraint.id != scene.id
+            and constraint.place == scene.place
+            and order.get(constraint.slot, -1) > after
+        ):
+            log.info("solver.moved_off_the_body", scene=constraint.id, place=constraint.place)
+            freed.append(constraint)
+            continue
+
+        # The sibling of the rule above, and the one that was missing (D-157).
+        # That one frees a scene bound into the room the body is in; this frees a
+        # scene bound to the body itself. A model writing five slots will put the
+        # victim at a communal meal an hour after it killed him, and the solver
+        # obeyed: it pinned the corpse where it fell (V7) and then the scene it
+        # had kept still demanded he be at the table (V1). `_room_for` already
+        # refuses to reschedule a victim scene past the murder, so freeing it is
+        # enough to make the rest of the machinery do the right thing.
+        if (
+            after is not None
+            and scene is not None
+            and constraint.id != scene.id
+            and mystery.victim in constraint.people
+            and order.get(constraint.slot, -1) > after
+        ):
+            log.info("solver.moved_off_the_dead", scene=constraint.id, slot=constraint.slot)
+            freed.append(constraint)
+            continue
+
         clash = any(
             claimed.get((person, constraint.slot), constraint.place) != constraint.place
             for person in constraint.people
@@ -653,7 +719,13 @@ def solve_until_valid(
 
     worst: list = []
     for offset in range(max(1, tries)):
-        solved = solve(mystery, seed=seed + offset)
+        # The first attempt narrates, because on a healthy draft it is the one
+        # that happens and the relocations are worth reading. The other
+        # twenty-three are the same lines again about arrangements nobody will
+        # ever see: one failing draft printed ninety lines of them and buried
+        # the error underneath (D-157).
+        with contextlib.nullcontext() if offset == 0 else quietly():
+            solved = solve(mystery, seed=seed + offset)
         result = validate(solved)
         if result.ok:
             if offset:

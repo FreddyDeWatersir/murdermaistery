@@ -24,6 +24,7 @@ and solver needs a corpus, not a live model, and a corpus costs money once.
 """
 
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -113,6 +114,62 @@ def complaint_about_setting(setting: str) -> str | None:
             "A phrase, not a word: who is gathered, where, and why tonight."
         )
     return None
+
+
+def unname_the_commission(mystery: Mystery) -> Mystery:
+    """Take the suspects' names back out of the briefing (D-149).
+
+    D-139 said the opening screen must not name anybody, because a name there
+    decides a five-suspect case before the first question. It said so as a
+    validator rule, which was the wrong instrument: two drafts out of three came
+    back naming somebody, each rejection cost a fresh Opus call, and the model
+    kept doing it because the sentence it is asked to write ("they have already
+    settled on one name") pulls the name in behind it.
+
+    A rule that rejects is for a fault only the model can fix. This one has one
+    right answer and no judgement in it, so it is repaired here instead, for
+    nothing, the way the solver repairs a grid rather than sending it back
+    (D-029). The validator rule stays as the guarantee.
+
+    The victim is left alone: they are named on every other screen already.
+    """
+    original = (mystery.commission or "").strip()
+    if not original:
+        return mystery
+
+    text = original
+    # One stand-in per person, so a briefing that mentions somebody twice reads
+    # as being about one person rather than two.
+    spare = ["one of them", "another of them", "a third of them"]
+    taken: dict[str, str] = {}
+
+    for character in mystery.characters:
+        if character.id == mystery.victim:
+            continue
+        parts = character.name.split()
+        # Whole name first: replacing word by word turns "Devika Menon" into
+        # "one of them that person", which is worse than the name was.
+        forms = [character.name, *sorted(parts, key=len, reverse=True)]
+        for form in forms:
+            if len(form) <= 2:
+                continue
+            whose = re.compile(rf"\b{re.escape(form)}'s\b")
+            plain = re.compile(rf"\b{re.escape(form)}\b")
+            if not (whose.search(text) or plain.search(text)):
+                continue
+            if character.id not in taken:
+                taken[character.id] = spare[min(len(taken), len(spare) - 1)]
+            text = whose.sub("their", text)
+            text = plain.sub(taken[character.id], text)
+
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    # A name at the start of a sentence leaves a lower-case stand-in behind it.
+    text = re.sub(r"(^|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
+
+    if text == original:
+        return mystery
+    log.info("mystery.commission_unnamed", named=len(taken))
+    return mystery.model_copy(update={"commission": text})
 
 
 class GenerationRequest(BaseModel):
@@ -282,29 +339,68 @@ case, under MATERIAL FOR THIS CASE, as a situation rather than a plot: make it \
 specific to these people, and make it come out of what the killer is \
 concealing.
 
+**Do not turn every motive into an announcement.** Twenty six real cases were \
+read back and twenty four of them were the same plot: the victim tells the \
+killer, privately, minutes before dying, what they are about to do in the \
+morning, and the killer removes the deadline. Audits, reports, wills, notaries, \
+letters going out on Monday. Even where the dealt motive was about love or grief \
+or conviction it was rewritten into a deadline, because a deadline is the \
+easiest thing to put in a scene.
+
+So check what you have been dealt and keep its register. A motive that is about \
+**what has already happened** does not need the victim to threaten anything: \
+they can say something ordinary, or kind, or nothing at all, and the killer acts \
+on years rather than on minutes. A motive that is about **love, jealousy, grief, \
+shame, mercy or conviction** is not improved by attaching a document to it. If \
+the dealt motive has no deadline in it, do not invent one.
+
+**One thing stays true whatever the register.** The hour after can be hot, but \
+it cannot be stupid: every shape in this request needs the killer to have done \
+something deliberate afterwards, whether that is a false account, a discovery \
+story, or simply standing in the right room looking untroubled. Somebody can \
+kill in a moment of rage and spend the next hour thinking clearly, and that \
+combination is more frightening than either on its own. What does not work is a \
+killer who is still in pieces at the end of the evening, because there is then \
+nothing for the player to take apart.
+
 3. The secrets, and this is the step that decides whether the case is any good. \
 The threads listed under MATERIAL FOR THIS CASE are what the innocent suspects \
 are busy hiding: turn each one into a secret with a holder, and let them cross \
 each other rather than running in parallel.
 
 **The victim is the hub.** Do not give five suspects five unrelated subplots \
-with one murder bolted on. The victim held something over most of the room: a \
-contract, a debt, a piece of knowledge, a decision about someone's future. At \
-least half the suspects must be concealing something that involves the victim, \
-so that half the cast has a motive and the killer is not the only person with a \
-reason to be evasive.
+with one murder bolted on. At least half the suspects must be concealing \
+something that involves the victim, so that half the cast has a motive and the \
+killer is not the only person with a reason to be evasive.
+
+**Being the hub does not have to mean holding leverage** (D-162). A contract, a \
+debt, a decision about someone's future: that is one way, it is the obvious way, \
+and taken every time it produces the same evening and the same cast, because a \
+person with leverage is an employer and the people around them are staff. A \
+victim can just as easily be the hub by being **loved**, by being the only one \
+who knows what happened, by being the person everybody has been performing for \
+since they were twenty, or by being the one thing four of these people still \
+have in common. Read the occasion before deciding which. If nothing at this \
+gathering is changing hands, do not invent a ledger so that it can.
 
 **Gate the killer's motive.** The secret that explains why the killer did it \
 must be reachable only after some other character's secret has surfaced. Set \
 `revealed_by` on it to the id of that other secret. This is what stops the \
 obvious suspect from being the answer.
 
-**Three people lie about where they were, and only one of them is the killer.** \
-This is the most important instruction here. If the killer is the only liar, \
-then working out who lied is the same as working out who did it, the player \
-solves the case from the timeline alone, and every secret you have written is \
-decoration. Fill in `false_claims` with three entries: the killer, and two \
-innocent people who lied for their own reasons.
+**Who lies, how many of them, and what they lie about is decided by SHAPE OF \
+THE SOLUTION in the request, not here.** Read the shape first and follow it \
+exactly. It is the only part of this request that changes from case to case, \
+and it is the whole reason two cases are not the same case. Several shapes \
+require the killer to tell no lie at all. Where anything below assumes a \
+particular pattern of lying, the shape wins.
+
+Two things hold whatever shape you are given. **The killer must not be the only \
+person with something wrong in their account**, or working out who was wrong is \
+the same as working out who did it and every secret you have written is \
+decoration. And **an empty room is an unbreakable alibi**: any room somebody \
+falsely claims has to hold at least one other person who could contradict them, \
+or the lie never surfaces and that character is wasted.
 
 For every entry give the room and the slot they will claim, which must not be \
 where they actually were, plus `covers` (the id of the secret the lie protects) \
@@ -319,33 +415,11 @@ should not have been with, going through papers that were not theirs. Being \
 caught out is embarrassing rather than fatal, and that is exactly why they hold \
 the line for a while.
 
-Every liar must claim a room that had **at least one other person in it at that \
-moment**, and the killer's room needs **two**, ideally people who are themselves \
-concealing something. An empty room is an unbreakable alibi: nobody can say they \
-were not there, the lie never surfaces, and a red herring nobody can detect is a \
-wasted character. A witness with nothing to hide is believed instantly and ends \
-the game in one question.
-
 **Give every innocent lie a way out.** The player must be able to resolve it, \
 not merely detect it. Either somebody else knows the secret it covers, so it can \
 be heard from a third party, or `admits_when` names a real condition under which \
 they will come clean. A lie the player catches and can never get underneath \
 teaches them that pressing does not pay, which is the opposite of the point.
-
-**One innocent liar must also have been alone.** The killer is unwitnessed at \
-the murder because they were alone with the victim. If every innocent liar can \
-be vouched for by somebody, the player stops thinking and asks "which liar has \
-no witness", and the answer is always the killer. Put at least one innocent \
-somewhere unobserved when they lied, so that test leaves two candidates and the \
-motive has to break the tie.
-
-**And one innocent must lie about the same slot the killer lies about.** The \
-killer lies about the hour they killed in, necessarily. So if theirs is the only \
-lie covering that hour, the whole case reduces to one question: who is lying \
-about it. In five real cases out of twelve nobody else was, and a player worked \
-that out unprompted and said the game had a rule of thumb that beat it. Somebody \
-innocent has to be lying about that same hour for their own reasons, so that \
-catching a liar there names two people and the player still has to choose.
 
 **Mark the killer's motive.** The killer holds two secrets: the background that \
 made them vulnerable, and the reason they killed. Set `is_motive` to true on the \
@@ -443,6 +517,32 @@ finds the one person with something and stops. That happened, and it was \
 reported back as smooth and not engaging. Grievances are not enough. Three \
 people the player would genuinely put in the frame is the target, and only one \
 of them did it.
+
+**And at least one of those three must be as deep as the killer.** This is the \
+part that has failed every time so far, and breadth does not fix it. Measured \
+over thirty six real cases: three people carried something damning in most of \
+them, and in **thirty of thirty six not one innocent had anything gated behind \
+anything at all**. Every chain in the case led to the murderer. So the killer's \
+motive was the deepest thing in the building in thirty three of thirty six, and \
+a player who simply followed whatever kept going found the answer without ever \
+thinking about the crime. That is a rule of thumb that beats the game, and a \
+real one found it on the second evening.
+
+So: pick one innocent and give them **a chain, not a fact**. Something damning \
+that is itself behind a gate, so the player has to produce an object to reach \
+it, exactly as they do for the killer's motive. It must run **at least as deep \
+as the killer's motive**. If the motive sits behind two gates, so does this.
+
+**And it has to have a floor that is not guilt.** Put one more secret behind the \
+damning one, not damning itself, that explains it: what they were really doing, \
+who they were protecting, why the thing that looks like a reason to kill is a \
+reason to be ashamed instead. The player should be able to spend six questions \
+becoming certain about the wrong person and then, on the seventh, have the whole \
+structure turn over and still be interesting. A deep chain with no floor is not \
+a red herring, it is a second murderer the case forgot to convict.
+
+Write the innocent chain first, before the killer's. It is the one you will \
+otherwise leave until the end and make out of grievances.
 
 **A secret that gates another one must be a thing, not just a fact.** Whenever \
 you put `revealed_by` on a secret, the secret it points at has to carry \
@@ -548,15 +648,43 @@ say two people were alone together at 21:00, nobody else may be in that room at 
 - Bind every constraint: give each one the `place` and `slot` where it happens.
 - Do not have anyone in two rooms at once, and do not leave a constraint \
 floating without a place and slot.
+**How the two of them come to be alone is not always the killer's doing.** \
+Twenty eight real cases were read: in twenty three the killer asked, took, \
+brought or followed the victim somewhere, over half the time downstairs, and \
+in **not one** was the victim simply already there. That makes every murder in \
+this engine premeditated, which is why the evening always needs a deadline and \
+why every cast is staff around a proprietor.
+
+Solitude has other sources and they are better. The victim goes somewhere alone \
+every night of their life and everybody knows it. A room empties for two minutes \
+and nobody planned that. The killer walks in on them and is not expecting to. \
+The two of them were already together for an ordinary reason and it turned. \
+Where the dealt motive is about something already done rather than something \
+about to happen, an engineered meeting is the wrong scene: **somebody who has \
+been carrying a thing for eleven years does not need a pretext, they need an \
+opportunity.**
+
+- **The victim does not have to own the place.** Read twenty eight cases and the \
+victim was the proprietor in twenty two: owner of the estate, master of the boat, \
+president of the co-operative, the woman who signed everyone here off. The cast \
+then writes itself as the people who work for them, which is how every case ends \
+up with a manager, a foreman, a cellarman and one outsider. A victim can be the \
+youngest person here, or the one with no standing at all, or somebody's guest, \
+and the case is more interesting when the person everybody has to talk about is \
+not the person who was paying them.
 - **The body is not found during the timeline.** The slots cover the evening up \
 to and including the murder and its immediate aftermath. Discovery happens after \
 the last slot, because everything the player investigates is what people were \
 doing before anyone knew. Never write a constraint where someone finds the body.
 - Name the killer and the victim in the `killer` and `victim` fields, and set \
-`murder` to the id of the constraint where the killing happens. A good case \
-usually has an earlier private scene between those same two people, the one \
-where the victim says the thing that gets them killed, so which of the two is \
-the murder cannot be guessed from the outside. Say which.
+`murder` to the id of the constraint where the killing happens. Two scenes between those \
+two people are usually better than one, so that which of them is the murder \
+cannot be guessed from the outside. Say which. **The earlier one does not have \
+to be where the victim says the thing that gets them killed**, and making it so \
+every time is how every case ends up with the same plot: the killer may have \
+learned it a week ago, or from somebody else in this building, or never have \
+learned anything at all because the reason is old. Let the earlier scene be \
+whatever those two people would actually have been doing.
 - **The murder happens in the slot named under WHEN IT HAPPENS, and not \
 wherever the story wants to put it.** If that is not the last slot, the evening \
 carries on around a room nobody goes into again, and the people who were with \
@@ -584,39 +712,6 @@ better job than working out who is lying.
 is what would move them: for a liar, what breaks them; for somebody honestly
 mistaken, what would jog it — being shown a thing, being told who else was there.
 They are relieved when it happens, not caught.
-
-- **Fill in `things`: two or three objects with paths of their own.** This is
-the second thing in the game that can be somewhere, and the only evidence a
-player can reconstruct without anybody lying about themselves. Give each one an
-`id`, a `name` a person would actually say, and `where`: the place it sat in
-every slot. At least one of them **moves**, and `moved_by` names who carried it
-in the slot where it changes rooms.
-
-The point is the gap between where a thing began and where it ended. The stone
-head was on the newel post at nine and beside her at eleven, so somebody carried
-it, and everybody who was in either room saw part of that journey. Nobody has to
-lie for this to convict: the person who saw it in both places is the person who
-took it, and they will have to explain that without ever being caught out about
-their own whereabouts.
-
-Three rules. A thing cannot be in a room that has nobody in it for the whole
-evening, or nobody ever saw it and it is furniture. The object that moves should
-not be the one everybody watched move: put its journey in front of one or two
-people, not five.
-
-And **at least two things move, and the killer is not the person who moved all of
-them.** This one matters more than it sounds. If the only thing that travels
-tonight is the thing the killer carried, then "who moved it" is a shorter road
-to the answer than the timeline ever was, and the second axis you were given
-collapses back into a signpost. Objects move for ordinary reasons: somebody took
-the letters upstairs because they did not want them read, somebody carried the
-decanter because they were drinking, somebody put the key back where it belonged
-because they had just used it for something they will not admit to. Give at
-least one journey to somebody innocent, with a reason that has nothing to do
-with the death, so that the player has to work out **which** journey is the one
-that matters. That work is the whole point of the mechanic.
-
-`matters` is one sentence on what its path is worth knowing, for the reveal.
 
 - Fill in `common_ground` with four to six plain sentences: the things about \
 this occasion that everybody in the building would say the same way. What the \
@@ -823,17 +918,40 @@ def _when(request: GenerationRequest) -> str:
         f"The killing happens in **slot {n}**: {where}. Not negotiable, and not "
         f"wherever the story would rather put it. A murder that is always in the "
         f"last hour or two makes the whole case answerable by asking who lies "
-        f"about the last hour or two."
+        f"about the last hour or two.\n\n"
+        f"**This is also the victim's whole life.** They are alive for slots 1 "
+        f"to {n} and for no slot after that, so every constraint they appear in "
+        f"has to sit in that window, and the murder is one of them. That leaves "
+        f"**{n - 1} other {'hour' if n == 2 else 'hours'}** for everything else "
+        f"they do tonight. Most scenes with the victim are private, which means "
+        f"one per slot.\n\n"
+        f"Count it before you write the grid. A case where the victim is wanted "
+        f"in more scenes than they have hours is not a case that can be arranged, "
+        f"and it gets thrown away. If the number is tight, they are in fewer and "
+        f"busier scenes: one room, two people arriving in turn, three things "
+        f"settled in the same half hour. What they were doing to the rest of them "
+        f"belongs in the secrets, where it costs no time at all. Do not move a "
+        f"scene later to make room, because later is after they are dead."
     )
 
 
 def _user_prompt(request: GenerationRequest) -> str:
+    # The shape goes first, and says so (D-151). It used to sit on the fifth line
+    # of the request, after the cast size, while the system prompt spent three
+    # thousand characters insisting on a pattern of lying that several shapes
+    # forbid. A case drew "the killer never lies" and wrote "the killer lies
+    # about a room", which is what the loudest instruction asked for.
     return (
+        f"SHAPE OF THE SOLUTION\n"
+        f"This governs the case. Where anything in the standing instructions "
+        f"assumes a different pattern of lying, of alibis or of who is "
+        f"protecting what, this wins. Write the case this shape describes, not "
+        f"the one the examples describe.\n\n"
+        f"{get_topology(request.topology).brief}\n\n"
         f"Setting: {request.setting}\n"
         f"Cast: {request.cast_size} suspects plus one victim.\n"
         f"Places: {request.place_count} distinct rooms or areas.\n"
         f"Time: {request.slot_count} consecutive slots.\n"
-        f"SHAPE OF THE SOLUTION\n{get_topology(request.topology).brief}\n\n"
         f"{_when(request)}\n\n"
         f"{_commission(request)}\n\n"
         f"{_casting(request.seed)}\n\n"
@@ -954,6 +1072,18 @@ def anthropic_drafter(
     return draft
 
 
+def prompt_version() -> str:
+    """Which instructions are in force, as eight characters (D-166).
+
+    Stamped on every draft so a corpus can be split by the prompt that made it.
+    Without it every base rate is measured over drafts from several different
+    sets of instructions at once, which is how a check that "fires on 97% of
+    cases" turned out to be firing on drafts written before the instruction it
+    was checking existed.
+    """
+    return hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:8]
+
+
 def _unwrap(raw: dict[str, Any]) -> dict[str, Any]:
     """Undo a degenerate wrapper if the model produced one.
 
@@ -968,6 +1098,129 @@ def _unwrap(raw: dict[str, Any]) -> dict[str, Any]:
             log.warning("mystery.unwrapped", key=next(iter(raw)))
             return inner
     return raw
+
+
+def unbind_the_imaginary(mystery: Mystery) -> Mystery:
+    """A scene set in a room that does not exist is an unbound scene (D-156).
+
+    The model writes eight constraints without a map in front of it and
+    occasionally sets one in a conservatory it invented two fields earlier. V4
+    caught that and threw the draft away, which cost forty cents and a redraft.
+
+    But it has exactly one right answer, which is the test D-149 asks. A
+    constraint whose place does not exist is a constraint that does not know its
+    place, and finding a place for a scene that does not know one is the
+    solver's entire job. So drop the invented room, keep everything else, and
+    the constraint goes into the pile the solver was already going to work
+    through. Same for an invented slot.
+
+    A constraint naming a **person** who is not in the cast is not repaired and
+    never will be, because nobody can know who the model meant. That half of V4
+    stays fatal.
+    """
+    places = {place.id for place in mystery.places}
+    slots = {slot.id for slot in mystery.slots}
+
+    freed: list[str] = []
+    repaired = []
+    for constraint in mystery.constraints:
+        update: dict[str, None] = {}
+        if constraint.place is not None and constraint.place not in places:
+            update["place"] = None
+        if constraint.slot is not None and constraint.slot not in slots:
+            update["slot"] = None
+        if update:
+            freed.append(constraint.id)
+            constraint = constraint.model_copy(update=update)
+        repaired.append(constraint)
+
+    if not freed:
+        return mystery
+
+    log.info("mystery.unbound_the_imaginary", scenes=freed)
+    return mystery.model_copy(update={"constraints": repaired})
+
+
+def _what_no_arrangement_fixes(mystery: Mystery, seed: int) -> list[str]:
+    """What is still wrong after the free half of the pipeline has tried everything.
+
+    Empty means there is an arrangement of this draft that satisfies the final
+    rules, which is the only question worth asking about a draft.
+
+    The proposed gate exists to stop a draft that cannot be saved. It was also
+    stopping drafts the solver repairs on its own: V6, two scenes claiming the
+    same person at the same hour, is precisely what `_resolve_clashes` unbinds
+    and reschedules, and its own docstring claimed no repair existed. Measured
+    over the corpus by manufacturing that exact clash in thirty-three drafts,
+    the solver fixed thirty-two of them (D-156).
+
+    So the question is not "does the draft satisfy the proposed rules" but "is
+    there an arrangement of this draft that satisfies the final ones", and the
+    final rules are strictly stronger. Solving is arithmetic and free; a
+    redraft is forty cents. Ask the free question first.
+
+    It runs on **every** draft, not only on ones the proposed gate complained
+    about, and that is the half D-156 got wrong. A draft can pass the proposed
+    rules and still have no valid arrangement at all: V7, nothing involving the
+    victim after the murder, is only checked at the final gate, so a model that
+    sat the dead man down to a communal meal an hour after killing him produced a
+    draft that was cached, returned, and then failed all twenty-four
+    arrangements in `web.py` with two paid attempts still unspent. Asking here
+    turns that into a redraft (D-157).
+
+    Same seed the caller will use, so what is proved here is what will happen
+    there rather than something adjacent to it.
+    """
+    from mystery.solver import quietly, solve_until_valid
+
+    # Quiet, because this is a question rather than the real solve. `web.py`
+    # runs the same arrangement again afterwards and narrates it there, so
+    # letting this one speak prints the whole evening twice (D-157).
+    with quietly():
+        _, _, violations = solve_until_valid(mystery, seed=seed)
+    return [v.message for v in violations]
+
+
+def _keep_the_wreckage(
+    cache_dir: Path | None,
+    request: GenerationRequest,
+    attempt: int,
+    raw: Any,
+    complaints: list[str],
+) -> None:
+    """Write a rejected draft down instead of dropping it (D-156).
+
+    Every measurement of this engine is taken over `var/mysteries`, which holds
+    only the drafts that passed. That corpus structurally cannot answer what the
+    gate rejects or how often, which is the number that decides whether a gate
+    is paying for itself. One evening cost $1.20 for three rejected drafts and
+    the only surviving record of them was a terminal window.
+
+    Never fatal: a failed write here must not turn a bad draft into a crash.
+    """
+    if cache_dir is None:
+        return
+    try:
+        folder = cache_dir.parent / "rejected"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{request.cache_key()}-{attempt}.json").write_text(
+            json.dumps(
+                {
+                    "key": request.cache_key(),
+                    "attempt": attempt,
+                    "seed": request.seed,
+                    "setting": request.setting,
+                    "topology": request.topology,
+                    "complaints": complaints,
+                    "draft": raw,
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+    except OSError as error:  # noqa: BLE001 - keeping the wreckage is best effort
+        log.warning("mystery.wreckage_unkept", error=str(error))
 
 
 def generate(
@@ -992,7 +1245,28 @@ def generate(
         cached = cache_dir / f"{request.cache_key()}.json"
         if cached.exists():
             log.info("mystery.cache_hit", key=request.cache_key())
-            return Mystery.model_validate_json(cached.read_text(encoding="utf-8"))
+            # Repaired on the way out as well as on the way in (D-149). Drafts
+            # cached before the repair existed still have names in the briefing,
+            # and a cached case is exactly the one nobody is going to pay to
+            # draft again.
+            kept = unbind_the_imaginary(
+                unname_the_commission(
+                    Mystery.model_validate_json(cached.read_text(encoding="utf-8"))
+                )
+            )
+            # A cached draft that cannot be arranged is worse than a cache miss:
+            # it is a seed that fails identically forever and never redrafts.
+            # Drafts cached before D-157 include some of those. Say so and pay
+            # for a new one rather than handing back a case nobody can play.
+            broken = _what_no_arrangement_fixes(kept, request.seed)
+            if not broken:
+                return kept
+            log.warning(
+                "mystery.cached_draft_unplayable",
+                key=request.cache_key(),
+                problems=broken,
+                detail="redrafting rather than returning a case that cannot be solved",
+            )
 
     complaints: list[str] = []
 
@@ -1000,17 +1274,46 @@ def generate(
         raw = _unwrap(drafter(request, complaints))
 
         try:
-            mystery = Mystery.model_validate(raw)
+            # Repaired before it is judged (D-149): a name in the briefing has
+            # one right answer and no judgement in it, so it costs nothing here
+            # and a fresh Opus call if it goes back to the model.
+            mystery = unbind_the_imaginary(unname_the_commission(Mystery.model_validate(raw)))
+            mystery = mystery.model_copy(update={"built_with": prompt_version()})
         except ValidationError as error:
             complaints = [
                 f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
                 for e in error.errors()[:8]
             ]
             log.warning("mystery.unparseable", attempt=attempt, problems=complaints)
+            _keep_the_wreckage(cache_dir, request, attempt, raw, complaints)
             continue
 
         result = validate(mystery, phase="proposed")
-        if result.ok:
+        # Kept apart because only one of the two is worth a free second opinion.
+        # The solver rearranges a grid; it cannot reach a secret nothing unlocks,
+        # so an unwinnable case goes straight back to the model.
+        unwinnable = _unreachable(mystery)
+
+        if unwinnable:
+            complaints = [v.message for v in result.violations] + unwinnable
+        else:
+            # The question that actually matters, asked of every draft: is there
+            # an arrangement of this one that satisfies the final rules? A draft
+            # is accepted on that and nothing else (D-157).
+            broken = _what_no_arrangement_fixes(mystery, request.seed)
+            if not broken and result.violations:
+                log.info(
+                    "mystery.repaired_by_solving",
+                    attempt=attempt,
+                    rules=sorted({v.rule for v in result.violations}),
+                    saved_usd=0.38,
+                )
+            elif broken and not result.violations:
+                log.warning("mystery.no_arrangement_works", attempt=attempt, problems=broken)
+            seen = [v.message for v in result.violations]
+            complaints = seen + [b for b in broken if b not in seen] if broken else []
+
+        if not complaints:
             if cache_dir is not None:
                 cache_dir.mkdir(parents=True, exist_ok=True)
                 (cache_dir / f"{request.cache_key()}.json").write_text(
@@ -1018,10 +1321,38 @@ def generate(
                 )
             return mystery
 
-        complaints = [v.message for v in result.violations]
         log.warning("mystery.rejected", attempt=attempt, problems=complaints)
+        _keep_the_wreckage(cache_dir, request, attempt, raw, complaints)
 
     raise GenerationFailed(complaints)
+
+
+def _unreachable(mystery: Mystery) -> list[str]:
+    """Reasons this case could never be won, said in time to be fixed (D-149).
+
+    The solvability analysis has always been advisory, on the argument that it
+    is a necessary condition rather than a sufficient one and a rule built on
+    that would eventually throw away a good case. Which is right about most of
+    it, and was wrong about this part, because the program already treats these
+    as fatal: it prints "This case cannot be solved" and refuses to serve.
+
+    So the case was being thrown away regardless, after every draft had been
+    paid for, for a reason the model was never told. A real run ended that way:
+    three drafts, a dollar ten, and the third one died because the killer's
+    motive was known to nobody but the killer.
+
+    Only the parts that are pure structure and that the solver cannot change:
+    which secrets can be reached through the `revealed_by` chain. Whether the
+    killer's alibi can be broken depends on the grid, and the grid is the
+    solver's to repair, so that stays out of here.
+    """
+    from mystery.solvable import why_not
+
+    return [
+        advisory.message
+        for advisory in why_not(mystery)
+        if advisory.check in ("S2", "S3", "S4")
+    ]
 
 
 class GenerationFailed(RuntimeError):

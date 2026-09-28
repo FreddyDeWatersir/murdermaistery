@@ -21,7 +21,7 @@ universal, quality is contextual (D-031).
 Adding a shape means adding an entry here. That is the point of the file.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from mystery.critique import Advisory, critique
@@ -49,10 +49,28 @@ The killer's protection is a **false account of where they were**. They name a \
 room they were not in, at the moment of the murder, and the case is taken apart \
 by establishing that they were somewhere else.
 
-This is the plainest shape and it lives or dies on the witnesses. The room they \
-name must hold at least two other people, all of them concealing something of \
+**Three people appear in `false_claims`: the killer, and two innocents who lied \
+for their own reasons.** If the killer is the only one whose account is wrong, \
+then finding the liar is finding the murderer and every secret you have written \
+is decoration.
+
+This is the plainest shape and it lives or dies on the witnesses. The room the \
+killer names must hold **two** other people, all of them concealing something of \
 their own, because a witness with nothing to hide is believed at once and ends \
-the game in a single question.\
+the game in a single question.
+
+Two further requirements, both there to stop a rule of thumb solving the case:
+
+**One of the innocent liars must also have been alone.** The killer is \
+unwitnessed at the murder because they were alone with the victim. If every \
+innocent liar can be vouched for, the player stops thinking and asks which liar \
+has no witness, and the answer is always the killer.
+
+**One innocent must lie about the same slot the killer lies about.** The killer \
+lies about the hour they killed in, necessarily, so if theirs is the only lie \
+covering that hour the case reduces to one question. In five real cases out of \
+twelve nobody else was lying about it and a player found that out unprompted, \
+and said the game had a rule of thumb that beat it.\
 """
 
 
@@ -97,8 +115,10 @@ because the timeline does not support it: they were somewhere else, seen by \
 somebody, at the moment it happened. A confession that cannot be disproved is not \
 a twist, it is a coin flip.
 
-The killer still lies about where they were, exactly as in the plain shape, and \
-still has a motive gated behind another secret. The confession sits on top: it is \
+The killer still lies about where they were, and two innocents do as well, so \
+that `false_claims` has three entries and finding a liar is not the same as \
+finding the murderer. The killer still has a motive gated behind another \
+secret. The confession sits on top: it is \
 the wrong ending, offered to the player, gift-wrapped, at the moment they are \
 most tired of asking questions.
 
@@ -148,8 +168,10 @@ thing they say they did not touch has their handling all over it. One seam, not 
 three: a discovery story with three holes was never believed by anybody.
 
 Everything else about the evening is honest, including the killer's account of \
-where they were the rest of the time. The lie is a single event, told once, at \
-the moment it was most useful.
+where they were the rest of the time. Give the killer no entry in \
+`false_claims`: their whole protection is the discovery story, and a second lie \
+underneath it makes them ordinary. The lie is a single event, told once, at the \
+moment it was most useful.
 
 The pleasure of this shape is that the one piece of testimony the game hands the \
 player as common knowledge, before they have asked anybody anything, is the lie.\
@@ -743,6 +765,10 @@ LIBRARY: dict[str, Topology] = {
 
 DEFAULT = "the_lie"
 
+# What `--topology` accepts instead of a shape's name, to mean "one I have not
+# played". Not a member of LIBRARY, and deliberately not spellable as one.
+UNPLAYED = "unplayed"
+
 
 def drawn(seed: int) -> str:
     """Which shape this seed gets (D-103).
@@ -753,6 +779,33 @@ def drawn(seed: int) -> str:
     silently change the next time a shape is added to the middle of the list.
     """
     return sorted(LIBRARY)[seed % len(LIBRARY)]
+
+
+def unplayed(played: Iterable[str], seed: int) -> str:
+    """A shape that is not on the shelf yet: coverage rather than randomness (D-155).
+
+    Independent uniform draws are the wrong instrument for somebody who has
+    seven shapes and has seen one. The expected number of drafts needed to see
+    all seven by drawing uniformly is 7 x (1 + 1/2 + ... + 1/7) = 18.2, at about
+    forty cents each. Dealing without replacement gets there in seven, and the
+    chance of two runs in a row landing on the same shape stops being 1 in 7.
+
+    **No deck is stored anywhere, because the shelf already is one.** What has
+    been played is what has been saved, and `SavedCase` has carried `topology`
+    since the shelf existed. So there is no state to initialise, nothing to keep
+    in sync with reality, and nothing that goes stale if a case is deleted by
+    hand. Once every shape has been played this collapses to `drawn`, which is
+    the behaviour you want at that point anyway.
+
+    Still a function of the seed, so the run is still reproducible. It is
+    reproducible as `--seed N --topology X` rather than `--seed N` alone, since
+    what comes back depends on the shelf, and that is the honest cost of the
+    whole idea (D-103 bought the shorter version and this spends some of it).
+    """
+    left = sorted(set(LIBRARY) - set(played))
+    if not left:
+        return drawn(seed)
+    return left[seed % len(left)]
 
 
 def get(topology_id: str) -> Topology:

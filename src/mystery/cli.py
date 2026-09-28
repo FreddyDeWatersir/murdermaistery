@@ -30,7 +30,7 @@ from mystery.library import load as load_local
 from mystery.library import shelf as pick_shelf
 from mystery.models import Mystery
 from mystery.palette import draw as draw_palette
-from mystery.palette import occasion
+from mystery.palette import murder_slot, occasion
 from mystery.solvable import report
 from mystery.solver import solve
 from mystery.topology import LIBRARY, assess, drawn
@@ -90,7 +90,8 @@ def _fill(args, want: int) -> int:
     # Said before it is spent (D-084). A draft is about nineteen cents at Opus
     # prices, and a retry costs the same again, so the honest number is a range.
     least = draft_estimate(drafts=needed)
-    print(f"  Setting: {args.setting}")
+    pinned = getattr(args, "pinned_setting", True)
+    print(f"  Setting: {args.setting if pinned else 'one per case, drawn from each seed'}")
     print(f"  {len(waiting(store))} waiting, want {want}. Generating {needed}.")
     print(f"  About ${least:.2f}, up to ${least * ATTEMPTS:.2f} if every one needs retries.")
     made = 0
@@ -101,8 +102,14 @@ def _fill(args, want: int) -> int:
             # A shape per case unless one was asked for. A buffer of four cases
             # that are all the same shape is a buffer of one case (D-103).
             shape = args.topology if getattr(args, "pinned", True) else drawn(seed)
+            # And an occasion per case, for exactly the same reason (D-166).
+            # `_draw` pins one from the first seed, so a batch of twelve was
+            # twelve evenings at the same party: no use as a buffer, and no use
+            # at all for measuring what the occasion deck does, which is what a
+            # batch is mostly for.
+            here = args.setting if getattr(args, "pinned_setting", True) else occasion(seed)
             request = GenerationRequest(
-                setting=args.setting,
+                setting=here,
                 cast_size=args.cast,
                 slot_count=args.slots,
                 place_count=args.places,
@@ -135,7 +142,7 @@ def _fill(args, want: int) -> int:
             if complaints:
                 print(f"  seed {seed}: advisories {sorted(set(complaints))}")
 
-            kept = store.save(solved, args.setting, shape, seed)
+            kept = store.save(solved, here, shape, seed)
             print(f"  {kept.id}   seed {seed}   {shape}")
             made += 1
             break
@@ -252,7 +259,10 @@ def _draw(args, announce: bool = True) -> None:
         if announce:
             print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
 
-    # The one input that was never dealt, until D-115.
+    # The one input that was never dealt, until D-115. `pinned_setting` exists
+    # for the same reason as `pinned` above: --fill draws an occasion per case
+    # when one was not given, and may only do that when it was left to us.
+    args.pinned_setting = args.setting is not None
     if args.setting is None:
         args.setting = occasion(args.seed)
         if announce:
@@ -386,10 +396,25 @@ def main(argv: list[str] | None = None) -> int:
         return _fill(args, args.fill)
 
     if args.material:
-        _draw(args)
+        # Every seed draws its own occasion and its own shape, and those two are
+        # the largest part of what a case will be. `_draw` pins them once from
+        # the first seed, which made this preview show twelve hands under one
+        # heading and eleven of them wrong: the whole point of reading material
+        # before spending is choosing the evening, and the evening was the one
+        # thing it did not vary (D-163).
+        if args.seed is None:
+            args.seed = fresh_seed()
+            print(f"  Seeds {args.seed} to {args.seed + args.material - 1}.")
+        chosen, shape = args.setting, args.topology
         for seed in range(args.seed, args.seed + args.material):
+            here = chosen or occasion(seed)
+            drawn_shape = shape or drawn(seed)
             print(f"\n=== seed {seed} " + "=" * 52)
-            print(draw_palette(seed, args.setting, args.topology, args.cast).brief())
+            print(f"  Occasion: {here}")
+            print(f"  Shape:    {drawn_shape}. {get_topology(drawn_shape).blurb}.")
+            print(f"  Murder:   slot {murder_slot(seed, args.slots)} of {args.slots}")
+            print(f"\n  Draft it with: --seed {seed} --topology {drawn_shape}\n")
+            print(draw_palette(seed, here, drawn_shape, args.cast).brief())
         return 0
 
     # Inspecting a saved case needs no seed, no shape and no occasion: it has its

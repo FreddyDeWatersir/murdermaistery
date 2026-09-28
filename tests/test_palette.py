@@ -251,3 +251,84 @@ def test_the_clock_varies_per_case_and_stays_playable() -> None:
     assert len(drawn) >= 6, "one number is a setting, not a property of a case"
     assert min(drawn) >= 40, "an evening nobody can finish is not tense, it is broken"
     assert max(drawn) >= 130, "most nights should have more time than anybody needs"
+
+
+def test_the_murder_is_never_earlier_than_the_third_slot() -> None:
+    """The victim can only appear at or before the murder, so the murder slot is
+    also the size of his life (D-158).
+
+    Dealing from slot 2 gave him two hours on a five hour evening, while the
+    request asks for a private scene with the killer, usually an earlier one with
+    the same pair, and a victim who was working on all of them tonight. Measured
+    over the corpus the model writes 3.56 scenes with him and does not reduce that
+    when the murder is early, so a quarter of all draws were unsatisfiable before
+    the model had written a word.
+    """
+    from mystery.palette import murder_slot
+
+    dealt = {murder_slot(seed, 5) for seed in range(4000)}
+    assert dealt == {3, 4, 5}, "slot 2 leaves the victim two hours and no case"
+
+
+def test_the_murder_is_still_not_always_near_the_end() -> None:
+    """The thing D-125 bought, which this must not give back: a murder that is
+    always in the last hour or two is answerable by asking who lies about the
+    last hour or two."""
+    from mystery.palette import murder_slot
+
+    dealt = [murder_slot(seed, 5) for seed in range(4000)]
+    assert 0.25 < dealt.count(3) / len(dealt) < 0.42, (
+        "the earliest allowed slot should still come up about a third of the time"
+    )
+
+
+def test_a_short_evening_still_gets_a_legal_slot() -> None:
+    """The floor is min(3, slot_count), so a three slot evening returns 3 rather
+    than an empty range."""
+    from mystery.palette import murder_slot
+
+    for slots in (2, 3, 4, 6):
+        for seed in range(50):
+            assert 1 <= murder_slot(seed, slots) <= slots
+
+
+def test_the_motives_are_not_all_the_same_sentence() -> None:
+    """Twenty six real cases were read back and twenty four were one plot: the
+    victim announces a deadline and the killer removes it (D-161).
+
+    The deck was half the cause. Nineteen of its twenty entries were some form of
+    "the victim was about to take something away or say something out loud", so
+    whatever the model was dealt, it wrote the same evening.
+    """
+    from mystery.palette import MOTIVES
+
+    deadline = ("about to", "was going to", "in the morning", "next week", "on Monday")
+    prospective = [m for m in MOTIVES if any(word in m for word in deadline)]
+
+    assert len(prospective) / len(MOTIVES) < 0.5, (
+        "more than half the motives are still a thing that has not happened yet"
+    )
+
+
+def test_the_motives_cover_more_than_money_and_exposure() -> None:
+    """The registers the engine had never once produced in forty drafts."""
+    from mystery.palette import MOTIVES
+
+    deck = " ".join(MOTIVES)
+    for feeling in ("love", "grief", "cruel", "conviction", "affair", "die"):
+        assert feeling in deck, f"nothing in the deck is about {feeling}"
+
+
+def test_a_material_preview_varies_the_occasion_with_the_seed() -> None:
+    """The preview exists so an evening can be chosen before it is paid for, and
+    it was showing twelve hands under one heading (D-163).
+
+    `_draw` pins the occasion once from the first seed, so eleven of twelve
+    previews named the wrong evening, and the decks are keyed on the setting
+    string, so every hand under it was drawn against a case that would never be
+    written.
+    """
+    from mystery.palette import occasion
+
+    dealt = {occasion(seed) for seed in range(657042, 657054)}
+    assert len(dealt) > 6, "twelve consecutive seeds should not share an evening"

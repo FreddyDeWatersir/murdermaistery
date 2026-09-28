@@ -8,6 +8,7 @@ after it has been through that conversion (D-080).
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
+
 from mystery.example import OPENING_NIGHT
 from mystery.interrogation import Assertion, Statement
 from mystery.models import Mystery

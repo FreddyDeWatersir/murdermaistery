@@ -284,6 +284,23 @@ def entries(source: "Shelf | Path | None" = None) -> list[SavedCase]:
     return found
 
 
+def played(source: "Shelf | Path | None" = None) -> set[str]:
+    """Which shapes are already on the shelf (D-155).
+
+    Cold path by construction. It opens every case, because a `Card` carries an
+    id and a date and nothing else (D-081). That trade is right here and nowhere
+    else: this runs once, from a command that is about to spend forty cents and
+    three minutes on a model call, so opening twenty files first is free. Never
+    call it from a page load.
+
+    A case saved before the shape was recorded counts as the plain shape, which
+    is what it was: until D-154 nothing else could be generated.
+    """
+    from mystery.topology import DEFAULT
+
+    return {case.topology or DEFAULT for case in entries(source)}
+
+
 def catalogue(source: "Shelf | Path | None" = None) -> str:
     """The shelf, for the command line."""
     saved = entries(source)

@@ -1165,10 +1165,174 @@ def not_every_journey_points_at_the_killer(mystery: Mystery) -> list[Advisory]:
     return []
 
 
+# A21 and A23 are retired, not deleted (D-151). They check objects with paths
+# through the evening, which the notebook stopped showing in D-139 and the draft
+# prompt stopped asking for here. Left in the module because the mechanic may
+# come back as the murder weapon, and a check nobody runs is cheaper to keep
+# than to rewrite; running them would only complain about an absence we chose.
+def _gates_deep(secret, by, seen=()) -> int:
+    """How many gates stand between a cold start and this secret.
+
+    Cycle-safe by carrying what it has already walked through, because the model
+    writes `revealed_by` by hand and a pair of secrets gating each other is a
+    thing it has actually done.
+    """
+    if secret.id in seen or not secret.revealed_by:
+        return 0
+    gate = by.get(secret.revealed_by)
+    return 0 if gate is None else 1 + _gates_deep(gate, by, (*seen, secret.id))
+
+
+def _points_at(secret, mystery: Mystery) -> str:
+    """Whose name this secret would put on the list.
+
+    What a secret is *about*, unless that is the dead man, in which case it is
+    the person carrying it who looks bad for having it.
+    """
+    return secret.about if secret.about and secret.about != mystery.victim else secret.holder
+
+
+def the_killer_is_not_the_deepest_thing_here(mystery: Mystery) -> list[Advisory]:
+    """A24: somebody innocent has a chain as long as the killer's (D-160).
+
+    The rule of thumb this exists to break: **follow whatever keeps going.**
+    Measured over thirty six drafts, the killer's motive was deeper than any
+    innocent's material in thirty three of them, and in thirty of thirty six no
+    innocent had anything gated behind anything at all. So depth was a perfect
+    signal for guilt, and a player who never thought about the crime could win by
+    pulling on whichever thread did not end.
+
+    A real playtest found exactly that. Twenty nine questions, not one of them
+    about the time of death in a case whose whole shape was that the house had
+    the hour wrong, and the answer reached anyway by following the only chain
+    that had a second link in it.
+
+    Breadth does not fix this and the prompt already has breadth: three people
+    carrying something damning is normal. What is missing is that theirs is
+    always one fact, and the killer's is always a chain. This measures the
+    difference rather than the count.
+
+    **A rival standing on the killer's own chain does not count** (D-162). The
+    first draft written against the new instructions put the innocent's damning
+    secret one link inside the road to the motive, so investigating him was
+    investigating her, and an earlier version of this check approved it. The
+    herring has to be somewhere else, or it is a signpost with a different name
+    on it.
+
+    **It fires on 92% of the existing corpus and that is the point, not a
+    fault.** `--score` marks anything above 90% as saying nothing, which is the
+    right rule for a check that has always been there; this one is new and is
+    measuring a property almost no case has yet. If it is still at 92% after a
+    dozen drafts written against the new instructions, then the instructions did
+    not land and the number means what the margin says it means.
+    """
+    if not mystery.killer:
+        return []
+
+    by = {secret.id: secret for secret in mystery.secrets}
+    motive = next((s for s in mystery.secrets if s.is_motive), None)
+    if motive is None:
+        return []  # A5 and A13 have plenty to say about that already
+
+    wanted = _gates_deep(motive, by)
+    if wanted == 0:
+        return []  # an ungated motive is A5's complaint, not this one
+
+    # Everything the player would have to open to reach the motive. A "rival"
+    # standing on that road is not a rival: pulling it walks them to the killer,
+    # which is exactly what a red herring must not do (D-162). A real draft put
+    # the innocent's damning secret one link inside the killer's own chain and
+    # this check called it a rival, because it only looked at depth.
+    road = set()
+    step = motive
+    while step is not None and step.id not in road:
+        road.add(step.id)
+        step = by.get(step.revealed_by) if step.revealed_by else None
+
+    deepest: dict[str, int] = {}
+    for secret in mystery.secrets:
+        if not secret.damning or secret.id in road:
+            continue
+        who = _points_at(secret, mystery)
+        if who in (mystery.killer, mystery.victim):
+            continue
+        deepest[who] = max(deepest.get(who, 0), _gates_deep(secret, by))
+
+    best = max(deepest.values(), default=0)
+    if best >= wanted:
+        return []
+
+    held = ", ".join(f"{who} at {d}" for who, d in sorted(deepest.items())) or "nobody"
+    return [
+        Advisory(
+            check="A24",
+            message=(
+                f"the killer's motive sits behind {wanted} gate(s) and the deepest "
+                f"thing pointing at anybody else is {best}, counting only what is "
+                f"not already on the road to the motive. So the player does not "
+                f"have to think about the murder at all: they pull whichever thread "
+                f"keeps going and it is always this one. Damning material by person: "
+                f"{held}. One innocent needs a chain at least {wanted} deep, gated "
+                f"the same way, ending in something a reader would write a name down "
+                f"about"
+            ),
+        )
+    ]
+
+
+def a_red_herring_has_a_floor(mystery: Mystery) -> list[Advisory]:
+    """A25: the deep innocent chain bottoms out in something that is not guilt.
+
+    A24 on its own would be satisfied by a second murderer. What makes a red
+    herring worth the player's six questions is that the seventh turns it over:
+    behind the damning thing is the humiliating, ordinary, or protective reason
+    it looks that way.
+
+    The proxy is structural rather than literary, and deliberately so. A secret
+    gated behind the damning one and not damning itself is the shape of an
+    explanation; whether it reads as one is not something arithmetic can know.
+    Present in six of thirty six drafts.
+    """
+    if not mystery.killer:
+        return []
+
+    by = {secret.id: secret for secret in mystery.secrets}
+    accused = [
+        secret
+        for secret in mystery.secrets
+        if secret.damning
+        and _points_at(secret, mystery) not in (mystery.killer, mystery.victim)
+        and _gates_deep(secret, by) >= 1
+    ]
+    if not accused:
+        return []  # A24 is already saying the louder version of this
+
+    floored = {
+        secret.id
+        for secret in accused
+        if any(o.revealed_by == secret.id and not o.damning for o in mystery.secrets)
+    }
+    if floored:
+        return []
+
+    names = ", ".join(sorted({s.id for s in accused}))
+    return [
+        Advisory(
+            check="A25",
+            message=(
+                f"{names} makes somebody innocent look guilty and nothing behind it "
+                f"lets them off. A damning chain with no floor is not a red herring, "
+                f"it is a second murderer the case forgot to convict, and the player "
+                f"ends up choosing between two guilty-looking people on feel. Gate one "
+                f"more secret behind it, not damning, that explains what they were "
+                f"really doing"
+            ),
+        )
+    ]
+
+
 ADVISORIES = [
     somebody_is_wrong_without_lying,
-    something_in_this_house_moved,
-    not_every_journey_points_at_the_killer,
     the_murder_hour_is_not_a_giveaway,
     wandering,
     alibi_breadth,
@@ -1189,6 +1353,8 @@ ADVISORIES = [
     the_case_has_a_second_half,
     they_could_each_have_done_it,
     the_cast_is_a_web_not_a_wheel,
+    the_killer_is_not_the_deepest_thing_here,
+    a_red_herring_has_a_floor,
 ]
 
 
