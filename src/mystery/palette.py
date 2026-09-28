@@ -102,6 +102,12 @@ VOICES = [
 # stated to the player in the briefing, because being told what you are for is
 # not a spoiler; whether it was the right question is the case.
 COMMISSIONS = [
+    # What the house has already decided about the death, and what it wants
+    # written down. **Not who engaged the player and not why they are in the
+    # building**: that is STANDINGS, and for a long time six of these eight also
+    # answered it, from a separate random stream, so a case could be told it was
+    # hired by a frightened letter-writer and also that it was halfway through
+    # an unrelated survey (D-169).
     (
         "The household want to know which of them did it, and want it settled "
         "tonight rather than by whoever arrives in the morning",
@@ -115,39 +121,39 @@ COMMISSIONS = [
     ),
     (
         "A doctor has already called it a fall, or a seizure, or the stairs, and "
-        "one person in this house refuses to accept that and sent for you",
-        "the doctor is wrong and the one who sent for you is right, though not "
-        "for the reason they think",
+        "one person in this house will not accept that",
+        "the doctor is wrong and the one who will not accept it is right, though "
+        "not for the reason they think",
     ),
     (
-        "You did not come about a death at all. You came for a document, a "
-        "payment or an object, and the death is standing between you and it",
-        "the thing you came for and the death turn out to be the same story, "
+        "Nobody has said the word murder out loud yet, and what is wanted is "
+        "somebody who will ask the questions that would make saying it necessary",
+        "one person in the room has already worked it out and is waiting to see "
+        "whether you will",
+    ),
+    (
+        "There is a thing in this house that has to be found before the morning, "
+        "and the death has put it out of reach",
+        "what was being looked for and the killing turn out to be the same story, "
         "which nobody will say out loud",
     ),
     (
-        "Somebody in this house wrote to you a fortnight ago saying they were "
-        "frightened, and would not say of what",
-        "the letter was not written by the person who died, and whoever wrote it "
-        "is still in the building",
-    ),
-    (
         "One of them has already confessed, plainly and without being pressed, "
-        "and you are here because nobody quite believes it",
+        "and nobody quite believes it",
         "the confession is false and the confessor knows exactly who they are "
         "covering for",
     ),
     (
-        "The insurers, the family or the firm want a version of tonight they can "
+        "The insurers, the family or the firm need a version of tonight they can "
         "file, and would rather it were tidy than true",
         "the tidy version and the true one name different people, and you will "
         "have to choose which one to write down",
     ),
     (
-        "You were already here on other business when it happened, and are the "
-        "only person present whose reason for being here is written down",
-        "your own business and the killing turn out to touch, and one of them "
-        "knows that before you do",
+        "Everybody has agreed what happened, in detail, within an hour of the "
+        "body being found, and they agree a little too well",
+        "the agreed account is somebody's careful work and at least two of them "
+        "know it is not what they saw",
     ),
 ]
 
@@ -194,32 +200,70 @@ MOTIVES = [
     "the killer had decided against it weeks ago, and the victim undid the decision",
 ]
 
-INTRIGUES = [
-    "two people here are pretending not to know each other",
-    "somebody is being blackmailed, and not by the victim",
-    "an affair that ended badly, which one of the two has not accepted",
-    "somebody has been taking small amounts for years and has never been caught",
-    "a forged document that will surface next week whatever happens tonight",
-    "two people made an agreement months ago and one of them has broken it",
-    "somebody is about to be replaced and is the only person who does not know",
-    "an old debt is being called in tonight, quietly, in a corner",
+# What the innocent suspects are being evasive about. Three are dealt per case
+# and the prompt turns each into a secret with a holder, so this is the deck the
+# red herrings are made of (D-170).
+#
+# Weighed by what it would cost the holder if it came out, the old deck of
+# twenty four was 3 heavy, 7 damaging and 14 merely awkward, so it could not
+# supply a suspect anybody would seriously write down, and the model had to
+# invent motive-grade material for the innocents from nothing every time. Split
+# into three tiers, with one heavy one guaranteed in every hand.
+#
+# A motive is a reason to kill and an intrigue is a reason to lie: they stay
+# different jobs. What has to match is the *weight*, so that heavy does not mean
+# guilty. An evening where all five have life-ending secrets is melodrama; an
+# evening where only the killer does is solved in four questions.
+
+# Would end them. A reader who learned only this would write the name down.
+WEIGHTY = [
+    "somebody here is the parent of somebody else here, and only one of them knows",
+    "two of them have been together for years, and one has a family who do not know",
+    "one of them let another take the blame for something, and that person is still paying",
+    "somebody has been signing another's name for two years and the bank has noticed",
     "somebody is covering for their own child and would let anyone hang for it",
+    "somebody has been taking small amounts for years and has never been caught",
+    "one of them ended another's marriage, and that is not public",
+    "somebody owes money to a person who does not take a late payment kindly",
+    "somebody here was told a year ago they are dying and has told nobody",
+    "one of them has been drinking or worse since the spring, and another is covering it",
+    "one of them wrote the anonymous letter that ruined another, and it worked",
+    "somebody here is frightened of a person in this room and will not say which",
+    "a forged document that will surface next week whatever happens tonight",
+]
+
+# Would damage them. A career, a marriage, a standing in this house.
+DAMAGING = [
+    "an affair that ended badly, which one of the two has not accepted",
+    "somebody's reference or recommendation was invented and is about to be checked",
+    "somebody has been reading other people's correspondence",
+    "somebody has already been paid to behave in a particular way this evening",
+    "an accusation was made last year, withdrawn, and never resolved",
+    "somebody lost a great deal of money on the victim's advice",
+    "somebody is being blackmailed, and not by the victim",
+    "one of them has left the faith the rest still keep, and the family do not know",
+    "somebody cannot forgive another for a thing the other does not remember doing",
+    "one of them has been waiting twenty years for a thanks that went to somebody else",
+]
+
+# Would embarrass them, or is simply nobody's business. A house needs small
+# obstructions as well as large ones, or everybody behaves like a murderer.
+AWKWARD = [
+    "two people here are pretending not to know each other",
+    "two people made an agreement months ago and one of them has broken it",
+    "an old debt is being called in tonight, quietly, in a corner",
     "two people are competing for the same position and both have been promised it",
     "somebody came here tonight specifically to say something and has not managed it",
     "a rumour about one of them is true, and the wrong person is spreading it",
-    "somebody has been reading other people's correspondence",
     "two of them were somewhere else together earlier and cannot say where",
-    "somebody's reference or recommendation was invented and is about to be checked",
     "a family matter everyone here knows about and nobody will name",
-    "somebody has already been paid to behave in a particular way this evening",
     "one of them is leaving the country next week and has told nobody",
-    "an accusation was made last year, withdrawn, and never resolved",
     "two of them are related and it is not public",
     "somebody is protecting a person who is not in the building",
     "one of them has been drinking since the afternoon and is managing it well",
-    "somebody lost a great deal of money on the victim's advice",
-    "a job was given to the wrong person and everybody knows which",
 ]
+
+INTRIGUES = WEIGHTY + DAMAGING + AWKWARD
 
 # The thing that happened before tonight, that most of them were there for, and
 # that nobody has mentioned since (D-109). Dealt separately from the intrigues
@@ -229,18 +273,35 @@ INTRIGUES = [
 # player collects five spokes, and the case has no middle. A shared past is what
 # makes them entangled with each other rather than only with the dead man.
 OLD_BUSINESS = [
+    # Concealment. Every one of these is somebody's guilt, and for a long time
+    # the whole deck was (D-168). Kept to half, because a group that covered
+    # something up together is a real and useful thing to be; the fault was that
+    # it was the only thing this deck could produce, so every cast came out as
+    # colleagues managing an exposure.
     "a death here years ago that was recorded as an accident",
     "money that went missing once, was quietly replaced, and never explained",
     "somebody who left suddenly and whose name is not used any more",
     "a fire, a flood or a collapse, and a decision about who was blamed",
-    "a child, now grown, and an agreement about who was told what",
-    "a season or a year everyone refers to only by its date",
     "a letter that was written, read by more people than intended, and destroyed",
-    "an inspection that was survived by arrangement rather than by merit",
     "somebody's illness or breakdown that was managed and never named",
-    "a promise made at a funeral that only half of them have kept",
     "a piece of work signed by the wrong person, and everybody was in the room",
     "an accusation made once, withdrawn under pressure, and true",
+    "a child, now grown, and an agreement about who was told what",
+    "a promise made at a funeral that only half of them have kept",
+    # And things a group can share that are nobody's crime. The prompt asks this
+    # deck for "what gives them reasons to know about each other rather than only
+    # about the victim", and knowing each other has never required having
+    # covered something up together.
+    "a child they all helped raise for one year",
+    "a relationship between two of them that ended here, and everybody knew",
+    "a rescue here, and one of them has never been thanked for it",
+    "money one of them gave another, quietly, never repaid and never mentioned",
+    "a strike or a refusal they all signed, and what it cost each of them",
+    "an illness one of them nursed another through, unmentioned since",
+    "a prize or a record, and the single name that went on it",
+    "a faith, a language or a trade they all left at the same time",
+    "a summer they all lived in the same house",
+    "a funeral half of them did not attend, for six different reasons",
 ]
 
 
@@ -403,7 +464,15 @@ class Palette:
             f"These threads also run under the evening, between people who did not "
             f"kill anybody. They are what the other suspects are being evasive "
             f"about, and at least one of them should be the thing that gates the "
-            f"killer's motive:\n{intrigues}\n"
+            f"killer's motive:\n{intrigues}\n\n"
+            f"**The first of the three is heavier than the other two.** It is "
+            f"dealt from the end of the deck that would end somebody, and it is "
+            f"the one to build the innocent's chain on: deep, gated, damning, "
+            f"and with a floor underneath it that is not guilt. The other two "
+            f"are smaller obstructions, and they should stay small. Five people "
+            f"whose lives are all ending tonight is melodrama; one person whose "
+            f"life is ending and four with something to be awkward about is a "
+            f"house.\n"
         )
 
 
@@ -419,7 +488,10 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
         manners=rng.sample(MANNERS, min(cast_size, len(MANNERS))),
         voices=rng.sample(VOICES, min(cast_size, len(VOICES))),
         motive=rng.choice(MOTIVES),
-        intrigues=rng.sample(INTRIGUES, 3),
+        # One heavy one, always (D-170). The deck used to be sampled flat, and
+        # with fourteen of twenty four merely awkward a hand of three was
+        # usually three embarrassments, which cannot carry a rival chain.
+        intrigues=[rng.choice(WEIGHTY), *rng.sample(DAMAGING + AWKWARD, 2)],
         standing=rng.choice(STANDINGS),
         old_business=rng.choice(OLD_BUSINESS),
         # Drawn on the seed alone, deliberately. The other decks are keyed on the

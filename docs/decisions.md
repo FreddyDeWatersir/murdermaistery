@@ -4592,3 +4592,142 @@ being looked for. Eight drafts is about $3.20 and one evening.
 
 Not to be done: running the batch on a cheaper model. It would cost a quarter as
 much and measure a model nobody plays with.
+
+## D-167 The victim may be named
+**Date:** 2026-09-28
+**Status:** active
+
+A played case opened with this, as the first sentence of the first screen:
+
+> Doña Amalia **one of them** was found at the foot of the river steps
+
+The victim is Amalia Reccioli. A suspect is Inés Reccioli de Farías.
+`unname_the_commission` takes every token longer than two characters out of
+every non-victim name, so it took "Reccioli" out of the dead woman's own name.
+
+**Sixteen of fifty six cases give a suspect a name the victim shares**, because a
+niece, a nephew and a daughter are the three commonest relationships this cast
+produces. Two commissions in the corpus are visibly mangled. V13 had the mirror
+of the same fault and would report the collision as a violation.
+
+Both now skip any token the victim shares. A suspect whose name is *entirely*
+shared with the victim is left alone rather than half-erased, which names nobody
+the household was not already thinking about.
+
+The rule the repair exists for is unchanged and was always written down: the
+victim may be named, the suspects may not.
+
+## D-168 A group that has only ever covered something up
+**Date:** 2026-09-28
+**Status:** active
+
+`OLD_BUSINESS` is drawn once per case and the prompt hands it over as "what
+binds them to each other, and not to the dead man... it is why they know things
+about each other rather than only about the victim". It had twelve entries and
+eleven were somebody's guilt: a death recorded as an accident, money quietly
+replaced, a fire and who was blamed, an inspection survived by arrangement, work
+signed by the wrong person, an accusation withdrawn under pressure.
+
+So the only group this engine could describe was a group that had covered
+something up, which is most of the reason every cast reads as colleagues
+managing an exposure. It is the smallest real deck in the project and it was
+setting the entire social history of the case.
+
+Two cut: "a season or a year everyone refers to only by its date", which is a
+label rather than an event and gives the model nothing to build; and "an
+inspection that was survived by arrangement", which is the third card in the
+deck meaning "we got away with it".
+
+Ten added, none of them a crime: a child they all helped raise for a year, a
+relationship between two of them that ended here, a rescue nobody was thanked
+for, money one gave another and never mentioned, a strike they all signed, an
+illness one nursed another through, a prize with one name on it, a faith or a
+trade they all left at the same time, a summer in the same house, a funeral half
+of them did not attend.
+
+Twenty entries, with concealment now half the deck rather than all of it, and a
+test that fails if it goes back over sixty per cent. Kept at half deliberately:
+a group that hid something together is a real and useful thing to be. The fault
+was that it was the only thing available.
+
+## D-169 Two decks answering the same question
+**Date:** 2026-09-28
+**Status:** active
+
+A player asked whether the standing and the commission were working or quietly
+producing contradictions. Checked against what the seeds actually dealt, the
+**standing is working exactly**: a case dealt "an old colleague of the victim,
+invited for reasons only the victim knew" wrote "Octavio Bardi wrote to you three
+weeks ago and asked you to come up for the vote, you two ran gauges together",
+and one dealt "acting for one of the guests, and everybody knows it" wrote "You
+work for Julieta, and every person in this house knows it". The D-111 fence is
+holding too: a suspect is told only the investigator's role, in the third person.
+
+The commission was the problem, and the fault is structural rather than a bad
+entry. **Six of the eight also asserted who engaged the player or why they were
+in the building**, which is what `STANDINGS` is for:
+
+- "Somebody in this house wrote to you a fortnight ago saying they were frightened"
+- "You did not come about a death at all. You came for a document, a payment or an object"
+- "You were already here on other business when it happened"
+
+That last one is a straight duplicate of the first standing. The two decks are
+dealt from independent streams, so nothing stopped a case being told it was hired
+by a frightened letter-writer and also that it was halfway through an unrelated
+survey.
+
+The split is now clean and stated in both places. **The standing says who the
+player is and why they cannot leave. The commission says only what the house has
+already decided about the death and what it wants written down.** Six entries
+rewritten to that line, keeping their wrong-notes, and two new ones that could
+only ever have been commissions: nobody has said the word murder out loud yet,
+and everybody agreed what happened within an hour and agrees a little too well.
+
+A test fails if an entry starts hiring the player again.
+
+## D-170 A deck that could not make a suspect
+**Date:** 2026-09-28
+**Status:** active
+
+`INTRIGUES` is dealt three per case and the prompt turns each into an innocent
+suspect's secret, so it is the deck every red herring is made of. Weighed by what
+it would cost the holder if it came out, the twenty four entries were:
+
+```
+would end them (a reader writes the name down)     3
+would damage them (career, marriage, standing)     7
+would merely embarrass them                       14
+```
+
+Sampled flat, a hand of three was usually three embarrassments. So the deck could
+not supply a person anybody would seriously suspect, and the model had to invent
+motive-grade material for the innocents from nothing, every time. That is most of
+why A24 keeps firing: the instruction asks for a rival chain and the material
+handed over cannot carry one.
+
+Two entries were also not concealable at all, which is a separate fault. "Somebody
+is about to be replaced and is the only person who does not know" cannot be a
+secret its holder keeps. "A job was given to the wrong person and everybody knows
+which" is hidden by nobody. Both cut.
+
+Now thirty five entries in three tiers, and a hand is **one from the heavy tier
+plus two from the rest**, so every case has exactly one innocent carrying
+something that could end them and four with smaller things. The brief says which
+of the three is the heavy one and that it is the one to build the chain on.
+
+The principle, which took a conversation to get right: **a motive is a reason to
+kill and an intrigue is a reason to lie, and those stay different jobs.** What
+has to match between the two decks is the *weight*, so that heavy does not mean
+guilty. Making them the same in kind would give five people whose lives are all
+ending tonight, which is melodrama and flat in a new way. The texture of an
+interrogation comes from five people obstructing for five different-sized
+reasons; the fault was that every reason was small.
+
+**Pairs deferred deliberately.** Writing the floor into each entry, the way
+`COMMISSIONS` carries its wrong-note, was the other candidate and is a reasonable
+design. Not done yet, because A25 (the herring has a way out) has had exactly one
+draft since the prompt started asking for it, and building a second fix for
+something the first has never been tested on is how this project has gone wrong
+before. Revisit after the batch. There is also a craft argument: a floor written
+in the abstract months before the case exists will read like a deck entry, where
+one the model derives from the house it has just invented will not.

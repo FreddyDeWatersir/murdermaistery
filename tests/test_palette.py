@@ -319,16 +319,101 @@ def test_the_motives_cover_more_than_money_and_exposure() -> None:
         assert feeling in deck, f"nothing in the deck is about {feeling}"
 
 
-def test_a_material_preview_varies_the_occasion_with_the_seed() -> None:
-    """The preview exists so an evening can be chosen before it is paid for, and
-    it was showing twelve hands under one heading (D-163).
+def test_the_old_business_is_not_all_somebody_s_guilt() -> None:
+    """Twelve entries and eleven were a thing somebody concealed, so every cast
+    came out as colleagues managing an exposure (D-168).
 
-    `_draw` pins the occasion once from the first seed, so eleven of twelve
-    previews named the wrong evening, and the decks are keyed on the setting
-    string, so every hand under it was drawn against a case that would never be
-    written.
+    The prompt asks this deck for what gives them reasons to know about each
+    other rather than only about the victim, and knowing each other has never
+    required having covered something up together.
     """
-    from mystery.palette import occasion
+    from mystery.palette import OLD_BUSINESS
 
-    dealt = {occasion(seed) for seed in range(657042, 657054)}
-    assert len(dealt) > 6, "twelve consecutive seeds should not share an evening"
+    guilt = (
+        "recorded as an accident", "went missing", "who was blamed",
+        "read by more people", "never named", "signed by the wrong person",
+        "withdrawn under pressure", "who was told what", "only half of them have kept",
+        "whose name is not used",
+    )
+    concealed = [o for o in OLD_BUSINESS if any(word in o for word in guilt)]
+
+    assert len(concealed) / len(OLD_BUSINESS) <= 0.6, (
+        "the deck can only produce a group that covered something up"
+    )
+
+
+def test_a_commission_does_not_say_who_engaged_the_player() -> None:
+    """Two decks were independently answering "why are you here" (D-169).
+
+    Six of the eight commissions asserted who sent for the player or what
+    brought them to the building, which is what STANDINGS is for, and the two are
+    dealt from separate streams. So a case could be told it was hired by a
+    frightened letter-writer and also that it was halfway through an unrelated
+    survey.
+    """
+    import re
+
+    from mystery.palette import COMMISSIONS
+
+    hiring = re.compile(
+        r"wrote to you|sent for you|paid for you|engaged|brought you|"
+        r"you came|you did not come|you were already here",
+        re.I,
+    )
+    trespassing = [brief for brief, _ in COMMISSIONS if hiring.search(brief)]
+
+    assert not trespassing, f"the commission is writing the standing: {trespassing}"
+
+
+def test_the_prompt_keeps_the_two_apart() -> None:
+    from mystery.generator import GenerationRequest, _commission
+
+    asked = _commission(GenerationRequest(setting="a harvest", seed=657043))
+
+    assert "who engaged the player" in asked
+
+
+def test_every_hand_carries_one_intrigue_that_could_end_somebody() -> None:
+    """Weighed by what it would cost the holder, the old deck was 3 heavy, 7
+    damaging and 14 merely awkward, so three sampled flat were usually three
+    embarrassments (D-170).
+
+    A red herring has to be something a reader would write a name down about, so
+    a deck that cannot supply one leaves the model inventing motive-grade
+    material for the innocents from nothing.
+    """
+    from mystery.palette import WEIGHTY, draw
+
+    for seed in range(60):
+        hand = draw(seed, "a vigil that has run long", "the_lie", 5)
+        assert len(hand.intrigues) == 3
+        assert sum(1 for i in hand.intrigues if i in WEIGHTY) >= 1
+
+
+def test_a_hand_is_not_three_heavy_ones() -> None:
+    """Five people whose lives are all ending tonight is melodrama, and flat in
+    a new way: the texture comes from obstructions of different sizes."""
+    from mystery.palette import WEIGHTY, draw
+
+    hands = [draw(seed, "a dig packing up early", "the_frame", 5) for seed in range(60)]
+
+    assert max(sum(1 for i in h.intrigues if i in WEIGHTY) for h in hands) <= 2
+
+
+def test_every_intrigue_is_something_its_holder_could_conceal() -> None:
+    """Two entries could not be secrets at all: one whose holder does not know it
+    ("about to be replaced and is the only person who does not know") and one
+    nobody hides ("a job was given to the wrong person and everybody knows
+    which"). The prompt asks for each to become a secret with a holder."""
+    from mystery.palette import INTRIGUES
+
+    assert not [i for i in INTRIGUES if "the only person who does not know" in i]
+    assert not [i for i in INTRIGUES if "a job was given to the wrong person" in i]
+
+
+def test_the_brief_says_the_first_one_is_the_heavy_one() -> None:
+    from mystery.palette import draw
+
+    brief = draw(3, "a memorial swim", "the_lie", 5).brief()
+
+    assert "first of the three is heavier" in brief
