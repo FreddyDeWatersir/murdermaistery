@@ -94,6 +94,60 @@ def sweep(folder: Path, seed: int = 0) -> list[Score]:
     return found
 
 
+def _footnote(skipped: int) -> str:
+    if not skipped:
+        return ""
+    return (
+        f", over the drafts with secrets ({skipped} older "
+        f"{'draft has' if skipped == 1 else 'drafts have'} no secrets and "
+        f"{'is' if skipped == 1 else 'are'} left out)"
+    )
+
+
+def _by_cohort(modern, counted, cohorts) -> list[str]:
+    """One column per set of instructions, unstamped first and newest last.
+
+    The stamp exists so that a change can be seen to have landed, and a pooled
+    rate over two prompt versions cannot show that however loudly the header
+    warns about it (D-175).
+    """
+    # "before the stamp" always leads, since everything predates everything.
+    names = sorted(cohorts, key=lambda n: (n != "before the stamp", n))
+    groups = {name: [s for s in modern if (s.built_with or "before the stamp") == name]
+              for name in names}
+    newest = names[-1]
+
+    def label(name: str) -> str:
+        return "pre-stamp" if name == "before the stamp" else name.split("/")[0]
+
+    head = "  check " + "".join(f"{label(name):>17}" for name in names)
+    rule = "  " + "-" * (len(head) - 2)
+    sizes = "        " + "".join(f"{('n=' + str(len(groups[n]))):>17}" for n in names)
+
+    def rate(name: str, check: str) -> str:
+        here = groups[name]
+        hits = sum(1 for s in here if check in s.fired)
+        return f"{hits}/{len(here)}  {100 * hits / len(here):3.0f}%" if here else "-"
+
+    rows = []
+    for check in sorted(counted, key=lambda c: -sum(
+        1 for s in groups[newest] if c in s.fired
+    )):
+        rows.append(f"  {check:<6}" + "".join(f"{rate(n, check):>17}" for n in names))
+
+    return [
+        "how often each advisory fires, by the instructions that made the draft:",
+        "",
+        head,
+        sizes,
+        rule,
+        *rows,
+        "",
+        f"Sorted by the {newest} column, which is the one that answers whether "
+        f"the last change landed.",
+    ]
+
+
 def report(scores: list[Score]) -> str:
     """The sweep as a page: a row per case, then how often each check fires.
 
@@ -143,24 +197,18 @@ def report(scores: list[Score]) -> str:
         f"(of the {len(modern)} with secrets)",
         "",
         "built by "
-        + ", ".join(f"{name} x{n}" for name, n in cohorts.most_common())
-        + (
-            "  <- more than one set of instructions in here, so these rates "
-            "belong to no version in particular"
-            if len(cohorts) > 1
-            else ""
-        ),
+        + ", ".join(f"{name} x{n}" for name, n in cohorts.most_common()),
         "",
-        "how often each advisory fires"
-        + (
-            f", over {len(modern)} drafts "
-            f"({skipped} older {'draft has' if skipped == 1 else 'drafts have'} "
-            f"no secrets and {'is' if skipped == 1 else 'are'} left out)"
-            if skipped
-            else ""
-        )
-        + ":",
     ]
+
+    # More than one set of instructions in the folder means the pooled rate
+    # belongs to none of them, and saying so and then printing it anyway was
+    # half a report (D-175). Split into a column per cohort, newest last,
+    # because the question is always whether the last change moved anything.
+    if len(cohorts) > 1:
+        return "\n".join(lines + _by_cohort(modern, counted, cohorts))
+
+    lines.append("how often each advisory fires" + _footnote(skipped) + ":")
     for check, hits in counted.most_common():
         share = hits / len(modern)
         note = "  <- fires on nearly everything, so it says nothing" if share >= 0.9 else ""

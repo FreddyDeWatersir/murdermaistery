@@ -9,11 +9,13 @@ a mystery is not broken; only your eyes tell you it is any good.
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from mystery.daily import BUFFER, shortfall, todays_case, waiting
 from mystery.example import OPENING_NIGHT
 from mystery.generator import (
+    DRAFT_MODEL,
     GenerationFailed,
     GenerationRequest,
     anthropic_drafter,
@@ -65,6 +67,89 @@ def render(mystery: Mystery) -> str:
 # can fix is worth retrying; a systematic one is not, and unbounded retry against
 # a paid API with nobody awake is how a bad night becomes a bad bill (D-078).
 ATTEMPTS = 3
+
+
+# Errors worth waiting out rather than giving up on (D-174). A batch of eight
+# runs for twenty five minutes, and an "Overloaded" on the seventh threw away the
+# eighth and left the run short, having already spent three dollars. None of
+# these cost anything when they fail: the call did not happen.
+PATIENT = ("overloaded", "rate_limit", "429", "529", "timeout", "connection")
+
+# How long to wait before trying again, in seconds. Four tries, then it is not a
+# blip any more and something is actually wrong.
+BACKOFF = (5, 20, 60)
+
+
+def _with_patience(request) -> None:
+    """Draft one case, waiting out the errors that are worth waiting out.
+
+    Anything else is raised as a RuntimeError for the caller to stop on: no key
+    and no such model are not going to be different in twenty seconds, and
+    retrying them costs money the second time.
+    """
+    for attempt, pause in enumerate((*BACKOFF, None)):
+        try:
+            generate(request, drafter=anthropic_drafter(), cache_dir=CACHE)
+            return
+        except GenerationFailed:
+            raise
+        except Exception as error:  # noqa: BLE001 - the SDK raises many shapes
+            blip = any(word in str(error).lower() for word in PATIENT)
+            if not blip or pause is None:
+                raise RuntimeError(str(error)) from error
+            print(f"       {type(error).__name__}, waiting {pause}s "
+                  f"(try {attempt + 2} of {len(BACKOFF) + 1})")
+            time.sleep(pause)
+
+
+def _batch(args, want: int) -> int:
+    """Draft N cases to measure, not to play (D-172).
+
+    `--fill` is the nightly buffer job and tops *up to* a target, so with
+    seventeen cases already waiting `--fill 8` correctly did nothing at all.
+    That is right for a buffer and wrong for statistics: a corpus is not full
+    just because the queue is.
+
+    Nothing is solved, checked or shelved here. Every draft lands in the cache
+    on its own, which is the folder `--score` sweeps, so the measuring is a
+    separate free step and this command only has to buy the drafts.
+    """
+    complaint = complaint_about_setting(args.setting)
+    if complaint:
+        print(f"  {complaint}")
+        return 2
+
+    each = draft_estimate()
+    print(f"  {want} drafts on {DRAFT_MODEL}, about ${each * want:.2f}.")
+    print(f"  Roughly three minutes each, one after another: {3 * want} minutes.")
+    print()
+
+    made = 0
+    for n in range(want):
+        seed = args.seed + n
+        shape = args.topology if getattr(args, "pinned", True) else drawn(seed)
+        here = args.setting if getattr(args, "pinned_setting", True) else occasion(seed)
+        request = GenerationRequest(
+            setting=here,
+            cast_size=args.cast,
+            slot_count=args.slots,
+            place_count=args.places,
+            topology=shape,
+            seed=seed,
+        )
+        print(f"  {n + 1}/{want}  seed {seed}  {shape}  {here[:52]}")
+        try:
+            _with_patience(request)
+        except GenerationFailed as failure:
+            print(f"       gave up: {failure}")
+            continue
+        except RuntimeError as error:
+            print(f"  Stopping: {error}")
+            return 1
+        made += 1
+
+    print(f"\n  {made} of {want} drafted. Measure them with --score.")
+    return 0
 
 
 def _fill(args, want: int) -> int:
@@ -318,6 +403,15 @@ def main(argv: list[str] | None = None) -> int:
         "them side by side. Calls no model",
     )
     parser.add_argument(
+        "--drafts",
+        type=int,
+        metavar="N",
+        help="draft N new cases and stop, for measuring rather than for playing. "
+        "Unlike --fill this ignores the buffer entirely and always makes N, since "
+        "a buffer that is already full is not a reason to have no statistics "
+        "(D-172). They land in the draft cache, which is what --score reads",
+    )
+    parser.add_argument(
         "--fill",
         nargs="?",
         type=int,
@@ -390,6 +484,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Today:   {case.id if case else 'NOTHING. Run --fill'}")
         print(f"  Waiting: {len(queue)} ({', '.join(c.id for c in queue) or 'none'})")
         return 0
+
+    if args.drafts:
+        _draw(args, announce=False)
+        return _batch(args, args.drafts)
 
     if args.fill:
         _draw(args)

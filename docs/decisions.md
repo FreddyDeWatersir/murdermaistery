@@ -4484,250 +4484,113 @@ its first arrangement and silences the other twenty-three, and `generate`'s prob
 is silent throughout, since `web.py` runs the same arrangement again afterwards
 and narrates it there.
 
-## D-164 The evening gets its own colour
+## D-175 Saying the rates mean nothing, and then printing them
 **Date:** 2026-09-28
 **Status:** active
 
-Every case rendered in the same near-black ground with the same gold accent,
-whether the evening was a Baltic port, inland Andalusia in the last heat of the
-year, or a Japanese farmhouse that has been in one family too long. The screen
-was the only part of the pipeline that learned nothing about the case.
-
-Three accent tokens now come from the region the seed drew, one palette per entry
-in `WHERE`, sent in `/state` and applied to the document root on boot.
-
-**Derived from the region rather than sampled from the generated backdrop**,
-which is the opposite of what I argued for yesterday and the reason is the
-playtest: the art is the weakest thing in the build right now, and sampling would
-make the colour of an evening depend on whether the picture came out well, which
-is the one thing about a case nobody can predict. A dealt palette also works with
-`--art` off, which is most runs and all of the tests, and it is one more deck,
-which is how everything else in this engine varies.
-
-**Ground, paper and text do not move.** Only `warm`, `cool` and `bad` are dealt,
-`bad` stays roughly red in every set because it means contradiction, and the
-notebook keeps its own paper palette and overrides all three on itself.
-Legibility is not a thing to deal from a seed: no case can arrive unreadable
-however its region was drawn, and a test asserts the dealt set is exactly those
-three keys.
-
-## D-165 Nobody was ever simply already there
-**Date:** 2026-09-28
-**Status:** active
-
-Asked why the cases still feel alike, a player named three things: there is
-always a technical person, always a guest who does not usually come, and the
-victim is always an old person who died falling down something. All three are
-real and all three are measurable.
-
-Twenty eight distinct cases, read end to end.
-
-**The victim was the proprietor in twenty two.** Owner of the estate, master of
-the boat, president of the co-operative, chief instructor and majority
-shareholder, the woman who signed everyone here off. The cast then writes itself,
-because the people around a proprietor are the people who work for one: `estate`
-appears in twenty suspect roles, `cellar` in ten, `manager` in seven, `foreman`
-in seven. The prompt now says plainly that the victim does not have to own the
-place, and that a case is more interesting when the person everybody has to talk
-about is not the person who was paying them.
-
-**And the murder is staged the same way every single time.** In twenty three of
-twenty eight the killer asked, took, brought or followed the victim somewhere,
-over half of those downstairs, and in **zero** was the victim already there for
-their own reasons. Every murder in this engine is therefore premeditated.
-
-That last number explains something that had been puzzling since D-161. A
-premeditated murder needs a reason to act *tonight*, which is a deadline, which
-is why the new motive registers kept getting rewritten into announcements however
-plainly the deck dealt them. The deadline was not coming from the motive
-instruction at all. It was coming from the staging.
-
-The cause is structural and worth naming: the murder is an `exclusive`
-constraint, so somebody has to produce solitude, and the cheapest way to produce
-it is to have the killer arrange it. The prompt now lists the others. The victim
-goes somewhere alone every night of their life. A room empties for two minutes
-and nobody planned it. The killer walks in and is not expecting to. And the line
-that ties it back to D-161: **somebody who has been carrying a thing for eleven
-years does not need a pretext, they need an opportunity.**
-
-## D-166 A batch is only worth buying if it can be told apart from the next one
-**Date:** 2026-09-28
-**Status:** active
-
-Asked whether a pile of cases could be generated for statistics without playing
-them, and whether to do that before or after changing the decks. `--fill N`
-already does the generating. Two things had to be fixed first or the money would
-have been wasted.
-
-**Every case in a batch was getting the same occasion.** The same fault as D-163
-and D-120: `_draw` fills in whatever was left off the command line, once, from
-the first seed, and `_fill` then passed that one setting into every case. A
-buffer of twelve was twelve evenings at the same party, which is useless as a
-buffer and worse than useless for measuring what the occasion deck does, since
-the occasion is the deck a batch is mostly bought to measure. It now draws one
-per case when none was given, exactly as the shape already did.
-
-**And nothing recorded which instructions made a draft.** `Mystery.built_with`
-now carries the first eight characters of the hash of the system prompt, stamped
-by `generate` after parsing, and `--score` groups by it and says so in the
-margin when a corpus holds more than one.
-
-This is the fix D-154 asked for and nobody did, and the cost of not having it is
-on the record: "A22 fires on 97% of drafts" turned out to mean "28 of the 30
-predate the instruction A22 checks". Every base rate quoted in this log before
-today was measured over a corpus mixing several sets of instructions. The current
-52-draft corpus reports as `before the stamp x52`, which is the honest label.
-
-**Order of work, which was the actual question.** Decks first, then one batch.
-The deck edits worth making need no evidence: `OLD_BUSINESS` has twelve entries
-and eleven are an institutional cover-up, and no number is going to make that
-more true. The prompt changes of the last three days are the opposite: four of
-them are shipped and completely unmeasured. So a batch bought now would measure
-instructions that are about to change again, and a batch bought after the deck
-work measures everything at once for the same money.
-
-Sizing it: the properties in question are near-binary per draft, so eight is
-enough to tell "22 of 28" from "roughly half", which is the size of the change
-being looked for. Eight drafts is about $3.20 and one evening.
-
-Not to be done: running the batch on a cheaper model. It would cost a quarter as
-much and measure a model nobody plays with.
-
-## D-167 The victim may be named
-**Date:** 2026-09-28
-**Status:** active
-
-A played case opened with this, as the first sentence of the first screen:
-
-> Doña Amalia **one of them** was found at the foot of the river steps
-
-The victim is Amalia Reccioli. A suspect is Inés Reccioli de Farías.
-`unname_the_commission` takes every token longer than two characters out of
-every non-victim name, so it took "Reccioli" out of the dead woman's own name.
-
-**Sixteen of fifty six cases give a suspect a name the victim shares**, because a
-niece, a nephew and a daughter are the three commonest relationships this cast
-produces. Two commissions in the corpus are visibly mangled. V13 had the mirror
-of the same fault and would report the collision as a violation.
-
-Both now skip any token the victim shares. A suspect whose name is *entirely*
-shared with the victim is left alone rather than half-erased, which names nobody
-the household was not already thinking about.
-
-The rule the repair exists for is unchanged and was always written down: the
-victim may be named, the suspects may not.
-
-## D-168 A group that has only ever covered something up
-**Date:** 2026-09-28
-**Status:** active
-
-`OLD_BUSINESS` is drawn once per case and the prompt hands it over as "what
-binds them to each other, and not to the dead man... it is why they know things
-about each other rather than only about the victim". It had twelve entries and
-eleven were somebody's guilt: a death recorded as an accident, money quietly
-replaced, a fire and who was blamed, an inspection survived by arrangement, work
-signed by the wrong person, an accusation withdrawn under pressure.
-
-So the only group this engine could describe was a group that had covered
-something up, which is most of the reason every cast reads as colleagues
-managing an exposure. It is the smallest real deck in the project and it was
-setting the entire social history of the case.
-
-Two cut: "a season or a year everyone refers to only by its date", which is a
-label rather than an event and gives the model nothing to build; and "an
-inspection that was survived by arrangement", which is the third card in the
-deck meaning "we got away with it".
-
-Ten added, none of them a crime: a child they all helped raise for a year, a
-relationship between two of them that ended here, a rescue nobody was thanked
-for, money one gave another and never mentioned, a strike they all signed, an
-illness one nursed another through, a prize with one name on it, a faith or a
-trade they all left at the same time, a summer in the same house, a funeral half
-of them did not attend.
-
-Twenty entries, with concealment now half the deck rather than all of it, and a
-test that fails if it goes back over sixty per cent. Kept at half deliberately:
-a group that hid something together is a real and useful thing to be. The fault
-was that it was the only thing available.
-
-## D-169 Two decks answering the same question
-**Date:** 2026-09-28
-**Status:** active
-
-A player asked whether the standing and the commission were working or quietly
-producing contradictions. Checked against what the seeds actually dealt, the
-**standing is working exactly**: a case dealt "an old colleague of the victim,
-invited for reasons only the victim knew" wrote "Octavio Bardi wrote to you three
-weeks ago and asked you to come up for the vote, you two ran gauges together",
-and one dealt "acting for one of the guests, and everybody knows it" wrote "You
-work for Julieta, and every person in this house knows it". The D-111 fence is
-holding too: a suspect is told only the investigator's role, in the third person.
-
-The commission was the problem, and the fault is structural rather than a bad
-entry. **Six of the eight also asserted who engaged the player or why they were
-in the building**, which is what `STANDINGS` is for:
-
-- "Somebody in this house wrote to you a fortnight ago saying they were frightened"
-- "You did not come about a death at all. You came for a document, a payment or an object"
-- "You were already here on other business when it happened"
-
-That last one is a straight duplicate of the first standing. The two decks are
-dealt from independent streams, so nothing stopped a case being told it was hired
-by a frightened letter-writer and also that it was halfway through an unrelated
-survey.
-
-The split is now clean and stated in both places. **The standing says who the
-player is and why they cannot leave. The commission says only what the house has
-already decided about the death and what it wants written down.** Six entries
-rewritten to that line, keeping their wrong-notes, and two new ones that could
-only ever have been commissions: nobody has said the word murder out loud yet,
-and everybody agreed what happened within an hour and agrees a little too well.
-
-A test fails if an entry starts hiring the player again.
-
-## D-170 A deck that could not make a suspect
-**Date:** 2026-09-28
-**Status:** active
-
-`INTRIGUES` is dealt three per case and the prompt turns each into an innocent
-suspect's secret, so it is the deck every red herring is made of. Weighed by what
-it would cost the holder if it came out, the twenty four entries were:
+The first batch landed and `--score` said:
 
 ```
-would end them (a reader writes the name down)     3
-would damage them (career, marriage, standing)     7
-would merely embarrass them                       14
+built by before the stamp x40, 7884377a/opus-5 x8  <- more than one set of
+instructions in here, so these rates belong to no version in particular
+
+  A24    39/48    81%
+  A25    10/48    21%
 ```
 
-Sampled flat, a hand of three was usually three embarrassments. So the deck could
-not supply a person anybody would seriously suspect, and the model had to invent
-motive-grade material for the innocents from nothing, every time. That is most of
-why A24 keeps firing: the instruction asks for a rival chain and the material
-handed over cannot carry one.
+The warning was right and the report then printed a pooled number anyway, which
+is half a tool. 81% over forty eight drafts from two different sets of
+instructions answers nothing: it is neither the old rate nor the new one, and the
+whole reason `built_with` exists (D-166) is to be able to see whether a change
+landed.
 
-Two entries were also not concealable at all, which is a separate fault. "Somebody
-is about to be replaced and is the only person who does not know" cannot be a
-secret its holder keeps. "A job was given to the wrong person and everybody knows
-which" is hidden by nobody. Both cut.
+The report now gives a column per cohort when there is more than one, unstamped
+first and newest last, with the rows sorted by the newest column, since the
+question is always whether the last change moved anything. A single-cohort corpus
+keeps the plain list it always had, because a column per cohort is worth the
+width only when there is something to compare.
 
-Now thirty five entries in three tiers, and a hand is **one from the heavy tier
-plus two from the rest**, so every case has exactly one innocent carrying
-something that could end them and four with smaller things. The brief says which
-of the three is the heavy one and that it is the one to build the chain on.
+The pooled numbers are gone rather than kept alongside. A number that belongs to
+no version is not a fallback, it is the thing that was misleading in the first
+place, and D-152 already learned this once with the pre-secrets drafts.
 
-The principle, which took a conversation to get right: **a motive is a reason to
-kill and an intrigue is a reason to lie, and those stay different jobs.** What
-has to match between the two decks is the *weight*, so that heavy does not mean
-guilty. Making them the same in kind would give five people whose lives are all
-ending tonight, which is melodrama and flat in a new way. The texture of an
-interrogation comes from five people obstructing for five different-sized
-reasons; the fault was that every reason was small.
+## D-176 The game moves in beside the shop
+**Date:** 2026-09-29
+**Status:** active
 
-**Pairs deferred deliberately.** Writing the floor into each entry, the way
-`COMMISSIONS` carries its wrong-note, was the other candidate and is a reasonable
-design. Not done yet, because A25 (the herring has a way out) has had exactly one
-draft since the prompt started asking for it, and building a second fix for
-something the first has never been tested on is how this project has gone wrong
-before. Revisit after the batch. There is also a craft argument: a floor written
-in the abstract months before the case exists will read like a deck entry, where
-one the model derives from the house it has just invented will not.
+The free AWS year is ending, and the next thing the game needs is groups
+playing it without me in the room. Both point at the Hetzner box that already
+serves 7seastcg.com: a CPX22, 4 GB, running at about 0.6 GB, with Caddy in
+front, the shop as its own `7seas` user on 127.0.0.1:3000, and Postgres behind
+it. The game idles near 0.3 GB, because every expensive thing it does happens at
+Anthropic.
+
+It copies the shop's shape rather than inventing one: a `mystery` system user
+with no password and no shell, `/srv/mystery/{repo,shared,var}`, a systemd unit
+on 127.0.0.1:8000, and a read-only deploy key. The unit caps the game at 1 GB
+and makes the whole disk read-only to it except `var/`, because the neighbour is
+a shop that takes payments and the game is the one that should fail first.
+
+**Each app owns its own Caddy config.** The shop's Caddyfile lives in the shop
+repo and is copied over `/etc/caddy/Caddyfile` whenever it changes. A block
+added to it by hand would be deleted by the next shop change, silently, and the
+game would vanish without anyone having touched it. So the shop gets one line,
+`import /etc/caddy/sites/*.caddy`, and the game's block lives in its own repo
+and its own file. Everything that reloads Caddy validates first, because a
+Caddyfile error takes the shop down too.
+
+**The server only serves.** Cases are drafted, checked and given art on the PC,
+bundled with `--bundle` (D-083) and unpacked with `mysteryctl add`. The server
+never holds the image key and never decides to spend money on a draft, which is
+D-078's rule (a visitor must never be what decides to spend) extended to the
+machine itself.
+
+No compression on the game's block, unlike the shop's: gzip can hold back a
+streamed answer until a chunk fills.
+
+The AWS code stays. It is the part of the project that answers "have you
+deployed anything" in an interview, and the environment variables still switch
+it back on.
+
+## D-177 One tester login, changed per group
+**Date:** 2026-09-29
+**Status:** active
+
+Basic auth at Caddy, the same pattern as the shop's `/admin`: the hash lives in
+`/etc/caddy/mystery-users`, never in git. One user, `tester`. The only question
+was whether changing it would be easy enough to actually do between groups, so
+it is one command: `sudo mysteryctl password` asks twice, hashes, writes, and
+validates before it reloads.
+
+A password is the right door for now because the per-session question budget
+(D-128) limits a session but nothing limits how many sessions strangers could
+open. That global cap is owed before anything goes public, and is not built.
+
+`mysteryctl` exists so the routine is commands rather than recipes: `add`,
+`play`, `fresh`, `password`, `transcripts`, `update`, `logs`. Anything that ends
+the running game asks first.
+
+## D-178 Rooms, and what runs until they exist
+**Date:** 2026-09-29
+**Status:** design open
+
+The groups we want are friends playing together online, on separate laptops.
+Neither mode fits: by default every browser gets its own game, and `--together`
+puts every visitor to the server into one. Two groups on the same evening would
+share a notebook. Decided: room codes, one shared game per group. The design
+(what a room holds, how a group sees each other's questions, two people asking
+at once) is the next fork, not settled here.
+
+Until then the server runs `--together`, one group per evening, and
+`mysteryctl fresh` between them. The cost is that any restart is a new game for
+whoever is playing, so no updates during a test.
+
+## D-179 Language, later
+**Date:** 2026-09-29
+**Status:** parked
+
+The model can play the suspects in any language, and a group should be asked
+which at the start. Parked, not dropped: rooms are the natural place for it (a
+room has a language the way it has a case), so the rooms design keeps a slot for
+it. The part that is not just a prompt line is everything already written in
+English: the briefing, the notebook, the clues and the page itself.

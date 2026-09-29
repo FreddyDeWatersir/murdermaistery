@@ -121,33 +121,41 @@ def test_drafts_from_before_secrets_are_left_out_of_the_base_rates() -> None:
     assert "A3" not in rates, "a check that only the pre-secrets draft fired"
 
 
-def test_the_report_says_which_prompt_made_these(tmp_path) -> None:
-    """Every base rate in the decision log so far was measured over a corpus that
-    mixed prompt versions with no way to tell them apart (D-166).
+def test_a_mixed_corpus_gets_a_column_per_cohort(tmp_path) -> None:
+    """Saying the rates belong to no version and then printing them anyway was
+    half a report (D-175).
 
-    That is how "A22 fires on 97% of drafts" turned out to mean "28 of the 30
-    predate the instruction it checks".
+    The stamp exists so a change can be seen to have landed, and a pooled rate
+    over two prompt versions cannot show that however loudly the header warns.
     """
     from mystery.bench import report, sweep
     from mystery.models import Mystery
 
     case = Mystery.model_validate(OPENING_NIGHT)
-    for name, version in (("a", "1111aaaa"), ("b", "1111aaaa"), ("c", "2222bbbb")):
+    for name, version in (("a", ""), ("b", ""), ("c", "7884377a/opus-5")):
         stamped = case.model_copy(update={"built_with": version})
-        (tmp_path / f"{name}.json").write_text(
-            stamped.model_dump_json(), encoding="utf-8"
-        )
+        (tmp_path / f"{name}.json").write_text(stamped.model_dump_json(), encoding="utf-8")
 
     page = report(sweep(tmp_path))
 
-    assert "1111aaaa x2" in page and "2222bbbb x1" in page
-    assert "belong to no version in particular" in page, (
-        "a mixed corpus has to say so, or the rates read as if they meant something"
+    assert "by the instructions that made the draft" in page
+    assert "pre-stamp" in page and "7884377a" in page
+    assert "n=2" in page and "n=1" in page
+
+
+def test_one_cohort_keeps_the_plain_list(tmp_path) -> None:
+    """A column per cohort is worth the width only when there is something to
+    compare. One set of instructions gets the single column it always had."""
+    from mystery.bench import report, sweep
+    from mystery.models import Mystery
+
+    case = Mystery.model_validate(OPENING_NIGHT).model_copy(
+        update={"built_with": "7884377a/opus-5"}
     )
+    for name in ("a", "b"):
+        (tmp_path / f"{name}.json").write_text(case.model_dump_json(), encoding="utf-8")
 
+    page = report(sweep(tmp_path))
 
-def test_a_draft_records_the_prompt_that_made_it() -> None:
-    from mystery.generator import prompt_version
-
-    assert len(prompt_version()) == 8
-    assert prompt_version() == prompt_version()
+    assert "by the instructions that made the draft" not in page
+    assert "how often each advisory fires" in page

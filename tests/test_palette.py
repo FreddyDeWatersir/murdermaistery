@@ -4,6 +4,7 @@ What is being protected is variety across a *run* of cases, which is not a
 property any single case has, so these tests look at sequences (D-075).
 """
 
+from mystery.models import Mystery
 from mystery.palette import INTRIGUES, MANNERS, MOTIVES, draw
 
 
@@ -417,3 +418,94 @@ def test_the_brief_says_the_first_one_is_the_heavy_one() -> None:
     brief = draw(3, "a memorial swim", "the_lie", 5).brief()
 
     assert "first of the three is heavier" in brief
+
+
+def test_a_batch_makes_n_drafts_whatever_the_buffer_holds(monkeypatch, tmp_path) -> None:
+    """`--fill 8` with seventeen cases waiting correctly did nothing at all: it
+    tops *up to* a target, which is right for a buffer and wrong for statistics
+    (D-172). A corpus is not full because the queue is.
+    """
+    import mystery.cli as cli
+    from mystery.example import OPENING_NIGHT
+
+    asked: list[int] = []
+
+    def spy(request, drafter, cache_dir=None, attempts=3):
+        asked.append(request.seed)
+        return Mystery.model_validate(OPENING_NIGHT)
+
+    monkeypatch.setattr(cli, "generate", spy)
+    monkeypatch.setattr(cli, "anthropic_drafter", lambda *a, **kw: (lambda r, c: {}))
+    monkeypatch.setattr(cli, "CACHE", tmp_path)
+
+    assert cli.main(["--drafts", "4", "--seed", "500"]) == 0
+    assert asked == [500, 501, 502, 503]
+
+
+def test_a_batch_varies_the_occasion_and_the_shape(monkeypatch, tmp_path) -> None:
+    """The reason to buy a batch is mostly to see what the decks do, so a batch
+    at one occasion measures nothing (D-163, D-166)."""
+    import mystery.cli as cli
+    from mystery.example import OPENING_NIGHT
+
+    seen: list[tuple[str, str]] = []
+
+    def spy(request, drafter, cache_dir=None, attempts=3):
+        seen.append((request.setting, request.topology))
+        return Mystery.model_validate(OPENING_NIGHT)
+
+    monkeypatch.setattr(cli, "generate", spy)
+    monkeypatch.setattr(cli, "anthropic_drafter", lambda *a, **kw: (lambda r, c: {}))
+    monkeypatch.setattr(cli, "CACHE", tmp_path)
+
+    cli.main(["--drafts", "10", "--seed", "900"])
+
+    assert len({s for s, _ in seen}) > 3, "ten drafts at one occasion measure nothing"
+    assert len({t for _, t in seen}) > 2, "and one shape is one puzzle"
+
+
+def test_a_batch_waits_out_an_overloaded_api(monkeypatch, tmp_path) -> None:
+    """Six of eight drafts made, then "Overloaded" on the seventh ended the run
+    and threw away the eighth, three dollars in (D-174).
+
+    Nothing was charged for the failure, because the call did not happen. The
+    only cost of giving up was the drafts that never got made.
+    """
+    import mystery.cli as cli
+    from mystery.example import OPENING_NIGHT
+
+    tries: list[int] = []
+
+    def flaky(request, drafter, cache_dir=None, attempts=3):
+        tries.append(request.seed)
+        if tries.count(request.seed) == 1:
+            raise RuntimeError("Error code: 529 - {'type': 'overloaded_error'}")
+        return Mystery.model_validate(OPENING_NIGHT)
+
+    monkeypatch.setattr(cli, "generate", flaky)
+    monkeypatch.setattr(cli, "anthropic_drafter", lambda *a, **kw: (lambda r, c: {}))
+    monkeypatch.setattr(cli, "CACHE", tmp_path)
+    monkeypatch.setattr(cli.time, "sleep", lambda _: None)
+
+    assert cli.main(["--drafts", "3", "--seed", "10"]) == 0
+    assert sorted(set(tries)) == [10, 11, 12], "every seed should still get drafted"
+
+
+def test_a_batch_does_not_wait_out_a_missing_key(monkeypatch, tmp_path) -> None:
+    """No key and no such model will not be different in twenty seconds, and
+    retrying them costs money the second time."""
+    import mystery.cli as cli
+
+    calls: list[int] = []
+
+    def refused(request, drafter, cache_dir=None, attempts=3):
+        calls.append(request.seed)
+        raise RuntimeError("No ANTHROPIC_API_KEY found")
+
+    monkeypatch.setattr(cli, "generate", refused)
+    monkeypatch.setattr(cli, "anthropic_drafter", lambda *a, **kw: (lambda r, c: {}))
+    monkeypatch.setattr(cli, "CACHE", tmp_path)
+    monkeypatch.setattr(cli.time, "sleep", lambda _: None)
+
+    assert cli.main(["--drafts", "4", "--seed", "20"]) == 1
+    assert calls == [20], "it should stop on the first one, not try all four"

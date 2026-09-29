@@ -1,0 +1,47 @@
+# /etc/systemd/system/mystery.service
+#
+# The murder mystery, beside the shop on the Hetzner box (D-176). Installed by
+# deploy/setup-server.sh and refreshed by `mysteryctl update`; edit this copy in
+# the repo, never the installed one, or the next update puts it back.
+
+[Unit]
+Description=Murder mystery (web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mystery
+Group=mystery
+
+# Every path in the code is relative (`var/cases`, `var/art`, `var/sessions`),
+# so this is what puts them in /srv/mystery/var and not inside the clone.
+WorkingDirectory=/srv/mystery
+
+# The API key, and which case to serve. Both live outside the clone, so a
+# `git pull` can never overwrite or publish them. `mysteryctl play` writes the
+# second one.
+EnvironmentFile=/srv/mystery/shared/.env
+EnvironmentFile=-/srv/mystery/shared/run.env
+
+# $MYSTERY_ARGS is deliberately unbraced: systemd splits it into words, so
+# "--together --case abc123" arrives as three arguments. Listens on 127.0.0.1
+# only (no --share), so the one way in from outside is Caddy and its password.
+ExecStart=/srv/mystery/repo/.venv/bin/python -m mystery.web --port 8000 $MYSTERY_ARGS
+
+Restart=on-failure
+RestartSec=5
+
+# The shop lives on the same 4 GB. The game idles near 0.3 GB; past 1 GB
+# something is wrong, and the game should be the one that dies, not Postgres.
+MemoryMax=1G
+
+# If the game is ever broken into, this is all it can touch: its own var/
+# folder. The rest of the disk is read-only to it and /home is invisible.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/mystery/var
+
+[Install]
+WantedBy=multi-user.target

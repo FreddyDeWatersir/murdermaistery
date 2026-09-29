@@ -606,13 +606,21 @@ def check_the_commission_names_nobody(mystery: Mystery) -> list[Violation]:
     text = mystery.commission or ""
     if not text.strip():
         return []
+    # A name the victim shares does not name a suspect (D-167). Sixteen of
+    # fifty six cases give somebody the victim's surname, and the victim may be
+    # named, so "Reccioli" in a briefing about Amalia Reccioli is the dead woman
+    # and not her niece.
+    dead = next((c for c in mystery.characters if c.id == mystery.victim), None)
+    theirs = {word for word in (dead.name.split() if dead else []) if len(word) > 2}
     named = sorted(
         {
             character.name
             for character in mystery.characters
             if character.id != mystery.victim
             for word in character.name.split()
-            if len(word) > 2 and re.search(rf"\b{re.escape(word)}\b", text)
+            if len(word) > 2
+            and word not in theirs
+            and re.search(rf"\b{re.escape(word)}\b", text)
         }
     )
     if not named:

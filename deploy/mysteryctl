@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# mysteryctl: everything you do to the murder mystery on the server, in one place.
+#
+# Installed to /usr/local/bin by deploy/setup-server.sh, so from anywhere on the
+# box:  sudo mysteryctl help
+#
+# Every command that ends the game in progress says so and asks first, because
+# while the server runs --together one restart is a new game for everybody (D-178).
+
+set -euo pipefail
+
+APP=/srv/mystery
+PY=$APP/repo/.venv/bin/python
+RUN_ENV=$APP/shared/run.env
+USERS=/etc/caddy/mystery-users
+SITE=/etc/caddy/sites/mystery.caddy
+URL=https://mystery.7seastcg.com
+
+# Everything below needs root. Asking for sudo here beats failing halfway.
+if [[ $EUID -ne 0 ]]; then
+	exec sudo "$0" "$@"
+fi
+ME=${SUDO_USER:-federico}
+
+die() {
+	echo "  $*" >&2
+	exit 1
+}
+
+# Run a command as the game's own user, from the folder its relative paths expect.
+as_mystery() {
+	(cd "$APP" && sudo -u mystery -H "$@")
+}
+
+ends_the_game() {
+	if systemctl is-active --quiet mystery; then
+		echo "  This ends the game that is running now, for everybody in it."
+		read -rp "  Go ahead? [y/N] " answer
+		[[ $answer == [yY]* ]] || die "Nothing changed."
+	fi
+}
+
+# Wait until the game answers on its port, or give up and say where to look.
+restart_and_wait() {
+	systemctl restart mystery
+	for _ in $(seq 30); do
+		if curl -fs -o /dev/null http://127.0.0.1:8000/; then
+			echo "  Up at $URL"
+			return 0
+		fi
+		systemctl is-active --quiet mystery || break
+		sleep 1
+	done
+	die "It did not come up. 'sudo mysteryctl logs' says why."
+}
+
+caddy_reload() {
+	local out
+	if ! out=$(caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1); then
+		echo "$out" | tail -5 >&2
+		die "Caddy rejected the config, so nothing was reloaded. The shop is untouched."
+	fi
+	systemctl reload caddy
+}
+
+usage() {
+	cat <<'EOF'
+  sudo mysteryctl status          is it running, and which case
+  sudo mysteryctl cases           the cases on the shelf
+  sudo mysteryctl add FILE.zip    put a case you bundled on your PC on the shelf
+  sudo mysteryctl play CASE_ID    serve that case (a fresh game)
+  sudo mysteryctl fresh           same case, fresh game for the next group
+  sudo mysteryctl password        change the tester password
+  sudo mysteryctl transcripts     copy every session to ~/transcripts
+  sudo mysteryctl update          pull the latest code and restart
+  sudo mysteryctl logs            follow the log (Ctrl+C to stop)
+EOF
+}
+
+cmd=${1:-help}
+shift || true
+
+case $cmd in
+status)
+	systemctl status mystery --no-pager --lines=5 || true
+	serving=$(sed -n 's/^MYSTERY_ARGS=//p' "$RUN_ENV" 2>/dev/null || true)
+	echo
+	echo "  Serving: ${serving:-nothing yet (sudo mysteryctl play CASE_ID)}"
+	;;
+
+cases)
+	as_mystery "$PY" -m mystery.web --cases
+	;;
+
+add)
+	zip=${1:-}
+	[[ -n $zip ]] || die "Which zip? For example: sudo mysteryctl add ~/abc123.zip"
+	[[ -f $zip ]] || die "No such file: $zip"
+	name=$(basename "$zip")
+	# The game user cannot read your home folder, and should not be able to,
+	# so the zip is handed over into its own inbox first.
+	install -o mystery -g mystery -m 600 "$zip" "$APP/var/inbox/$name"
+	as_mystery "$PY" -m mystery.cli --unbundle "var/inbox/$name"
+	rm -f "$APP/var/inbox/$name"
+	;;
+
+play)
+	id=${1:-}
+	[[ $id =~ ^[A-Za-z0-9_-]+$ ]] || die "Which case? 'sudo mysteryctl cases' lists them."
+	compgen -G "$APP/var/cases/*${id}*.json" >/dev/null ||
+		die "No case '$id' on the shelf. 'sudo mysteryctl cases' lists them."
+	ends_the_game
+	printf 'MYSTERY_ARGS=--together --case %s\n' "$id" >"$RUN_ENV"
+	chown mystery:mystery "$RUN_ENV"
+	chmod 640 "$RUN_ENV"
+	restart_and_wait
+	;;
+
+fresh)
+	[[ -s $RUN_ENV ]] || die "Nothing is being served yet. Use: sudo mysteryctl play CASE_ID"
+	ends_the_game
+	restart_and_wait
+	;;
+
+password)
+	read -rsp "  New tester password: " pw
+	echo
+	read -rsp "  Again: " again
+	echo
+	[[ $pw == "$again" ]] || die "They did not match. Nothing changed."
+	((${#pw} >= 10)) || die "Use at least 10 characters. Nothing changed."
+	# --plaintext puts the password on a command line for the few milliseconds
+	# the hash takes. On a box where you are the only person who logs in, that
+	# beats piping it through a prompt that may or may not read stdin.
+	hash=$(caddy hash-password --plaintext "$pw")
+	unset pw again
+	tmp=$(mktemp)
+	printf 'tester %s\n' "$hash" >"$tmp"
+	install -o root -g caddy -m 640 "$tmp" "$USERS"
+	rm -f "$tmp"
+	if grep -qs 'sites/\*\.caddy' /etc/caddy/Caddyfile; then
+		caddy_reload
+		echo "  Changed. Testers log in as 'tester' with the new password."
+	else
+		echo "  Saved. Caddy is not serving the game yet (deploy/README.md, step 9)."
+	fi
+	;;
+
+transcripts)
+	shopt -s nullglob
+	files=("$APP"/var/sessions/*.json)
+	((${#files[@]})) || die "No sessions yet."
+	dest=$(getent passwd "$ME" | cut -d: -f6)/transcripts
+	install -d -o "$ME" -g "$ME" -m 700 "$dest"
+	cp -p "${files[@]}" "$dest"/
+	chown "$ME:$ME" "$dest"/*.json
+	echo "  ${#files[@]} sessions in ~/transcripts, newest first:"
+	ls -lt "$dest" | sed -n '2,6p'
+	echo
+	echo "  On your PC:  scp -r $ME@157.180.80.106:transcripts ."
+	;;
+
+update)
+	ends_the_game
+	as_mystery git -C "$APP/repo" pull --ff-only
+	as_mystery bash -c "cd $APP/repo && uv sync --locked --no-dev"
+	install -m 644 "$APP/repo/deploy/mystery.service" /etc/systemd/system/mystery.service
+	systemctl daemon-reload
+	if ! cmp -s "$APP/repo/deploy/mystery.caddy" "$SITE"; then
+		cp "$SITE" "$SITE.bak"
+		install -m 644 "$APP/repo/deploy/mystery.caddy" "$SITE"
+		caddy_reload
+		echo "  Caddy picked up the new site block (old one kept as $SITE.bak)."
+	fi
+	restart_and_wait
+	# Last, and by rename, because this script is the file being replaced and
+	# bash is still reading it.
+	install -m 755 "$APP/repo/deploy/mysteryctl" /usr/local/bin/.mysteryctl.new
+	mv -f /usr/local/bin/.mysteryctl.new /usr/local/bin/mysteryctl
+	;;
+
+logs)
+	exec journalctl -u mystery -f -n 50
+	;;
+
+help | -h | --help)
+	usage
+	;;
+
+*)
+	usage
+	exit 1
+	;;
+esac

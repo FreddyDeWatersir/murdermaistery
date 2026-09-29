@@ -1,0 +1,26 @@
+# /etc/caddy/sites/mystery.caddy
+#
+# Installed from the mystery repo (deploy/mystery.caddy). The shop's Caddyfile
+# pulls every file in /etc/caddy/sites in with one import line, so the shop
+# repo never has to know the game exists and a shop deploy can never delete
+# this (D-176).
+
+mystery.7seastcg.com {
+	# One login for testers. The hash lives in /etc/caddy/mystery-users, never
+	# in git, and `sudo mysteryctl password` replaces it (D-177).
+	basic_auth {
+		import /etc/caddy/mystery-users
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	# No `encode` here, unlike the shop. Compressing the answer stream can hold
+	# words back until a chunk fills, and the suspects would stutter.
+	reverse_proxy 127.0.0.1:8000
+}

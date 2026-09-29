@@ -912,3 +912,121 @@ def test_the_prompt_does_not_require_the_victim_to_own_the_place() -> None:
     from mystery.generator import SYSTEM_PROMPT
 
     assert "does not have to own the place" in SYSTEM_PROMPT
+
+
+def test_the_victims_own_name_survives_the_briefing_repair() -> None:
+    """Sixteen of fifty six cases give a suspect the victim's surname, because a
+    niece, a nephew and a daughter are the commonest things in this cast (D-167).
+
+    Replacing that surname rewrote the dead woman's own name in the first
+    sentence the player reads: "Doña Amalia one of them was found at the foot of
+    the river steps".
+    """
+    from mystery.generator import unname_the_commission
+
+    family = Mystery.model_validate(
+        {
+            **json.loads(json.dumps(GOOD_DRAFT)),
+            "victim": "roos",
+            "killer": "gustav",
+            "characters": [
+                {"id": "roos", "name": "Amalia Reccioli"},
+                {"id": "gustav", "name": "Ines Reccioli de Farias"},
+                {"id": "lelia", "name": "Julieta Bossani"},
+                {"id": "mihail", "name": "Cosme Lattanzi"},
+            ],
+            "commission": (
+                "Amalia Reccioli was found at the foot of the steps, and Ines "
+                "Reccioli de Farias will not have it."
+            ),
+        }
+    )
+
+    repaired = unname_the_commission(family).commission
+
+    assert "Amalia Reccioli was found" in repaired, "the victim may be named"
+    assert "Ines" not in repaired, "the suspect may not"
+
+
+def test_v13_does_not_report_a_name_the_victim_shares() -> None:
+    from mystery.validator import validate
+
+    family = Mystery.model_validate(
+        {
+            **json.loads(json.dumps(GOOD_DRAFT)),
+            "victim": "roos",
+            "killer": "gustav",
+            "characters": [
+                {"id": "roos", "name": "Amalia Reccioli"},
+                {"id": "gustav", "name": "Ines Reccioli de Farias"},
+                {"id": "lelia", "name": "Julieta Bossani"},
+                {"id": "mihail", "name": "Cosme Lattanzi"},
+            ],
+            "commission": "Amalia Reccioli was found at the foot of the steps.",
+        }
+    )
+
+    assert not [v for v in validate(family, phase="proposed").violations if v.rule == "V13"]
+
+
+def test_a_draft_records_the_model_as_well_as_the_prompt() -> None:
+    """The prompt hash stopped being enough the moment there were two models to
+    choose between (D-171). A corpus that cannot tell them apart is D-166 again
+    in a different column.
+    """
+    def wrote_it(request, complaints):
+        return SHIPPED
+
+    wrote_it.model = "claude-opus-5-5"
+
+    stamped = generate(REQUEST, drafter=wrote_it)
+
+    assert stamped.built_with.endswith("/opus-5-5")
+    assert "/" in stamped.built_with, "the prompt version is still the first half"
+
+
+def test_a_drafter_with_no_model_still_stamps_the_prompt() -> None:
+    """Every fake in this suite is a plain function, and none of them should have
+    to grow an attribute to keep the pipeline working."""
+    stamped = generate(REQUEST, drafter=_fake_drafter(SHIPPED))
+
+    assert stamped.built_with and "/" not in stamped.built_with
+
+
+def test_the_rates_cover_the_models_actually_used() -> None:
+    """Getting a price wrong by a factor of forty five cost real money once
+    (D-082), so the table has to carry whatever the defaults point at."""
+    from mystery.generator import DRAFT_MODEL, RATES, VOICE_MODEL
+
+    assert DRAFT_MODEL in RATES and VOICE_MODEL in RATES
+    assert RATES["claude-opus-5-5"] == (4.0, 20.0), "Opus 5.5 is $4 in, $20 out"
+
+
+def test_a_model_that_cannot_force_a_tool_call_is_refused_before_it_is_paid_for() -> None:
+    """Opus 5.5 returns a 400 for `tool_choice: {"type": "tool"}`, which is how
+    this pipeline guarantees a valid case (D-002, D-173).
+
+    Found in the middle of a batch that had been announced at $2.41, so the
+    useful moment to say so is before the first call rather than after it.
+    """
+    from mystery.generator import complaint_about_model
+
+    assert complaint_about_model("claude-opus-5-5")
+    assert "output_config" in complaint_about_model("claude-opus-5-5")
+
+
+def test_a_model_nobody_has_tested_is_not_refused() -> None:
+    """A deny list, not an allow list. What is known is which models refuse;
+    treating everything unlisted as broken would block the next one that works
+    and would be a claim nobody checked."""
+    from mystery.generator import complaint_about_model
+
+    assert complaint_about_model("claude-opus-5") is None
+    assert complaint_about_model("claude-sonnet-5-5") is None
+    assert complaint_about_model("some-model-from-next-year") is None
+
+
+def test_the_drafting_default_is_a_model_that_can_do_it() -> None:
+    from mystery.generator import DRAFT_MODEL, complaint_about_model
+
+    assert complaint_about_model(DRAFT_MODEL) is None

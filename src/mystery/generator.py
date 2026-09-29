@@ -67,6 +67,12 @@ VOICE_MODEL = "claude-sonnet-5"
 # which is the lesson from getting the image prices wrong by a factor of forty
 # five (D-082, D-084).
 RATES = {
+    # Checked against the published price list on 2026-09-28 (D-171). Opus 5.5
+    # is $4/$20 against Opus 5's $5/$25, so a draft is a fifth cheaper for the
+    # same work. The older entries stay because drafts made on them are still on
+    # the shelf and `--score` reads their logged cost.
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
     "claude-opus-5": (5.0, 25.0),
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-5": (3.0, 15.0),
@@ -79,6 +85,40 @@ RATES = {
 # forty one cents a draft, not twenty six. The estimate printed before a run is
 # only honest if this is kept up to date with the prompt.
 TYPICAL_DRAFT = (17900, 11500)
+
+
+# Models known to reject `tool_choice={"type": "tool", ...}` (D-173).
+#
+# The whole model boundary is a forced tool call: the `Mystery` schema is handed
+# over as a tool and the model is required to call it, so malformed output is
+# rejected by the API before it reaches us (D-002). Opus 5.5 does not support
+# that and returns a 400. Fable 5.1 and Mythos 5.1 are reported to do the same.
+# They want `output_config.format` instead, which is a migration rather than a
+# flag, because the streaming reply parser reads partial tool-call JSON.
+#
+# A deny list rather than an allow list, deliberately. What is known is which
+# models refuse; treating every model not on a hand-written list as broken would
+# block the next one that works and would be a claim nobody checked. Listed at
+# all because the failure is a 400 in the middle of a paid batch, and the useful
+# moment to find out is before the first call.
+REJECTS_FORCED_TOOLS = frozenset(
+    {
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+        "claude-mythos-5-1",
+    }
+)
+
+
+def complaint_about_model(model: str) -> str | None:
+    """Why this model cannot draft, or None if nothing is known against it."""
+    if model not in REJECTS_FORCED_TOOLS:
+        return None
+    return (
+        f"{model} does not support forced tool calls, which is how this pipeline "
+        f"guarantees a valid case (D-173). Use --generator-model claude-opus-5, "
+        f"or migrate the boundary to output_config.format."
+    )
 
 
 def cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -143,10 +183,24 @@ def unname_the_commission(mystery: Mystery) -> Mystery:
     spare = ["one of them", "another of them", "a third of them"]
     taken: dict[str, str] = {}
 
+    # Whatever the victim is called stays on the page (D-167). Sixteen of
+    # fifty six cases give a suspect the victim's surname, because a niece, a
+    # nephew and a daughter are the most common things in this cast, and
+    # replacing that surname rewrote the dead woman's own name in the first
+    # sentence the player reads: "Doña Amalia one of them was found at the foot
+    # of the river steps". The victim may be named; only the suspects may not.
+    dead = next((c for c in mystery.characters if c.id == mystery.victim), None)
+    theirs = {word for word in (dead.name.split() if dead else []) if len(word) > 2}
+
     for character in mystery.characters:
         if character.id == mystery.victim:
             continue
-        parts = character.name.split()
+        parts = [word for word in character.name.split() if word not in theirs]
+        if not parts:
+            # Everything distinguishing about this name belongs to the victim
+            # too. Taking it out would take the victim out with it, and leaving
+            # it in names nobody the household would not already be thinking of.
+            continue
         # Whole name first: replacing word by word turns "Devika Menon" into
         # "one of them that person", which is worse than the name was.
         forms = [character.name, *sorted(parts, key=len, reverse=True)]
@@ -897,7 +951,12 @@ def _commission(request: GenerationRequest) -> str:
         f"opening screen is an enormous prior on a house of five even when it is "
         f"the wrong one, and when it is the right one there is no case left. "
         f"Which name they have settled on is the first thing the player finds "
-        f"out, not the first thing they are told. The victim may be named."
+        f"out, not the first thing they are told. The victim may be named.\n\n"
+        f"**And say nothing about who engaged the player or why they are in "
+        f"this building.** That is decided above, under the standing, and the "
+        f"two used to contradict each other because both were writing it "
+        f"(D-169). The commission is only what the house has already decided "
+        f"about the death and what it wants written down."
     )
 
 
@@ -991,6 +1050,10 @@ def anthropic_drafter(
             "root as ANTHROPIC_API_KEY=sk-ant-... , or set it in your shell."
         )
 
+    refusal = complaint_about_model(model)
+    if refusal:
+        raise RuntimeError(refusal)
+
     client = anthropic.Anthropic(api_key=key)
 
     def draft(request: GenerationRequest, complaints: list[str]) -> dict[str, Any]:
@@ -1069,6 +1132,11 @@ def anthropic_drafter(
 
         raise RuntimeError("the model returned no tool call")
 
+    # So the draft can record which model wrote it (D-171). The prompt hash on
+    # its own stopped being enough the moment there were two models to choose
+    # between, and a corpus that cannot tell them apart is the D-166 problem
+    # again in a different column.
+    draft.model = model
     return draft
 
 
@@ -1278,7 +1346,13 @@ def generate(
             # one right answer and no judgement in it, so it costs nothing here
             # and a fresh Opus call if it goes back to the model.
             mystery = unbind_the_imaginary(unname_the_commission(Mystery.model_validate(raw)))
-            mystery = mystery.model_copy(update={"built_with": prompt_version()})
+            wrote_it = getattr(drafter, "model", "")
+            mystery = mystery.model_copy(
+                update={
+                    "built_with": prompt_version()
+                    + (f"/{wrote_it.removeprefix('claude-')}" if wrote_it else "")
+                }
+            )
         except ValidationError as error:
             complaints = [
                 f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
