@@ -1049,3 +1049,27 @@ def test_a_case_dealt_another_world_is_stamped_with_it_and_a_typed_one_is_not() 
     typed = GenerationRequest(setting="a wake, on the night before the will is read", seed=seed)
     plain = in_its_world(CASE, typed)
     assert (plain.world, plain.authority) == ("", "")
+
+
+def test_the_model_is_not_handed_the_fields_generate_stamps() -> None:
+    """A field in the tool is a field the model fills. The first draft after
+    worlds existed wrote a paragraph into `world` (D-182)."""
+    from mystery.generator import STAMPED, _tool_schema
+
+    properties = _tool_schema()["properties"]
+    for field in STAMPED:
+        assert field not in properties, field
+
+
+def test_whatever_a_draft_wrote_about_its_world_is_replaced_by_the_deal() -> None:
+    from test_agent import CASE
+
+    from mystery.generator import GenerationRequest, in_its_world
+
+    scribbled = CASE.model_copy(
+        update={"world": "A snowbound road-house", "authority": "You hold nobody here."}
+    )
+    plain = in_its_world(
+        scribbled, GenerationRequest(setting="a wake, on the night before the will is read")
+    )
+    assert (plain.world, plain.authority) == ("", "")

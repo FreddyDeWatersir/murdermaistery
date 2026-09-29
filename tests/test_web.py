@@ -930,3 +930,28 @@ def test_only_the_accents_move() -> None:
 
     for seed in range(200):
         assert set(hues(seed)) == {"warm", "cool", "bad"}
+
+
+def _state_of(case):
+    from fastapi.testclient import TestClient
+
+    from mystery.web import build_app
+
+    app = build_app(Game(case, responder_saying("", [])))
+    return TestClient(app).get("/state").json()
+
+
+def test_who_is_coming_comes_from_the_world_deck_not_the_draft() -> None:
+    """A present-day case, even one whose draft scribbled in `authority`, says
+    the police; a case in a world says whoever that world sends (D-182)."""
+    from mystery.palette import WORLDS
+
+    scribbled = CASE.model_copy(
+        update={"world": "A snowbound road-house", "authority": "You hold nobody here."}
+    )
+    assert _state_of(scribbled)["authority"] == "the police"
+
+    venice = next(w for w in WORLDS if w.key == "venice-1748")
+    assert _state_of(CASE.model_copy(update={"world": venice.key}))["authority"] == (
+        venice.authority
+    )

@@ -164,9 +164,14 @@ def in_its_world(mystery: Mystery, request: "GenerationRequest") -> Mystery:
     page needs it to say who is on the way.
     """
     dealt = world_for(request.seed, request.setting)
-    if dealt is None:
-        return mystery
-    return mystery.model_copy(update={"world": dealt.key, "authority": dealt.authority})
+    # Always overwritten, including with nothing: whatever the draft put in
+    # these two is not a deal, and a present-day case must say so.
+    return mystery.model_copy(
+        update={
+            "world": dealt.key if dealt else "",
+            "authority": dealt.authority if dealt else "",
+        }
+    )
 
 
 def unname_the_commission(mystery: Mystery) -> Mystery:
@@ -1042,8 +1047,23 @@ def _tool_schema() -> dict[str, Any]:
     grid. That was wrong (D-029): the model is the only thing in the pipeline
     that knows *why* anyone is anywhere, and a grid without reasons reads as a
     random walk. It proposes; the solver repairs what breaks.
+
+    Minus the fields `generate` stamps afterwards (D-182). A schema is an
+    instruction: the first case drafted after `world` and `authority` existed
+    came back with a paragraph about a snowbound road-house in `world` and a
+    sentence about the gendarmerie in `authority`, because a field in the tool
+    is a field the model believes it was asked to fill.
     """
-    return Mystery.model_json_schema()
+    schema = Mystery.model_json_schema()
+    for stamped in STAMPED:
+        schema.get("properties", {}).pop(stamped, None)
+        if stamped in schema.get("required", []):
+            schema["required"].remove(stamped)
+    return schema
+
+
+# Written by `generate` after the draft, never by the model.
+STAMPED = ("built_with", "world", "authority")
 
 
 def anthropic_drafter(

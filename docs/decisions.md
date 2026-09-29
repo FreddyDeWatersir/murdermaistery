@@ -4690,3 +4690,30 @@ sacristy". The briefing already stripped the article; the subtitle now does too.
 
 Not done: rooms, polling and signed notes (the rooms design is still open on
 joining, turn-taking and which case a room plays).
+
+## D-183 A field in the tool is a field the model fills
+**Date:** 2026-09-29
+**Status:** active
+
+The first three cases drafted after D-182: the two dealt worlds came back
+stamped correctly, and the present-day one came back with a paragraph about a
+snowbound road-house in `world` and "You hold nobody here..." in `authority`.
+Nobody asked the model for either. `_tool_schema` hands it the whole `Mystery`
+schema, and a property in a forced tool reads as an instruction to write one.
+`generate` only overwrote the two when a world was dealt, so on a present-day
+case the model's text survived, and the page would have told the player that
+"You hold nobody here... are on their way".
+
+Three changes, each enough on its own for this case and together enough for
+the next field somebody adds:
+
+- The schema the model sees drops everything `generate` stamps (`STAMPED`:
+  `built_with`, `world`, `authority`). `built_with` had the same exposure and
+  was only ever safe because it is overwritten unconditionally.
+- `in_its_world` always overwrites, with empty strings when no world was dealt.
+- The page no longer reads `authority` off the case at all. It looks the world
+  key up in the deck and says the police when the key is not a world, which is
+  also how the colours already worked.
+
+The one case saved with the scribbles (`the-sixteen-kilometres-7297`) was
+cleaned by hand; everything else in it is the model's and untouched.

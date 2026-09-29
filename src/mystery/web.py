@@ -49,7 +49,7 @@ from mystery.knowledge import analyse_alibi, derive
 from mystery.library import S3Shelf, catalogue, played
 from mystery.library import shelf as pick_shelf
 from mystery.models import Mystery
-from mystery.palette import hues, occasion
+from mystery.palette import hues, occasion, world_named
 from mystery.palette import questions as questions_for
 from mystery.session import KEEP, InMemorySessions, Session, Sessions
 from mystery.session import sessions as pick_sessions
@@ -917,7 +917,10 @@ def build_app(
             "hues": game.case.hues,
             # Who is on the way instead of the police, in a case set in another
             # world (D-182). Every case before worlds is the present day.
-            "authority": game.mystery.authority or "the police",
+            # Looked up from the world's key in the deck rather than read off
+            # the case, so a case whose draft wrote something of its own into
+            # `authority` still says the police (D-182).
+            "authority": getattr(world_named(game.mystery.world), "authority", "the police"),
             "notebook": game.notebook(),
         }
 
