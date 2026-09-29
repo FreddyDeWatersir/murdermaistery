@@ -4594,3 +4594,22 @@ which at the start. Parked, not dropped: rooms are the natural place for it (a
 room has a language the way it has a case), so the rooms design keeps a slot for
 it. The part that is not just a prompt line is everything already written in
 English: the briefing, the notebook, the clues and the page itself.
+
+## D-180 A long answer scrolls instead of running off the screen
+**Date:** 2026-09-29
+**Status:** active
+
+Found in the first session on the server: a suspect who talked for long enough
+grew the answer box past the bottom of the window. The page never scrolls (the
+scene is a fixed frame, on purpose), so the end of the answer was simply not
+there, and the only way to read it was the transcript afterwards.
+
+The answer area now stops at 38% of the screen height and scrolls inside
+itself. While an answer is arriving it follows the newest words down, unless the
+player has scrolled up to reread something, in which case it leaves them there
+until the next question. The text in it can also be selected now, so a line can
+be copied into the notes.
+
+Checked in a real browser at a laptop's 1366x700 with a fifty nine sentence
+answer: the box scrolled, it sat at the last words when the answer finished, the
+question bar stayed on screen, and scrolling up mid-answer held.

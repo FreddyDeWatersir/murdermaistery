@@ -1106,6 +1106,13 @@ letter-spacing:.01em;margin-bottom:2px}
 #nameplate small{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
 text-transform:uppercase;color:var(--muted);font-weight:400;margin-left:10px}
 #said{font-size:16.5px;line-height:1.62;min-height:3.2em;max-width:70ch}
+/* A long answer used to grow the box until the end of it went off the bottom of
+   the screen, where nothing could scroll to it and the only way to read it was
+   the transcript (D-180). The box now stops at a share of the screen and the
+   answer scrolls inside it, following the words as they arrive. */
+#said{max-height:38vh;overflow-y:auto;overscroll-behavior:contain;
+padding-right:10px;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;
+user-select:text}
 /* The player's own voice, so it reads as neither the role label above it (mono,
    uppercase) nor the answer below it (plain). Italic display face, quietly. */
 #said .asked{display:block;font-family:var(--display);font-style:italic;
@@ -1559,7 +1566,18 @@ function openSay(asked){
   mouth=document.getElementById('mouth');
   el.innerHTML=(asked?'<span class="asked">\u201c'+esc(asked)+'\u201d</span>':'')+
     '<span class="body"></span><span class="cursor"></span>';
+  el.scrollTop=0;following=true;
   return el.querySelector('.body');
+}
+
+/* Keep the newest words in view while an answer arrives, unless the player has
+   scrolled up to reread something, in which case leave them there (D-180). The
+   scroll listener is what tells the two apart: moving the box ourselves lands at
+   the bottom and keeps following on, a player scrolling up does not. */
+let following=true;
+function follow(){
+  const el=$('said');
+  if(el&&following)el.scrollTop=el.scrollHeight;
 }
 
 function runSay(body,pitch){
@@ -1573,7 +1591,7 @@ function runSay(body,pitch){
     // about a second however big it is.
     const take=Math.max(1,Math.round(pending.length/40));
     const chunk=pending.slice(0,take);pending=pending.slice(take);
-    body.textContent+=chunk;n+=chunk.length;
+    body.textContent+=chunk;n+=chunk.length;follow();
     if(mouth)mouth.setAttribute('ry',(n%3===0)?'5.5':'2.6');
     if(/[a-z0-9]/i.test(chunk[0])&&n%2===0)blip(pitch);
     closeIfDone();
@@ -1585,7 +1603,7 @@ function runSay(body,pitch){
     if(mouth)mouth.setAttribute('ry','2.6');
   }
   $('said')._finish=()=>{
-    body.textContent+=pending;pending='';streaming=false;closeIfDone();
+    body.textContent+=pending;pending='';streaming=false;closeIfDone();follow();
   };
 }
 
@@ -1594,7 +1612,7 @@ function runSay(body,pitch){
 function pushSay(text){
   if(typer){pending+=text;return}
   const body=$('said')?.querySelector('.body');
-  if(body)body.textContent+=text;
+  if(body){body.textContent+=text;follow()}
 }
 function endSay(){streaming=false}
 
@@ -1604,6 +1622,12 @@ function say(text,pitch,asked){
   runSay(body,pitch);
   pushSay(text);endSay();
 }
+
+// Scroll does not bubble, so this listens on the way down instead.
+document.addEventListener('scroll',e=>{
+  const el=e.target;
+  if(el&&el.id==='said')following=el.scrollHeight-el.scrollTop-el.clientHeight<24;
+},true);
 
 document.addEventListener('click',e=>{
   if(typer&&!e.target.closest('#bar,#book,#reveal,#top'))$('said')._finish()});
