@@ -30,6 +30,7 @@ from pathlib import Path
 import structlog
 
 from mystery.models import Mystery
+from mystery.palette import world_named
 
 log = structlog.get_logger()
 
@@ -48,6 +49,12 @@ STYLE = (
 
 
 def _setting_prompt(mystery: Mystery, setting: str) -> str:
+    # A case in another world (D-182) names its occasion only ("the night the
+    # council votes on whether to change course"), which on its own draws a
+    # present-day boardroom. The world says when and where it is.
+    elsewhere = world_named(mystery.world) if mystery.world else None
+    if elsewhere is not None:
+        setting = f"{elsewhere.place}; {setting}"
     return (
         f"{STYLE} The place: {setting}. This is the establishing shot of "
         f"{mystery.title.lower()}, on the evening somebody died there. Show the "

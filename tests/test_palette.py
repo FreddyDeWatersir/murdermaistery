@@ -509,3 +509,96 @@ def test_a_batch_does_not_wait_out_a_missing_key(monkeypatch, tmp_path) -> None:
 
     assert cli.main(["--drafts", "4", "--seed", "20"]) == 1
     assert calls == [20], "it should stop on the first one, not try all four"
+
+
+# --- Other worlds (D-182) ---------------------------------------------------
+
+
+def test_about_three_cases_in_ten_are_in_another_world() -> None:
+    from mystery.palette import world
+
+    share = sum(world(seed) is not None for seed in range(3000)) / 3000
+    assert 0.25 < share < 0.35, share
+
+
+def test_every_world_is_dealt_somewhere() -> None:
+    from mystery.palette import WORLDS, world
+
+    dealt = {w.key for seed in range(5000) if (w := world(seed)) is not None}
+    assert dealt == {w.key for w in WORLDS}
+
+
+def test_a_world_seed_is_dealt_one_of_that_worlds_own_occasions() -> None:
+    from mystery.palette import occasion, world
+
+    seed = next(s for s in range(1000) if world(s) is not None)
+    assert occasion(seed) in world(seed).occasions
+
+
+def test_every_world_occasion_survives_the_setting_guard() -> None:
+    from mystery.generator import complaint_about_setting
+    from mystery.palette import WORLDS
+
+    for w in WORLDS:
+        for line in w.occasions:
+            assert complaint_about_setting(line) is None, line
+
+
+def test_a_setting_somebody_typed_is_never_moved_into_another_world() -> None:
+    from mystery.palette import world, world_for
+
+    seed = next(s for s in range(1000) if world(s) is not None)
+    assert world_for(seed, "a board stranded overnight by weather") is None
+    assert world_for(seed, world(seed).occasions[0]) == world(seed)
+
+
+def test_a_world_replaces_the_region_in_the_brief_and_says_who_is_coming() -> None:
+    from mystery.palette import draw, world
+
+    seed = next(s for s in range(1000) if world(s) is not None)
+    w = world(seed)
+    brief = draw(seed, w.occasions[0], "the_lie").brief()
+
+    assert "not in the present day" in brief
+    assert w.place in brief and w.authority in brief and w.silence in brief
+    assert "Where on earth this house is" not in brief
+
+
+def test_the_present_day_brief_is_unchanged_by_worlds() -> None:
+    from mystery.palette import draw, world
+
+    seed = next(s for s in range(1000) if world(s) is None)
+    brief = draw(seed, "a wake, on the night before the will is read", "the_lie").brief()
+    assert "Where on earth this house is" in brief
+    assert "not in the present day" not in brief
+
+
+def test_whoever_is_coming_reads_as_a_plural_after_the_page_says_the() -> None:
+    """The page writes "{authority} are on their way", capitalised at the
+    start of a sentence, so every entry is "the something", plural."""
+    from mystery.palette import WORLDS
+
+    for w in WORLDS:
+        assert w.authority.startswith("the "), w.key
+        assert w.silence.strip(), w.key
+
+
+def test_a_world_case_keeps_its_own_colours_and_an_old_case_keeps_its_region() -> None:
+    from mystery.palette import WORLDS, hues
+
+    w = WORLDS[0]
+    assert hues(12, w.key) == dict(zip(("warm", "cool", "bad"), w.hues, strict=True))
+    # No key is how every case made before worlds arrives, and it must not
+    # change colour because its seed would deal a world today.
+    assert hues(12) == hues(12, "")
+    assert hues(12, "no-such-world") == hues(12)
+
+
+def test_world_keys_are_unique_and_colours_are_colours() -> None:
+    import re
+
+    from mystery.palette import WORLDS
+
+    assert len({w.key for w in WORLDS}) == len(WORLDS)
+    for w in WORLDS:
+        assert all(re.fullmatch(r"#[0-9a-f]{6}", c) for c in w.hues), w.key

@@ -412,6 +412,354 @@ OCCASIONS = [
 ]
 
 
+# Other worlds (D-182). Every region above is the present day, and every occasion
+# assumes modern life: a vote, a sale, a funding decision. The model can write
+# any century and any planet, and the cases were all the same fifty years.
+#
+# A world is not a second deck drawn beside WHERE, because the two would not
+# agree: Quebec in the reign of Nero is nothing. Each world brings everything
+# the present day was quietly supplying. Where and when. Occasions that could
+# only happen there. Who is coming instead of the police, since a Roman villa
+# has no police and a generation ship has something else. And, for anything
+# with machines, why the machines cannot simply answer the question: a station
+# with cameras on every door is not a mystery, it is a playback.
+#
+# Dealt for about three cases in ten, and only when nobody named a setting.
+# The rest stay in the present day, which is still a good place for a murder.
+#
+# `authority` is always plural ("the vigiles", "the wardens") because the page
+# says "{authority} are on their way", and it always starts with "the".
+
+
+@dataclass(frozen=True)
+class World:
+    key: str
+    place: str
+    occasions: tuple[str, ...]
+    authority: str
+    silence: str
+    hues: tuple[str, str, str]
+
+
+WORLD_SHARE = 0.30
+
+WORLDS: list[World] = [
+    # --- The ancient and medieval world. No forensics, no records anybody can
+    # pull: what happened is what people saw and what they will admit to.
+    World(
+        "naples-62",
+        "a villa above the Bay of Naples in AD 62, the spring after the earthquake, "
+        "with cracks still in the frescoes",
+        (
+            "the night before a will is read aloud in front of the family's freedmen",
+            "a dinner to settle a daughter's marriage contract, with the dowry "
+            "already spent",
+        ),
+        "the magistrate's lictors from Puteoli",
+        "Nobody here can read a body the way a physician of a later age would. "
+        "Slaves see everything and are believed about nothing, which is itself "
+        "a thing somebody can use.",
+        ("#d4a05a", "#8fa6a0", "#c0584a"),
+    ),
+    World(
+        "alexandria",
+        "a scholar's house in Alexandria under the last of the Ptolemies, three "
+        "streets from the Library",
+        (
+            "the night a disputed manuscript is to be copied and returned to "
+            "its owner",
+            "a symposium held to honour a teacher who is losing his sight",
+        ),
+        "the city watch of the Macedonian quarter",
+        "Writing is rare and expensive, so what is written down is believed, "
+        "and whoever holds the pen holds the truth.",
+        ("#dcb35e", "#6f9fb8", "#c9604f"),
+    ),
+    World(
+        "asturias-1080",
+        "a monastery in the Asturian mountains in the winter of 1080, the pass "
+        "closed by snow",
+        (
+            "the election of a new abbot, the night before the chapter votes",
+            "a relic arriving from Compostela, and the pilgrims who carried it "
+            "snowed in",
+        ),
+        "the bishop's men from Oviedo, once the pass opens",
+        "Hours are kept by bells and candles, not clocks, and a brother who "
+        "was at prayer is believed because doubting him is a sin.",
+        ("#b89f6e", "#7f95a8", "#b5584e"),
+    ),
+    World(
+        "venice-1748",
+        "a Venetian palazzo during Carnival, 1748, with the masks due off at "
+        "midnight",
+        (
+            "a card party where a family's last ship is being wagered",
+            "the night before a daughter is sent to a convent against her will",
+        ),
+        "the Signori di Notte",
+        "Everybody was masked until midnight, so who was where depends on who "
+        "recognised whom by their walk, their voice or their shoes.",
+        ("#c9a15a", "#7e98c2", "#c2564f"),
+    ),
+    World(
+        "edo-fire-season",
+        "a rice merchant's house in Edo in the winter fire season, with the "
+        "watch-bell ringing every hour",
+        (
+            "the night the house's debts are called in by a rival guild",
+            "a tea gathering to settle an adoption into the family name",
+        ),
+        "the magistrate's constables",
+        "Rank decides who may speak to whom and who may enter which room, so an "
+        "account is as much about who was allowed where as who was there.",
+        ("#c7a36c", "#7c9a90", "#b7514a"),
+    ),
+    World(
+        "lahore-road-1630",
+        "a caravanserai on the Grand Trunk Road near Lahore in 1630, gates shut "
+        "for the night",
+        (
+            "a merchant caravan waiting out a flood, with a dowry in the strongroom",
+            "the night before an imperial tax collector arrives to count the goods",
+        ),
+        "the kotwal's men from Lahore",
+        "Travellers come and go under other names, and the only register is "
+        "what the keeper chose to remember.",
+        ("#d8a653", "#7aa38c", "#c75e4e"),
+    ),
+    # --- The last two centuries, somewhere other than a country house.
+    World(
+        "south-georgia-1912",
+        "a whaling station on South Georgia in 1912, the last ship of the season "
+        "due in two days",
+        (
+            "the night the season's oil money is divided among the crews",
+            "the manager's farewell before he sails home for good",
+        ),
+        "the magistrate from the station at Grytviken",
+        "No telegraph reaches this far, and every man here has a reason to be "
+        "on the next ship rather than a witness.",
+        ("#b3ad90", "#86a5b3", "#bb6158"),
+    ),
+    World(
+        "harlem-1926",
+        "a Harlem brownstone during a rent party in 1926, the band still playing "
+        "at two in the morning",
+        (
+            "a rent party thrown to save the house from the landlord",
+            "the night a poet's first book comes back from the printer",
+        ),
+        "the precinct detectives",
+        "Half the evening was illegal under Prohibition, so nobody wants to be "
+        "the one who tells the precinct what they were drinking or where.",
+        ("#d0a454", "#8a94c4", "#c85a50"),
+    ),
+    World(
+        "shanghai-1937",
+        "the rooms above a jazz club in the Shanghai International Settlement, "
+        "November 1937, the guns audible across the river",
+        (
+            "the night the last boat tickets out are being divided",
+            "a farewell for the club's owner, who is selling up in the morning",
+        ),
+        "the Settlement's municipal police",
+        "Everybody here has papers, and half of the papers are false. Who a "
+        "person is matters as much as where they were.",
+        ("#d2a35c", "#7ca0b6", "#c9534c"),
+    ),
+    World(
+        "polar-1968",
+        "a Soviet polar research station in 1968, the supply plane a week late",
+        (
+            "the night before a report goes to Moscow that will end somebody's "
+            "career",
+            "a party for the station chief's fiftieth birthday, with the "
+            "last of the spirit",
+        ),
+        "the investigator the Party is sending on the next plane",
+        "Everybody watches everybody here, and everybody has been asked to "
+        "report on the others, so every account is also a denunciation.",
+        ("#b7b39a", "#7ea3bd", "#bf5a55"),
+    ),
+    World(
+        "berlin-1989",
+        "a flat in East Berlin on the night of 9 November 1989, the radio saying "
+        "the border is open",
+        (
+            "a family deciding who crosses tonight and who stays with the flat",
+            "a going-away dinner for a friend with a travel permit, which is "
+            "suddenly worthless",
+        ),
+        "the Volkspolizei",
+        "The Stasi kept files on all of them, so everyone assumes the others "
+        "have already been talking, and nobody knows who.",
+        ("#b8a47a", "#8898b0", "#c35a52"),
+    ),
+    # --- Contemporary, but nowhere near a country house.
+    World(
+        "antarctic-winterover",
+        "an Antarctic research base in the last week before the winter-over, "
+        "when the last flight leaves",
+        (
+            "the night the winter-over crew is chosen and the rest fly out",
+            "a midwinter dinner held early because somebody is being sent home",
+        ),
+        "the federal police flying in from the coast",
+        "The satellite link is rationed to an hour a day, and the only cameras "
+        "point at the instruments, not the people.",
+        ("#b9b8a4", "#7fa8c4", "#c05e58"),
+    ),
+    World(
+        "stuck-ship",
+        "a container ship anchored at the mouth of a canal, eleventh day waiting "
+        "for a slot",
+        (
+            "the night the owners tell the crew the ship is being sold, crew and all",
+            "a birthday on board with the last of the good food",
+        ),
+        "the port police launch, due at first light",
+        "The bridge logs only the ship, not the people on it, and the crew's "
+        "phones have had no signal for a week.",
+        ("#c6a86a", "#6f9fb0", "#c45a4d"),
+    ),
+    World(
+        "reality-villa",
+        "a reality television villa on an island, the night before the live "
+        "finale",
+        (
+            "the last night before the public vote is announced",
+            "a producers' party after the cameras are switched off for the night",
+        ),
+        "the police launch from the mainland",
+        "The cameras were switched off at midnight by contract, and every "
+        "contestant has spent weeks learning to perform for them.",
+        ("#e0a95c", "#76a7c4", "#d05a55"),
+    ),
+    # --- Futures. Each one says why its machines cannot solve the case, because
+    # that is the whole difficulty of writing a murder in a world that watches.
+    World(
+        "generation-ship",
+        "a generation ship in the two hundred and twelfth year of its voyage, "
+        "where nobody alive has seen a planet",
+        (
+            "the night the council votes on whether to change course",
+            "a naming day for the first child born in the new decks",
+        ),
+        "the ship's wardens",
+        "The archive failed in year 190 and records have been kept by hand ever "
+        "since. Nothing watches the corridors, because there has been nothing to "
+        "watch for in living memory.",
+        ("#b6a67e", "#7fb0c0", "#c85d57"),
+    ),
+    World(
+        "europa-outpost",
+        "a mining outpost under the ice of Europa, the relay to Earth down for a "
+        "solar storm",
+        (
+            "the night the Company's buyout offer has to be answered",
+            "a wake for a miner lost in the ice last week",
+        ),
+        "the Company's inspectors, once the relay is back",
+        "The storm wiped the internal cameras, and in pressure suits everybody "
+        "looks alike at twenty metres.",
+        ("#a9b4a6", "#78aecb", "#c25b58"),
+    ),
+    World(
+        "mars-election",
+        "a Martian dome settlement on the night before its first vote on "
+        "independence from Earth",
+        (
+            "the last night of campaigning, both sides under one roof",
+            "the dinner at which the Earth governor's successor is chosen",
+        ),
+        "the Earth-appointed marshals",
+        "The dome's monitoring is switched off by law for the election week, to "
+        "prove that nobody is watching how anyone votes.",
+        ("#d69457", "#8aa3b4", "#c2513f"),
+    ),
+    World(
+        "lagos-2071",
+        "a penthouse above the flooded lagoon city of Lagos in 2071",
+        (
+            "the engagement party of a tech heiress whose company is failing",
+            "the launch night of an app that half the room built and one person owns",
+        ),
+        "the city's private security contractors",
+        "Everyone in this room pays for a privacy seal, so their feeds cannot be "
+        "opened without a court order that takes a week to get.",
+        ("#d8a24d", "#6fb0b8", "#cf5a4c"),
+    ),
+    World(
+        "cryo-waking",
+        "a cryonics facility in the Swiss Alps in 2090, on the night the first "
+        "patients are woken",
+        (
+            "the waking of a founder who has been frozen for forty years",
+            "the night the board decides whose relatives are woken first",
+        ),
+        "the cantonal police",
+        "The wake halls run without electronics during the protocol, so for "
+        "six hours the building knows only what the staff remember.",
+        ("#bcb6a0", "#86a8c8", "#c5605c"),
+    ),
+    World(
+        "orbital-hotel",
+        "an orbital hotel on its last night before it is deorbited into the sea",
+        (
+            "the closing party for the staff who ran it for thirty years",
+            "the last paying guests, who each bought the final night for a reason",
+        ),
+        "the orbital authority's shuttle",
+        "The hotel's systems are being switched off floor by floor, and "
+        "logging was the first thing to go.",
+        ("#c9b07a", "#7aa2d0", "#cc5d5a"),
+    ),
+    World(
+        "svalbard-2140",
+        "the seed vault on Svalbard in 2140, a generation after the grids failed",
+        (
+            "the night the keepers vote on whether to open the vault to the south",
+            "the handover from one keeper family to the next",
+        ),
+        "the council riders from Longyearbyen",
+        "There has been no electricity for surveillance in forty years. There is "
+        "a logbook, and whoever keeps it decides what happened.",
+        ("#b4b09c", "#7fa0b8", "#bd5a55"),
+    ),
+]
+
+
+def world(seed: int) -> World | None:
+    """The other world this seed deals, or None for the present day (D-182).
+
+    Keyed on the seed alone, like `where` and `occasion`, so a case reproduces
+    from the number the run prints.
+    """
+    rng = random.Random(f"world|{seed}")
+    if rng.random() >= WORLD_SHARE:
+        return None
+    return rng.choice(WORLDS)
+
+
+def world_for(seed: int, setting: str) -> World | None:
+    """The world a case is actually in, given the setting it was written from.
+
+    A world only applies when the setting is one of its own occasions, which is
+    what `occasion` deals for it. A setting somebody typed in by hand is theirs,
+    so a seed that would have dealt Venice does not drag "a board stranded by
+    weather" into 1748.
+    """
+    dealt = world(seed)
+    if dealt is not None and setting in dealt.occasions:
+        return dealt
+    return None
+
+
+def world_named(key: str) -> World | None:
+    return next((w for w in WORLDS if w.key == key), None)
+
+
 @dataclass(frozen=True)
 class Palette:
     manners: list[str]
@@ -421,6 +769,40 @@ class Palette:
     standing: str = ""
     old_business: str = ""
     where: str = ""
+    world: World | None = None
+
+    def _where(self) -> str:
+        if self.world is None:
+            return (
+                f"**Where on earth this house is:** {self.where}. That decides the "
+                f"names, the food, the weather, the money and how the building is "
+                f"built. Do not write a travel brochure of it and do not make anybody "
+                f"a type: it should show mostly in what people are called and what "
+                f"they take for granted. **If the setting given below already implies "
+                f"a place, that wins and you ignore this line entirely** — and a "
+                f"period or a style implies one as surely as a country does. A "
+                f"Victorian castle is British, a dacha is Russian, a hacienda is "
+                f"Spanish-speaking. Only use the line above when the setting could "
+                f"honestly be anywhere."
+            )
+        w = self.world
+        return (
+            f"**This case is not in the present day.** It is set in {w.place}. "
+            f"That decides everything the present day would otherwise supply: "
+            f"what people are called, how they speak, what they eat, what they "
+            f"believe, what a room is lit by, what time is told by and what counts "
+            f"as proof. **No anachronisms**: nobody says okay in Rome, nobody has a "
+            f"phone in 1748, and in a future the technology is part of the world "
+            f"rather than decoration. The `slots` are labelled the way this world "
+            f"tells the time. Write it as people who live there, not as a costume "
+            f"drama about them.\n\n"
+            f"**Who is coming.** Wherever these instructions say the police, read "
+            f"{w.authority}. They are on their way, they are not here yet, and "
+            f"they are not the person asking the questions.\n\n"
+            f"**Why this world cannot simply answer the question.** {w.silence} "
+            f"Keep to that. A case where a record, a machine or a witness nobody "
+            f"can doubt would settle it in one step is not a case."
+        )
 
     def brief(self) -> str:
         manners = "\n".join(f"  - {m}" for m in self.manners)
@@ -430,16 +812,7 @@ class Palette:
             f"MATERIAL FOR THIS CASE\n"
             f"Not a menu to choose from. This is the assignment, and the point of "
             f"it is that the next case gets different material.\n\n"
-            f"**Where on earth this house is:** {self.where}. That decides the "
-            f"names, the food, the weather, the money and how the building is "
-            f"built. Do not write a travel brochure of it and do not make anybody "
-            f"a type: it should show mostly in what people are called and what "
-            f"they take for granted. **If the setting given below already implies "
-            f"a place, that wins and you ignore this line entirely** — and a "
-            f"period or a style implies one as surely as a country does. A "
-            f"Victorian castle is British, a dacha is Russian, a hacienda is "
-            f"Spanish-speaking. Only use the line above when the setting could "
-            f"honestly be anywhere.\n\n"
+            f"{self._where()}\n\n"
             f"Manners, one per suspect, in any order you like. Write them as these "
             f"people rather than as the phrases below, and let the manner shape "
             f"what they actually say:\n{manners}\n\n"
@@ -484,6 +857,7 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
     same four hands.
     """
     rng = random.Random(f"{seed}|{setting}|{topology}")
+    dealt = world_for(seed, setting)
     return Palette(
         manners=rng.sample(MANNERS, min(cast_size, len(MANNERS))),
         voices=rng.sample(VOICES, min(cast_size, len(VOICES))),
@@ -499,7 +873,8 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
         # one must vary even when the setting phrase does not, because the
         # setting phrase is exactly what was dragging every cast to one country
         # (D-111).
-        where=random.Random(f"where|{seed}").choice(WHERE),
+        where=(dealt.place if dealt else random.Random(f"where|{seed}").choice(WHERE)),
+        world=dealt,
     )
 
 
@@ -606,13 +981,22 @@ PALETTES: dict[str, tuple[str, str, str]] = {
 }
 
 
-def hues(seed: int) -> dict[str, str]:
+def hues(seed: int, world_key: str = "") -> dict[str, str]:
     """The three accents for this case, keyed to the region it is set in.
+
+    A case in another world (D-182) carries its own three, and says which world
+    it is in by the key stamped on it, never by re-dealing the seed: a case
+    written before worlds existed must not change colour because its seed would
+    deal Venice today.
 
     Falls back to the shipped gold and blue rather than raising, because a
     palette is decoration and a case that cannot be coloured must still be
     playable.
     """
+    elsewhere = world_named(world_key) if world_key else None
+    if elsewhere is not None:
+        warm, cool, bad = elsewhere.hues
+        return {"warm": warm, "cool": cool, "bad": bad}
     region = random.Random(f"where|{seed}").choice(WHERE)
     for name, colours in PALETTES.items():
         if region.startswith(name) or name.lower() in region.lower():
@@ -626,6 +1010,9 @@ def occasion(seed: int) -> str:
 
     Used when nobody passed `--setting`. Keyed the same way as `where`, on the
     seed alone, so that the two together are reproducible from the number the
-    run prints and nothing else (D-115).
+    run prints and nothing else (D-115). A seed that deals another world gets
+    one of that world's own occasions (D-182).
     """
-    return random.Random(f"occasion|{seed}").choice(OCCASIONS)
+    dealt = world(seed)
+    pool = dealt.occasions if dealt is not None else OCCASIONS
+    return random.Random(f"occasion|{seed}").choice(pool)

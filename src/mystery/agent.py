@@ -151,6 +151,22 @@ def _object_of(secret) -> str:
     return "what they are holding"
 
 
+def in_the(name: str) -> str:
+    """A room as it reads after "in": `the sacristy`, `Octavio's office`.
+
+    Every brief sentence used to say "in the {room}", and generated rooms mostly
+    arrive already named "The sacristy", so the model was reading "you were in
+    the The sacristy" in every fact it was given (D-181). A possessive takes no
+    article at all.
+    """
+    head, _, rest = name.partition(" ")
+    if head.lower() == "the" and rest:
+        return f"the {rest}"
+    if head.endswith(("'s", "\u2019s")):
+        return name
+    return f"the {name}"
+
+
 def build_brief(
     mystery: Mystery,
     knowledge: dict[CharacterId, Knowledge],
@@ -187,7 +203,7 @@ def build_brief(
     person knows the player knows, and the brief must never leak the difference.
     """
     names = {c.id: c.name for c in mystery.characters}
-    places = {p.id: p.name for p in mystery.places}
+    places = {p.id: in_the(p.name) for p in mystery.places}
     times = {s.id: s.label for s in mystery.slots}
     know = knowledge[character]
     presented = shown or set()
@@ -211,14 +227,14 @@ def build_brief(
             facts.append(
                 Fact(
                     id=f"self:{slot.id}",
-                    text=f"At {times[slot.id]} you were in the {places[claim.place]}.",
+                    text=f"At {times[slot.id]} you were in {places[claim.place]}.",
                     subject=character,
                     slot=slot.id,
                     place=claim.place,
                 )
             )
             really = (
-                f"You were actually in the {places.get(where, where)} at {times[slot.id]}."
+                f"You were actually in {places.get(where, where)} at {times[slot.id]}."
             )
 
             if is_the_killer:
@@ -253,7 +269,7 @@ def build_brief(
             facts.append(
                 Fact(
                     id=f"self:{slot.id}",
-                    text=f"At {times[slot.id]} you were in the {places.get(where, where)}.",
+                    text=f"At {times[slot.id]} you were in {places.get(where, where)}.",
                     subject=character,
                     slot=slot.id,
                     place=where,
@@ -268,7 +284,7 @@ def build_brief(
                 id=f"saw:{observation.subject}@{observation.slot}",
                 text=(
                     f"At {times.get(observation.slot, observation.slot)} you saw "
-                    f"{names.get(observation.subject, observation.subject)} in the "
+                    f"{names.get(observation.subject, observation.subject)} in "
                     f"{places.get(observation.place, observation.place)}."
                 ),
                 subject=observation.subject,
@@ -412,7 +428,7 @@ def build_brief(
         d = mystery.discovery
         common.append(
             f"{names.get(mystery.victim, 'The victim')} is dead. "
-            f"{names.get(d.finder, d.finder)} found the body in the "
+            f"{names.get(d.finder, d.finder)} found the body in "
             f"{places.get(d.place, d.place)} after the evening was over. "
             f"{d.summary}".strip()
         )
@@ -465,7 +481,7 @@ def build_brief(
             Fact(
                 id=f"thing:{sighting.thing}@{sighting.slot}",
                 text=(
-                    f"At {times[sighting.slot]} {named(thing)} was in the "
+                    f"At {times[sighting.slot]} {named(thing)} was in "
                     f"{places.get(sighting.place, sighting.place)}, and you were "
                     f"there to see it."
                 ),
@@ -487,7 +503,7 @@ def build_brief(
         scene = scenes.get(account.constraint)
         where = places.get(scene.place, "") if scene and scene.place else ""
         when = times.get(scene.slot, "") if scene and scene.slot else ""
-        setting = f" ({when}, the {where})" if when and where else ""
+        setting = f" ({when}, {where})" if when and where else ""
         if account.true:
             note = " This is what happened, and you have no reason to doubt it."
         elif account.honest:

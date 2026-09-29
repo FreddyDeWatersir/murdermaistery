@@ -4613,3 +4613,80 @@ be copied into the notes.
 Checked in a real browser at a laptop's 1366x700 with a fifty nine sentence
 answer: the box scrolled, it sat at the last words when the answer finished, the
 question bar stayed on screen, and scrolling up mid-answer held.
+
+## D-181 Two things the second server playtest turned up
+**Date:** 2026-09-29
+**Status:** active
+
+**The briefing was there all along, and nobody could see it.** A playtest
+finished wanting the opening briefing back mid-game, because the key facts are
+in it. It has been reopenable since the briefing existed, from a button in the
+top bar, styled as ten-pixel grey capitals with no border next to three real
+buttons. It now looks like its neighbours. The briefing itself still needs the
+redesign that is on the list (nine blocks, the cast twice); this only makes it
+findable.
+
+**"In the The sacristy."** Every fact a suspect is given was templated as "in the
+{room}", and generated rooms nearly always arrive named "The sacristy", "The
+river veranda". Checked against the shelf: four of five recent cases name every
+room that way, and one names a room "Octavio's office", which came out as "in
+the Octavio's office". So every placement a suspect read said it twice, which
+is a small thing for a person and an invitation for a model to repeat it.
+`in_the` puts one article on, or none for a possessive, and the templates stop
+adding their own. Changing the brief text changes the prompt, so cached answers
+are not reused across this, which is the cache doing its job.
+
+Found while chasing a different report from the same evening: the victim missing
+from the timeline after an answer that plainly placed her. Her sighting was in
+the speaker's brief (`saw:alvine@s2`), so the likeliest cause is that the answer
+said it without citing it, which the timeline cannot see (D-041). Not fixed
+here: the transcript will say which, and the two fixes are different.
+
+## D-182 Other worlds
+**Date:** 2026-09-29
+**Status:** active
+
+Every region in WHERE is the present day, and every occasion assumes modern
+life: a vote, a sale, a funding decision. A generator that can write any century
+and any planet was writing the same fifty years, in the same kind of house. The
+Agatha Christie present day is good and stays; it stops being the only thing.
+
+**A world, not an era deck.** An era drawn beside WHERE would not agree with
+it: Quebec in the reign of Nero is nothing. So a world is one complete entry
+that supplies everything the present day was quietly supplying: where and
+when, two occasions that could only happen there, who is on the way instead of
+the police, and why the world cannot simply answer the question. Twenty one to
+start: six ancient and early modern, five from the last two centuries, three
+contemporary but nowhere near a country house, and seven futures.
+
+**The futures carry the hard part.** A station with a camera on every door is
+not a mystery, it is a playback. Each future says why its machines are silent
+tonight (a solar storm wiped the cameras, the dome's monitoring is off by law
+for the election, the archive failed in year 190) and the brief tells the model
+to keep to it. The historical worlds get a line too, because "no forensics"
+changes what counts as proof and who is believed.
+
+**Dealt, about three in ten, and only when nobody named a setting.** `world`
+is keyed on the seed like `where` and `occasion`. `occasion` deals from the
+world's own two when there is one. `world_for` applies a world only when the
+setting is one of its occasions, so a setting somebody typed by hand is never
+dragged into 1748. None of the seeds already on the shelf deal a world, checked.
+
+**Stamped, not re-dealt.** `generate` stamps `world` and `authority` on the
+case from the deal, after the draft, the way it stamps `built_with`. The page
+reads them from the case: "the Signori di Notte are on their way, and you are
+not the Signori di Notte". A case from before this has neither field, and the
+page reads that as the present day and the police. Colours follow the same
+rule: a world case has its own three accents, and an old case keeps its
+region's, because re-dealing its seed today must not repaint it.
+
+**The pictures are told too.** The establishing shot only knew the occasion
+("the night the council votes on whether to change course"), which on its own
+is a present-day boardroom, and a portrait only knew a look and a role. Both
+now get the world's place line.
+
+Also here, from the same pass: the subtitle said "found the body in the The
+sacristy". The briefing already stripped the article; the subtitle now does too.
+
+Not done: rooms, polling and signed notes (the rooms design is still open on
+joining, turn-taking and which case a room plays).

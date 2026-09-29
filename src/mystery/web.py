@@ -154,7 +154,7 @@ class Case:
         # (D-164). Every case used to render in the same near-black and gold
         # whether it was a Baltic port or inland Andalusia, so the screen was
         # the one part of the pipeline that learned nothing about the case.
-        self.hues = hues(seed)
+        self.hues = hues(seed, mystery.world)
         self.portraits = portraits or {}
         self.scenery = scenery or {}
         self.knowledge = derive(mystery)
@@ -915,6 +915,9 @@ def build_app(
             "commission": game.mystery.commission,
             "occasion": game.setting,
             "hues": game.case.hues,
+            # Who is on the way instead of the police, in a case set in another
+            # world (D-182). Every case before worlds is the present day.
+            "authority": game.mystery.authority or "the police",
             "notebook": game.notebook(),
         }
 
@@ -1312,9 +1315,9 @@ text-transform:uppercase;color:var(--cool);margin:22px 0 7px;font-weight:400}
 padding:11px 22px;font-family:var(--display);font-size:15px;color:#08090c;
 cursor:pointer}
 #brief .go:hover{filter:brightness(1.1)}
-#briefagain{background:none;border:0;color:var(--muted);font-family:var(--mono);
-font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:0}
-#briefagain:hover{color:var(--ink)}
+/* The briefing, reopenable mid-game. It used to be ten-pixel grey caps with no
+   border, and a playtest spent an evening not knowing it was there while the
+   key facts sat behind it (D-181). Now it is a button like its neighbours. */
 #reveal{position:fixed;inset:0;background:rgba(5,6,9,.95);display:none;
 justify-content:center;padding:24px;overflow-y:auto;z-index:9;user-select:text}
 #reveal.on{display:flex}
@@ -1838,7 +1841,7 @@ function paintBrief(){
     '<p>You arrived after that. You saw none of it, and everything you are about '+
     'to be told, you are being told.</p>'+
     (S.notebook&&S.notebook.budget
-      ?'<p class="clock">The police are on the road. You have about <b>'+
+      ?'<p class="clock">'+esc(Coming())+' are on the road. You have about <b>'+
         S.notebook.budget+'</b> questions before they are at the door.</p>':'')+
     '<h4>Who is here</h4><div class="roster">'+roster+'</div>'+
     (common?'<h4>What everybody knows</h4><ul>'+common+'</ul>':'')+
@@ -1862,11 +1865,11 @@ async function boot(){
      that makes sense if you might be the police. */
   $('sub').textContent=(S.discovery
     ? S.victim+' is dead. '+S.discovery.finder+' found the body in the '+
-      S.discovery.place+'.'
+      String(S.discovery.place||'').replace(/^[Tt]he\\s+/,'')+'.'
     : S.victim+' is dead. One of them did it.')+
     (S.you&&S.you.role?' You are '+S.you.role.replace(/^(An?|The) /i,
       m=>m.toLowerCase()).replace(/\\.$/,'')+'.':'')+
-    ' The police are on their way and you are not the police.';
+    ' '+Coming()+' are on their way, and you are not '+coming()+'.';
 
   const cast=$('cast');
   S.suspects.forEach(s=>{
@@ -1987,14 +1990,14 @@ function paintBook(n){
   const left=(n.left==null?null:n.left);
   $('count').innerHTML=
     (left==null?n.questions+(n.questions===1?' question':' questions')
-      :(left>0?left+' question'+(left===1?'':'s')+' left':'The police are here'))+
+      :(left>0?left+' question'+(left===1?'':'s')+' left':Coming()+' are here'))+
     (n.conflicts.length?' \u00b7 <b>'+n.conflicts.length+' contradiction'+
       (n.conflicts.length>1?'s':'')+'</b>':'');
   $('count').classList.toggle('late',!!n.late && !n.over);
   $('count').classList.toggle('spent',!!n.over);
   if(n.over){
     $('q').disabled=true;
-    $('q').placeholder='The police are here. You can still name somebody.';
+    $('q').placeholder=Coming()+' are here. You can still name somebody.';
   }
   paintHand();
   render();
@@ -2562,6 +2565,11 @@ function showScene(url,label){
   const w=$('where');
   w.textContent=label;w.className=label?'on':'';
 }
+
+/* Who is coming, as the page says it (D-182): "the police" for the present
+   day, "the Signori di Notte" in 1748. Always plural, always starts with "the". */
+function coming(){return (S&&S.authority)||'the police'}
+function Coming(){const w=coming();return w.charAt(0).toUpperCase()+w.slice(1)}
 
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 boot();

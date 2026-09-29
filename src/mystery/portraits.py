@@ -25,6 +25,7 @@ from pathlib import Path
 import structlog
 
 from mystery.models import Mystery
+from mystery.palette import world_named
 
 log = structlog.get_logger()
 
@@ -66,6 +67,13 @@ def _prompt(mystery: Mystery, character) -> str:
     ]
     if character.role:
         lines.append(f"They are {character.role.rstrip('.')}.")
+    # Without this a Roman freedman comes back in a cardigan (D-182).
+    elsewhere = world_named(mystery.world) if mystery.world else None
+    if elsewhere is not None:
+        lines.append(
+            f"They live in {elsewhere.place}. Their clothes, hair and anything "
+            f"they carry belong to that time and place."
+        )
     lines.append(
         f"They are at {mystery.title.lower()}, being questioned after a death. "
         f"Their manner is {character.manner or 'guarded'}."

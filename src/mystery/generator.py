@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
 from mystery.models import Mystery
-from mystery.palette import commission, murder_slot
+from mystery.palette import commission, murder_slot, world_for
 from mystery.palette import draw as draw_palette
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import get as get_topology
@@ -154,6 +154,19 @@ def complaint_about_setting(setting: str) -> str | None:
             "A phrase, not a word: who is gathered, where, and why tonight."
         )
     return None
+
+
+def in_its_world(mystery: Mystery, request: "GenerationRequest") -> Mystery:
+    """Stamp which world the case was dealt, and who is coming there (D-182).
+
+    From the deal, not from the draft: the model is told the world and writes in
+    it, but whether a case is in Venice is a fact about the request, and the
+    page needs it to say who is on the way.
+    """
+    dealt = world_for(request.seed, request.setting)
+    if dealt is None:
+        return mystery
+    return mystery.model_copy(update={"world": dealt.key, "authority": dealt.authority})
 
 
 def unname_the_commission(mystery: Mystery) -> Mystery:
@@ -1317,10 +1330,13 @@ def generate(
             # cached before the repair existed still have names in the briefing,
             # and a cached case is exactly the one nobody is going to pay to
             # draft again.
-            kept = unbind_the_imaginary(
-                unname_the_commission(
-                    Mystery.model_validate_json(cached.read_text(encoding="utf-8"))
-                )
+            kept = in_its_world(
+                unbind_the_imaginary(
+                    unname_the_commission(
+                        Mystery.model_validate_json(cached.read_text(encoding="utf-8"))
+                    )
+                ),
+                request,
             )
             # A cached draft that cannot be arranged is worse than a cache miss:
             # it is a seed that fails identically forever and never redrafts.
@@ -1347,11 +1363,14 @@ def generate(
             # and a fresh Opus call if it goes back to the model.
             mystery = unbind_the_imaginary(unname_the_commission(Mystery.model_validate(raw)))
             wrote_it = getattr(drafter, "model", "")
-            mystery = mystery.model_copy(
-                update={
-                    "built_with": prompt_version()
-                    + (f"/{wrote_it.removeprefix('claude-')}" if wrote_it else "")
-                }
+            mystery = in_its_world(
+                mystery.model_copy(
+                    update={
+                        "built_with": prompt_version()
+                        + (f"/{wrote_it.removeprefix('claude-')}" if wrote_it else "")
+                    }
+                ),
+                request,
             )
         except ValidationError as error:
             complaints = [

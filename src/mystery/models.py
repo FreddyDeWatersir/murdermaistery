@@ -394,6 +394,13 @@ class Mystery(BaseModel):
     # only worth the money if it can still be told apart from the next batch.
     built_with: str = ""
 
+    # Which other world this case is set in, if any, and who is on their way
+    # there instead of the police (D-182). Stamped by `generate` from the deal,
+    # never written by the model, and empty on every case made before worlds
+    # existed, which the page reads as the present day and the police.
+    world: str = ""
+    authority: str = ""
+
     def accounts_of(self, constraint: str) -> list[Account]:
         return [a for a in self.accounts if a.constraint == constraint]
 

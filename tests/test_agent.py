@@ -1309,3 +1309,15 @@ def test_the_repair_reaches_the_notebook() -> None:
 
     assert reply.used == ["self:s1"]
     assert assertions_from(brief, reply), "a bare slot id used to reach nothing"
+
+
+def test_a_room_already_called_the_something_is_not_the_the_something():
+    """Generated rooms arrive as "The sacristy", and every fact used to read
+    "you were in the The sacristy" (D-181)."""
+    from mystery.agent import in_the
+
+    assert in_the("The sacristy") == "the sacristy"
+    assert in_the("the long dining room") == "the long dining room"
+    assert in_the("Octavio's office") == "Octavio's office"
+    assert in_the("Rear cabin bench") == "the Rear cabin bench"
+    assert in_the("Theatre bar") == "the Theatre bar"

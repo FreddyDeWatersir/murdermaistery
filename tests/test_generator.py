@@ -1030,3 +1030,22 @@ def test_the_drafting_default_is_a_model_that_can_do_it() -> None:
     from mystery.generator import DRAFT_MODEL, complaint_about_model
 
     assert complaint_about_model(DRAFT_MODEL) is None
+
+
+def test_a_case_dealt_another_world_is_stamped_with_it_and_a_typed_one_is_not() -> None:
+    """Who is coming is a fact about the deal, stamped after the draft (D-182)."""
+    from test_agent import CASE
+
+    from mystery.generator import GenerationRequest, in_its_world
+    from mystery.palette import world
+
+    seed = next(s for s in range(1000) if world(s) is not None)
+    w = world(seed)
+
+    dealt = GenerationRequest(setting=w.occasions[0], seed=seed)
+    stamped = in_its_world(CASE, dealt)
+    assert (stamped.world, stamped.authority) == (w.key, w.authority)
+
+    typed = GenerationRequest(setting="a wake, on the night before the will is read", seed=seed)
+    plain = in_its_world(CASE, typed)
+    assert (plain.world, plain.authority) == ("", "")
