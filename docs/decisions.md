@@ -4941,3 +4941,53 @@ most fixtures fail Normal and the tests are about plumbing. Two tests close it
 again to check the gate itself.
 
 Next: slim the prompt of every rule a gate, a repair or a deck now enforces.
+
+## D-189 The prompt slimmed to what no check can see, and the example meets Normal
+**Date:** 2026-10-05
+**Status:** active
+
+The standing prompt was 37,000 characters and was telling the model one thing
+while the gate (D-188) counted another: it asked for "two other people with
+something damning", and the gate counts people with a reason *and* the chance
+at the murder hour. The worked example, Opening Night, failed Normal: a field of
+two, an innocent trail one gate deep, and the killer the only liar at the murder
+hour. The one case the model was shown would have been sent back.
+
+Chosen at the fork, with the player's predictions:
+
+- **The targets are generated, not written.** `_targets` builds WHAT THE CASE IS
+  MEASURED ON from `measures.GATE`, says each number the way it is measured,
+  and leaves out the shortcuts the dealt shape hides. It sits in the request
+  after the shape. `prompt_version` hashes it with the system prompt, so a
+  change to the gate is a new cohort.
+- **Rules a gate or repair enforces are cut to a sentence or dropped:** roles
+  without histories, `covers`, the empty murder room, `exclusive`, the grid's
+  hard requirements, the gated motive, three who look guilty, the deep innocent
+  trail. Two unmeasured quotas went with them: "four in ten secrets gated" and
+  "at least two other damning secrets", both superseded by the field and the
+  trail. What stays is craft: voice, manner, wants, breaking points, the web,
+  the order of discovery, the floor under the innocent chain, people standing
+  still, accounts, common ground.
+- **One clause of why per rule, no counts.** "Twenty eight real cases were
+  read" and D-numbers are for this log, not for the model.
+- **Things now dealt lose their paragraphs:** the title advice (which
+  contradicted the dealt form), the old business, the five assessors.
+- **Opening Night is fixed rather than cut (option 1).** Ilse lies about the
+  interval and was alone at the stage door; a back passage lets her hear the
+  prop store; Renske's transfers now also open Nadia's promise, so the innocent
+  trail (books, promise, Ilse's reason) runs two gates against the motive's
+  one; Wouter's lie moves to the dressing corridor, where two people can break
+  it. It meets Normal with no shortcuts and stays winnable. The prose says the
+  shield and the decoy are one way to do it, not the pattern, to keep the
+  example from making every case the same case.
+
+Result: system prompt 37,093 to 28,377 characters, request up 1,500 for the
+targets, about 16% less in all. The money saved is cents; the point is that
+every rule the model reads is one the gate checks the same way.
+
+Found on the way: an innocent liar's breaking point was still worded "you will
+admit it only if:", the password phrasing D-113 removed from secrets. It now
+reads the same way as a secret's.
+
+Measured by the next batch against the D-188 baseline. D-188 and D-189 land in
+one cohort, by choice: both aim at the same numbers.

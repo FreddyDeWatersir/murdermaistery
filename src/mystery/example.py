@@ -10,7 +10,11 @@ the test both go through the parse boundary, which is where a real model's
 output actually arrives, rather than starting from something already valid.
 
 The case is prototype 02 rewritten to the current schema: hub victim, gated
-motive, three liars of whom one is the killer, a shield, and a decoy.
+motive, four liars of whom one is the killer, a shield, and a decoy. Since
+D-189 it also meets Normal (D-186): three suspects with a reason and the chance,
+two liars at the murder hour, and an innocent trail deeper than the motive,
+because it is the example in the drafting prompt and should be a case the gate
+would keep.
 """
 
 from typing import Any
@@ -129,7 +133,9 @@ OPENING_NIGHT: dict[str, Any] = {
         },
         {"id": "prop_store", "name": "Prop Store", "adjacent": []},
         {"id": "lighting_box", "name": "Lighting Box", "adjacent": []},
-        {"id": "stage_door", "name": "Stage Door", "adjacent": []},
+        # A back passage from the stage door to the prop store (D-189), so that
+        # Ilse, alone at the stage door at the interval, is still a witness.
+        {"id": "stage_door", "name": "Stage Door", "adjacent": ["prop_store"]},
     ],
     "slots": [
         {"id": "s0", "label": "19:40", "index": 0},
@@ -143,7 +149,7 @@ OPENING_NIGHT: dict[str, Any] = {
             "s0": "dressing_corridor",
             "s1": "dressing_corridor",
             "s2": "dressing_corridor",
-            "s3": "dressing_corridor",
+            "s3": "stage_door",
             "s4": "green_room",
         },
         "tomas": {
@@ -164,7 +170,7 @@ OPENING_NIGHT: dict[str, Any] = {
             "s0": "green_room",
             "s1": "lighting_box",
             "s2": "lighting_box",
-            "s3": "lighting_box",
+            "s3": "dressing_corridor",
             "s4": "green_room",
         },
         "wouter": {
@@ -216,6 +222,14 @@ OPENING_NIGHT: dict[str, Any] = {
             "description": "Nadia has it out with Bram about the promise he made her.",
         },
         {
+            "id": "the_call",
+            "people": ["ilse"],
+            "exclusive": True,
+            "place": "stage_door",
+            "slot": "s3",
+            "description": "Ilse slips out to ask her agent whether her part is being recast.",
+        },
+        {
             "id": "the_sacking",
             "damning": True,
             "people": ["tomas", "bram"],
@@ -247,7 +261,10 @@ OPENING_NIGHT: dict[str, Any] = {
             "id": "the_books",
             "holder": "renske",
             "about": "bram",
-            "summary": "Bram was moving money out of the company and Renske found the transfers.",
+            "summary": (
+                "Bram was moving money out of the company and Renske found the "
+                "transfers, among them a deposit on an autumn contract for Nadia."
+            ),
             "breaks_when": "she is told somebody already knows about the money",
             "evidence": "the transfer printouts",
             "known_by": ["tomas"],
@@ -257,9 +274,13 @@ OPENING_NIGHT: dict[str, Any] = {
             "holder": "nadia",
             "about": "bram",
             "summary": "Bram promised Nadia the lead and went cold on it two weeks ago.",
-            "breaks_when": "she is asked kindly rather than pressed",
+            "breaks_when": "she knows somebody has seen the money he put down for her",
             "known_by": ["ilse"],
-            # An object, because it now gates Ilse's secret and a gate has to be
+            # Behind Renske's transfers since D-189, so that the innocent trail
+            # (the books, then the promise, then Ilse's reason) runs two gates
+            # deep, one deeper than the killer's motive.
+            "revealed_by": "the_books",
+            # An object, because it gates Ilse's secret and a gate has to be
             # something the player can put on the table (S5, D-087).
             "evidence": "a card in Bram's hand: the lead is yours in the autumn, B.",
         },
@@ -280,17 +301,16 @@ OPENING_NIGHT: dict[str, Any] = {
             "summary": "Ilse overheard Bram say she was finished after this run.",
             "breaks_when": "she is told her part was already being recast",
             "known_by": [],
-            # Behind Nadia's promise, so that somebody innocent has a trail as
-            # deep as the killer's (A24, a gate since D-184): the lead Bram
-            # promised Nadia was Ilse's part, which is what the player needs to
-            # know before Ilse's own reason to want him gone comes out.
+            # Behind Nadia's promise: the lead Bram promised Nadia was Ilse's
+            # part, which is what the player needs to know before Ilse's own
+            # reason to want him gone comes out.
             "revealed_by": "the_promise",
         },
     ],
     "false_claims": [
         {
             "character": "wouter",
-            "place": "green_room",
+            "place": "dressing_corridor",
             "slot": "s3",
             "covers": "the_theft",
             "admits_when": "never",
@@ -308,6 +328,15 @@ OPENING_NIGHT: dict[str, Any] = {
             "slot": "s1",
             "covers": "the_promise",
             "admits_when": "somebody says they saw her at the stage door",
+        },
+        {
+            # The second lie about the murder hour (D-189), so that catching a
+            # lie about the interval is not the same as catching the killer.
+            "character": "ilse",
+            "place": "dressing_corridor",
+            "slot": "s3",
+            "covers": "the_replacement",
+            "admits_when": "she is told her part was already being recast",
         },
     ],
     "discovery": {

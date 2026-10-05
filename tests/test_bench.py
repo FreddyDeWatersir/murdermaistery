@@ -80,14 +80,23 @@ def test_a_sweep_does_not_narrate_every_relocation(capsys) -> None:
     """The solver says what it moved, which is right for one case and noise for
     forty. The first real report arrived under six hundred lines of
     `solver.relocated_lie` and could not be read."""
-    score(Mystery.model_validate(OPENING_NIGHT))
+    # Wouter claiming the green room, where only Tomas could contradict him, so
+    # the solver has a lie to move (the shipped case no longer needs one, D-189).
+    moved = {
+        **OPENING_NIGHT,
+        "false_claims": [
+            {**c, "place": "green_room"} if c["character"] == "wouter" else c
+            for c in OPENING_NIGHT["false_claims"]
+        ],
+    }
+    score(Mystery.model_validate(moved))
     loud = capsys.readouterr().out
 
     import tempfile
     from pathlib import Path as P
 
     with tempfile.TemporaryDirectory() as folder:
-        (P(folder) / "a.json").write_text(json.dumps(OPENING_NIGHT), encoding="utf-8")
+        (P(folder) / "a.json").write_text(json.dumps(moved), encoding="utf-8")
         sweep(P(folder))
     quiet = capsys.readouterr().out
 

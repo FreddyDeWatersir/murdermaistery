@@ -1075,14 +1075,56 @@ def test_whatever_a_draft_wrote_about_its_world_is_replaced_by_the_deal() -> Non
     assert (plain.world, plain.authority) == ("", "")
 
 
+# The shipped example one lie short of Normal: the killer alone lies about the
+# murder hour.
+_SHORT = {
+    **SHIPPED,
+    "false_claims": [c for c in SHIPPED["false_claims"] if c["character"] != "ilse"],
+}
+
+
+def test_the_shipped_example_meets_normal() -> None:
+    """It is the example in the drafting prompt, so it is a case the gate keeps
+    (D-189)."""
+    from mystery.measures import NORMAL, measure
+    from mystery.solver import solve
+
+    assert measure(solve(Mystery.model_validate(SHIPPED)), "the_lie").meets(NORMAL)
+
+
+def test_the_targets_are_the_gate_in_words() -> None:
+    """Built from the gate, so the prompt cannot ask for one thing while the gate
+    counts another, and a shortcut the shape hides is not asked about."""
+    from mystery.generator import _targets
+    from mystery.measures import NORMAL, SHORTCUTS
+
+    plain = _targets("the_lie", NORMAL)
+    assert "At least 3 suspects with a reason and the chance" in plain
+    assert "At least 2 people lie" in plain
+    assert SHORTCUTS["alone"] in plain
+    assert SHORTCUTS["alone"] not in _targets("mutual_alibi", NORMAL)
+    open_gate = {"field": 0, "shortcuts": 99, "motive": 0, "trail": 0, "liars_at_hour": 0}
+    assert _targets("the_lie", open_gate) == ""
+
+
+def test_the_targets_reach_the_model_after_the_shape(monkeypatch) -> None:
+    import mystery.measures
+    from mystery.generator import _user_prompt
+
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    prompt = _user_prompt(GenerationRequest(setting="a house", seed=1))
+    assert prompt.index("SHAPE OF THE SOLUTION") < prompt.index("WHAT THE CASE IS MEASURED ON")
+    assert prompt.index("WHAT THE CASE IS MEASURED ON") < prompt.index("Setting:")
+
+
 def test_a_draft_short_of_normal_is_redrafted_and_told_why(monkeypatch) -> None:
     """The gate is the four numbers against Normal (D-188). The shipped example
-    has the killer as the only liar at the murder hour, and the redraft is told
-    exactly that."""
+    meets it (D-189); without Ilse's lie the killer is the only liar at the
+    murder hour, and the redraft is told exactly that."""
     import mystery.measures
 
     monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
-    drafter = _flaky_drafter(SHIPPED)
+    drafter = _flaky_drafter(_SHORT)
     with pytest.raises(GenerationFailed):
         generate(REQUEST, drafter=drafter, attempts=2)
 
@@ -1097,7 +1139,7 @@ def test_the_closest_miss_is_kept_for_review(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
     cache = tmp_path / "mysteries"
     with pytest.raises(GenerationFailed):
-        generate(REQUEST, drafter=_flaky_drafter(SHIPPED), cache_dir=cache, attempts=2)
+        generate(REQUEST, drafter=_flaky_drafter(_SHORT), cache_dir=cache, attempts=2)
 
     kept = list((tmp_path / "review").glob("*.json"))
     assert len(kept) == 1

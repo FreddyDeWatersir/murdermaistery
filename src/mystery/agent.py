@@ -255,7 +255,8 @@ def build_brief(
                 )
             else:
                 # An innocent liar can be brought to it, and the notebook has to
-                # be able to hear it when they are, so it is citable (D-064).
+                # be able to hear it when they are, so it is citable (D-064). Not
+                # "only if", for the reason D-113 gives for secrets (D-189).
                 condition = claim.admits_when or (
                     "the questioner already knows what you were really doing"
                 )
@@ -264,7 +265,9 @@ def build_brief(
                         id=f"truth:{slot.id}",
                         text=(
                             f"{really} You said otherwise and you are not going back "
-                            f"on it lightly. You will admit it only if: {condition}"
+                            f"on it lightly. What would bring you to it: "
+                            f"{condition.rstrip('.')}. That is the shape of it rather "
+                            f"than a password."
                         ),
                         subject=character,
                         slot=slot.id,

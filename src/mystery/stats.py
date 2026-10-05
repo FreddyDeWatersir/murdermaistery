@@ -89,6 +89,17 @@ def trail_depths(mystery: Mystery) -> tuple[int, int]:
 def _why(complaints: list[str]) -> str:
     """Which gate sent a draft back, in one word."""
     text = " ".join(complaints)
+    # The measures gate (D-188): one sentence per missed number.
+    from mystery.measures import _FIX
+
+    marks = (
+        "choosing between whole theories",
+        "no gate in front of it",
+        "innocent trail is",
+        "lie about where they were at the murder hour",
+    )
+    if any(m in text for m in marks) or any(fix in text for fix in _FIX.values()):
+        return "Normal"
     if "deepest thing pointing" in text:
         return "A24"
     if "never passes through" in text:

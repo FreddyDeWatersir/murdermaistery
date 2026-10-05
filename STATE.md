@@ -1,12 +1,11 @@
 # STATE
 
-**NEXT (5 Oct 2026):** slim the prompt (D-187 step 5). D-188 wired the gate to
-the measures, dealt the old business's age, a title form and the killer's
-position, and retired A1 and S5. Difficulty as an input is still to come; until
-then every draft is held to Normal.
-
-Before the next batch: `uv run python -m mystery.cli --stats` for the baseline.
-After it, read "killer landed where dealt" and `var/review/` (near misses).
+**NEXT (5 Oct 2026):** a batch on the slimmed prompt (D-189), then read it with
+`uv run python -m mystery.cli --stats`. Compare the newest cohort with the one
+above it: yield, cost per shelved case, "meets Normal", "killer landed where
+dealt", and which numbers the rejected drafts missed. Near misses are in
+`var/review/`. Difficulty as an input is still to come; until then every draft
+is held to Normal.
 
 ---
 

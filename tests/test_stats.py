@@ -86,3 +86,10 @@ def test_nothing_in_it_spoils_a_case(tmp_path) -> None:
         assert secret.summary not in text
     assert "the_finder" not in text
     assert "the_finder" in report(collect(tmp_path), spoilers=True)
+
+
+def test_a_draft_sent_back_by_the_measures_is_filed_under_normal() -> None:
+    from mystery.measures import NORMAL, Measures, complaints
+    from mystery.stats import _why
+
+    assert _why(complaints(Measures(shortcuts=["alone"]), NORMAL)) == "Normal"
