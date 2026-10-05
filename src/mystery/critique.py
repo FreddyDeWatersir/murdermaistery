@@ -15,6 +15,7 @@ Each advisory names a threshold and says why it was chosen, so that when one tur
 out to be wrong there is something to argue with.
 """
 
+import re
 from dataclasses import dataclass
 
 from mystery.knowledge import analyse_alibi, derive
@@ -1331,6 +1332,81 @@ def a_red_herring_has_a_floor(mystery: Mystery) -> list[Advisory]:
     ]
 
 
+# Words too common to say two descriptions are of the same object.
+_FILLER = frozenset(
+    {"a", "an", "the", "of", "and", "with", "in", "on", "at", "to", "from", "for"}
+    | {"by", "his", "her", "their", "its", "one", "two", "three", "into", "behind"}
+    | {"under", "over", "which", "that", "this", "those", "these", "some"}
+)
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in _FILLER}
+
+
+def _same_object(evidence: str, name: str) -> bool:
+    """Whether a secret's evidence and a thing in the house are one object.
+
+    Both are free text written by the same model in the same draft, so the
+    same object comes back in nearly the same words ("a strip of three
+    photographs of a courtyard, a birth record folded behind them"). Most of
+    the shorter description's words appearing in the longer one is that.
+    """
+    ours, theirs = _words(evidence), _words(name)
+    if len(ours) < 3 or len(theirs) < 3:
+        return False
+    return len(ours & theirs) / min(len(ours), len(theirs)) >= 0.6
+
+
+def the_evidence_is_in_the_holders_hands(mystery: Mystery) -> list[Advisory]:
+    """A26: a secret's evidence is something its holder could actually produce.
+
+    Evidence is handed to the player by whoever holds the secret (D-087). A
+    played case had the photographs and the birth record as the evidence for
+    Sevda's secret, while the same envelope was Nevzat's, in his pocket, all
+    evening. The player laid it on the table in front of Sevda and she said so
+    herself: that envelope was never mine to hand over.
+
+    Nothing compared the two because they are two different fields: `evidence`
+    is free text on a secret, a `Thing` is an object with an owner and a path.
+    So this matches them by description and asks the only question that
+    matters, which is whether the person who would hand it over ever had it.
+    """
+    flagged = []
+    for secret in mystery.secrets:
+        if not secret.evidence:
+            continue
+        for thing in mystery.things:
+            owner = thing.belongs_to
+            # The dead are left out on purpose. A living owner will say "that is
+            # mine, it has been in my pocket all evening" the moment it is put
+            # in front of them, which is what broke the played case. A suspect
+            # holding something of the victim's is a story, not a contradiction,
+            # and often a very good one.
+            if not owner or owner == secret.holder or owner == mystery.victim:
+                continue
+            if secret.holder in thing.moved_by.values():
+                continue
+            if _same_object(secret.evidence, thing.name):
+                flagged.append((secret, thing, owner))
+
+    return [
+        Advisory(
+            check="A26",
+            message=(
+                f"'{secret.id}' is held by '{secret.holder}' and its evidence is "
+                f"'{thing.id}', which belongs to '{owner}' and never passes through "
+                f"'{secret.holder}''s hands. The player is given evidence by whoever "
+                f"holds the secret, so this hands them an object that is in somebody "
+                f"else's pocket. Either make the secret {owner}'s, or have "
+                f"{secret.holder} take the thing at some point (`moved_by`), or give "
+                f"the secret evidence of its own"
+            ),
+        )
+        for secret, thing, owner in flagged
+    ]
+
+
 ADVISORIES = [
     somebody_is_wrong_without_lying,
     the_murder_hour_is_not_a_giveaway,
@@ -1355,6 +1431,7 @@ ADVISORIES = [
     the_cast_is_a_web_not_a_wheel,
     the_killer_is_not_the_deepest_thing_here,
     a_red_herring_has_a_floor,
+    the_evidence_is_in_the_holders_hands,
 ]
 
 

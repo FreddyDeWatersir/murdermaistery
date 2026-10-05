@@ -397,6 +397,18 @@ def main(argv: list[str] | None = None) -> int:
         "--cases", action="store_true", help="list the cases on the shelf and stop"
     )
     parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="measure everything made so far, kept and rejected: yield, cost per "
+        "shelved case, depth, which checks fire. Names nothing, so it is safe to "
+        "read before playing. Calls no model (D-185)",
+    )
+    parser.add_argument(
+        "--spoilers",
+        action="store_true",
+        help="with --stats, also show each case's shape",
+    )
+    parser.add_argument(
         "--casts",
         action="store_true",
         help="print the cast of every saved case together, for reading three of "
@@ -466,6 +478,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cases:
         print(catalogue(store))
+        return 0
+
+    if args.stats:
+        from mystery.stats import collect
+        from mystery.stats import report as stats_report
+
+        print(stats_report(collect(), spoilers=args.spoilers))
         return 0
 
     if args.casts:

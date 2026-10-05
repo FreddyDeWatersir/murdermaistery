@@ -240,7 +240,7 @@ def assertions_from(brief: Brief, reply: Reply) -> list[Assertion]:
     """
     by_id = {fact.id: fact for fact in (*brief.facts, *brief.guarded)}
 
-    return [
+    found = [
         Assertion(subject=fact.subject, slot=fact.slot, place=fact.place)
         for used in reply.used
         if (fact := by_id.get(used))
@@ -248,6 +248,17 @@ def assertions_from(brief: Brief, reply: Reply) -> list[Assertion]:
         and fact.slot is not None
         and fact.place is not None
     ]
+
+    # A cited scene places everybody in it (D-184). Found in a played case: a
+    # suspect answered from the scene she shared with the victim, cited the
+    # scene and not the sighting, and the victim never reached the timeline.
+    # The citation may arrive bare or as the account of it (`said:`).
+    for used in reply.used:
+        for subject, slot, place in brief.scenes.get(used.removeprefix("said:"), []):
+            placed = Assertion(subject=subject, slot=slot, place=place)
+            if placed not in found:
+                found.append(placed)
+    return found
 
 
 def _hour(label: str) -> str:

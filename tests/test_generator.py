@@ -1073,3 +1073,41 @@ def test_whatever_a_draft_wrote_about_its_world_is_replaced_by_the_deal() -> Non
         scribbled, GenerationRequest(setting="a wake, on the night before the will is read")
     )
     assert (plain.world, plain.authority) == ("", "")
+
+
+def _a_corridor() -> dict:
+    """The shipped case with its innocent trail taken away again: solvable,
+    valid, and one thread long (A24)."""
+    import copy
+
+    case = copy.deepcopy(SHIPPED)
+    for secret in case["secrets"]:
+        if secret["id"] == "the_replacement":
+            secret.pop("revealed_by", None)
+    return case
+
+
+def test_a_case_with_only_one_thread_is_redrafted_and_told_why() -> None:
+    """A24 is a gate now (D-184): the one playtest that called a case the best
+    yet was one of two on the shelf it did not fire on."""
+    corridor = _a_corridor()
+    assert validate(Mystery.model_validate(corridor), phase="proposed").ok
+
+    drafter = _flaky_drafter(corridor, SHIPPED)
+    generate(REQUEST, drafter=drafter)
+
+    assert len(drafter.calls) == 2, "a one-thread case has to buy a redraft"
+    assert any("gate" in c and "deepest" in c for c in drafter.calls[1])
+
+
+def test_a_cached_corridor_is_redrafted_with_the_reason_already_given(tmp_path) -> None:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / f"{REQUEST.cache_key()}.json").write_text(
+        Mystery.model_validate(_a_corridor()).model_dump_json(indent=2), encoding="utf-8"
+    )
+
+    drafter = _flaky_drafter(SHIPPED)
+    generate(REQUEST, drafter=drafter, cache_dir=tmp_path)
+
+    assert len(drafter.calls) == 1
+    assert drafter.calls[0], "the first redraft should already know what was wrong"

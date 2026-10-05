@@ -457,3 +457,44 @@ def test_refusals_are_counted_and_answers_are_not() -> None:
 
 def test_somebody_who_has_not_spoken_has_no_ledger() -> None:
     assert Transcript().ledger(CASE, "vera") == []
+
+
+# A cited scene places everybody in it (D-184) ---------------------------------
+
+
+def _with_a_scene(**changes):
+    from mystery.models import Constraint
+
+    scene = Constraint(
+        id="c_study_talk", people=["vera", "clara"], place="study", slot="s1"
+    )
+    case = CASE.model_copy(update={"constraints": [*CASE.constraints, scene], **changes})
+    return case, derive(case)
+
+
+def test_citing_a_shared_scene_puts_the_other_person_on_the_timeline() -> None:
+    """Found in a played case: the answer came from the scene with the victim,
+    cited the scene and not the sighting, and the victim never reached the grid."""
+    case, know = _with_a_scene()
+    brief = build_brief(case, know, "clara")
+
+    placed = assertions_from(brief, Reply(speech="We talked in the study.", used=["c_study_talk"]))
+    assert Assertion("vera", "s1", "study") in placed
+    assert Assertion("clara", "s1", "study") in placed
+
+
+def test_the_account_of_a_scene_counts_as_citing_it() -> None:
+    case, know = _with_a_scene()
+    brief = build_brief(case, know, "clara")
+
+    placed = assertions_from(brief, Reply(speech="...", used=["said:c_study_talk"]))
+    assert Assertion("vera", "s1", "study") in placed
+
+
+def test_a_liar_citing_the_scene_they_lie_about_places_nobody() -> None:
+    """The killer claims the hall at s2, so the murder scene in the cellar is not
+    a scene they stand behind, and citing it must not put the truth on the grid."""
+    brief = build_brief(CASE, KNOW, "otto")
+
+    assert "murder" not in brief.scenes
+    assert assertions_from(brief, Reply(speech="...", used=["murder"])) == []

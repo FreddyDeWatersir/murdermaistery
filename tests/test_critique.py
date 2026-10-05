@@ -866,3 +866,56 @@ def test_a24_does_not_count_a_rival_standing_on_the_killers_road() -> None:
     assert _fires(_with_secrets(*chain), "A24"), (
         "a herring on the road to the motive is a signpost, not a herring"
     )
+
+
+# A26: evidence the holder could actually produce (D-184) ----------------------
+
+
+def _with_an_envelope(owner: str, moved_by: dict | None = None):
+    from test_agent import CASE
+
+    from mystery.models import Thing
+
+    envelope = Thing(
+        id="photo_envelope",
+        name="A brown envelope with a strip of three photographs of a courtyard, "
+        "and a birth record folded behind them",
+        belongs_to=owner,
+        where={"s0": "hall", "s1": "study", "s2": "hall"},
+        moved_by=moved_by or {},
+    )
+    secrets = [
+        s.model_copy(
+            update={
+                "evidence": "A strip of three photographs of a courtyard and a birth record"
+            }
+        )
+        if s.id == "affair"
+        else s
+        for s in CASE.secrets
+    ]
+    return CASE.model_copy(update={"things": [envelope], "secrets": secrets})
+
+
+def test_evidence_that_is_somebody_elses_pocket_is_flagged() -> None:
+    """The played case: Sevda's evidence was Nevzat's envelope, and Sevda said
+    so herself when it was put in front of her."""
+    from mystery.critique import the_evidence_is_in_the_holders_hands
+
+    flagged = the_evidence_is_in_the_holders_hands(_with_an_envelope(owner="clara"))
+    assert [a.check for a in flagged] == ["A26"]
+    assert "clara" in flagged[0].message
+
+
+def test_evidence_the_holder_owns_or_took_is_fine() -> None:
+    from mystery.critique import the_evidence_is_in_the_holders_hands
+
+    assert the_evidence_is_in_the_holders_hands(_with_an_envelope(owner="vera")) == []
+    took_it = _with_an_envelope(owner="clara", moved_by={"s1": "vera"})
+    assert the_evidence_is_in_the_holders_hands(took_it) == []
+
+
+def test_something_of_the_victims_in_a_suspects_hands_is_a_story_not_a_fault() -> None:
+    from mystery.critique import the_evidence_is_in_the_holders_hands
+
+    assert the_evidence_is_in_the_holders_hands(_with_an_envelope(owner="magnus")) == []

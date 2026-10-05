@@ -117,6 +117,12 @@ class Brief:
     # confession is the first one: it is a thing they will do, not a thing they
     # know.
     instructions: list[str] = field(default_factory=list)
+    # The scenes this person was in and will stand behind, by constraint id,
+    # with everybody the scene puts in the room (D-184). Citing a scene is a
+    # statement about who was there, and the timeline could not hear it: a
+    # suspect who answered from the candle-counting scene placed the victim in
+    # the sacristy in words and nowhere on the grid.
+    scenes: dict[str, list[tuple[str, str, str]]] = field(default_factory=dict)
 
     @property
     def licensed(self) -> set[str]:
@@ -574,7 +580,35 @@ def build_brief(
         roster=roster,
         investigator=asking,
         instructions=instructions,
+        scenes=_scenes_they_stand_behind(mystery, character, facts),
     )
+
+
+def _scenes_they_stand_behind(
+    mystery: Mystery, character: CharacterId, facts: list[Fact]
+) -> dict[str, list[tuple[str, str, str]]]:
+    """Every scene this person was in, *where they say they were* (D-184).
+
+    Only when their sayable account of that hour puts them in the scene's room.
+    A liar citing the scene they are lying about must not put the truth on the
+    grid by accident: the killer's own `self:` fact for the murder hour names
+    the room they claim, not the storeroom, so the murder scene never qualifies
+    for the killer, and an innocent's lie is protected the same way until it is
+    admitted.
+    """
+    said_where = {
+        fact.slot: fact.place
+        for fact in facts
+        if fact.id.startswith("self:") and fact.slot and fact.place
+    }
+    return {
+        scene.id: [(person, scene.slot, scene.place) for person in scene.people]
+        for scene in mystery.constraints
+        if character in scene.people
+        and scene.place
+        and scene.slot
+        and said_where.get(scene.slot) == scene.place
+    }
 
 
 # The prompt is three pieces rather than one string, and the split is about

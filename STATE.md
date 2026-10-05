@@ -1,5 +1,16 @@
 # STATE
 
+**NEXT (5 Oct 2026):** wire the check roles from D-187, step 1 of its list.
+Read the Engine Map first (claude.ai artifact "Engine Map") and run
+`uv run python -m mystery.cli --stats` for the baseline. The order after that
+is in D-187: difficulty as an input, deal what is not dealt, fix A1 and S5,
+slim the prompt, then a batch half at `--slots 6`.
+
+Measuring is free and spoils nothing: `--stats` (add `--spoilers` for shapes
+and which shortcuts work).
+
+---
+
 **NEXT:** Generate one case with nothing pinned and play it.
 
 The last one, `the-sixth-name-on-the-board`, was the best so far and is worth

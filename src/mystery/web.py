@@ -1145,6 +1145,12 @@ button{font-family:var(--body);font-size:13px;background:var(--panel2);color:var
 border:1px solid var(--rule);padding:7px 12px;border-radius:6px;cursor:pointer}
 button:hover{border-color:var(--muted)}
 button.accuse{border-color:var(--bad);color:var(--bad)}
+/* The accusation used to sit right after the question box, exactly where a
+   send button lives, and a playtest nearly charged somebody by reaching for
+   it (D-184). It is up with the other things you do once, and the spot beside
+   the box is a real Ask button that does what Enter does. */
+#top .right .accuse{margin-left:14px}
+button.ask{border-color:var(--cool);color:var(--cool)}
 .badge.late{color:var(--warm);border-color:var(--warm)}
 .badge.spent{color:#c9564e;border-color:#c9564e}
 .badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
@@ -1442,6 +1448,7 @@ text-transform:uppercase;color:var(--muted)}
       <button id="mute">Sound on</button>
       <button id="textsize" title="Reading size">A</button>
       <button id="booktoggle">Notebook</button>
+      <button class="accuse" id="accusebtn" title="Name who did it">Accuse</button>
     </div>
   </div>
   <div id="stage"><svg id="portrait" viewBox="0 0 200 250"></svg>
@@ -1453,7 +1460,7 @@ text-transform:uppercase;color:var(--muted)}
   <div id="bar">
     <div id="cast"></div>
     <input id="q" placeholder="Ask a question" autocomplete="off">
-    <button class="accuse" id="accusebtn">Accuse</button>
+    <button class="ask" id="askbtn">Ask</button>
     <div id="hand" class="gone"></div>
   </div>
 </div>
@@ -1887,6 +1894,7 @@ async function boot(){
     cast.appendChild(b);
   });
   $('q').onkeydown=e=>{if(e.key==='Enter')send()};
+  $('askbtn').onclick=()=>send();
   $('mute').onclick=()=>{sound=!sound;$('mute').textContent=sound?'Sound on':'Sound off'};
   setSize(load('size')||'');
   setBook(parseInt(load('book'),10)||BOOK_DEFAULT);
@@ -1999,7 +2007,7 @@ function paintBook(n){
   $('count').classList.toggle('late',!!n.late && !n.over);
   $('count').classList.toggle('spent',!!n.over);
   if(n.over){
-    $('q').disabled=true;
+    $('q').disabled=true;$('askbtn').disabled=true;
     $('q').placeholder=Coming()+' are here. You can still name somebody.';
   }
   paintHand();

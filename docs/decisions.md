@@ -4717,3 +4717,154 @@ the next field somebody adds:
 
 The one case saved with the scribbles (`the-sixteen-kilometres-7297`) was
 cleaned by hand; everything else in it is the model's and untouched.
+
+## D-184 What The Sixteen Kilometres taught
+**Date:** 2026-09-30
+**Status:** active
+
+The best-received evening so far: a hundred and twenty five questions, nine of
+ten secrets found, and a wrong accusation with the right hunch behind it. Read
+back from the transcript, it made four changes.
+
+**A24 is a gate.** Somebody innocent with a trail as deep as the killer's was,
+in the player's words, what made the case. It is also the check that fires on
+nineteen of the twenty one cases on the shelf; this was one of the two it did
+not. So a draft that fails it is now sent back with the message, the same way an
+unsolvable one is, and a cached draft that fails it redrafts with the reason
+already given. Everything else `assess` prints stays advice: a gate costs a
+redraft, and it is only worth that for a fault a player would notice.
+
+The price is real and not yet measured. A24 fired on three of the last four
+drafts, so most seeds will now pay for at least one redraft, about forty cents,
+and some will run out of attempts and fail. The first batch under this will say
+how often; if it is most of the time, the instruction has to get better rather
+than the gate softer.
+
+The shipped example could not pass it and every test that drafts it went red,
+which was the right result. It has a trail now: Ilse's reason to want Bram gone
+sits behind Nadia's promise, the lead that was Ilse's part, and the promise has
+a card in Bram's hand so the gate is something the player can put down (S5).
+
+**A26, the evidence is in its holder's hands, also a gate.** Sevda's secret had
+Nevzat's envelope as its evidence, the one in his pocket all evening, and when
+the player laid it in front of her she said so. `evidence` is free text on a
+secret and a `Thing` has an owner and a path, and nothing compared them. A26
+matches the two by description and flags a secret whose evidence belongs to a
+living suspect who is not the holder and whom the holder never took it from.
+Run over the shelf it finds exactly the envelope. It also found two cases where
+a suspect holds something of the victim's, and those are left alone on purpose:
+the dead cannot say "that is mine", and a suspect with the victim's folio is a
+story, not a contradiction.
+
+**A cited scene places everybody in it.** The victim-missing-from-the-timeline
+report, confirmed from the server: Marguerite answered from the candle-counting
+scene she shared with Soeur Alvine and cited the scene, not the sighting. The
+timeline only read `self:` and `saw:` facts, so it placed nobody. A brief now
+carries the scenes its character stands behind, and a citation of one (bare or
+as `said:`) puts every person in it in that room at that hour. Only scenes where
+the speaker's own sayable account puts them in that room, so a liar citing the
+scene they lie about, the killer's murder scene above all, never puts the truth
+on the grid.
+
+**The Accuse button moved.** It sat directly after the question box, where every
+other interface puts Send, and the player nearly charged somebody reaching for
+it. It is in the top bar now with the other things you do once, and the spot
+beside the box is an Ask button that does what Enter does.
+
+**Found and not yet fixed**, each waiting on a design call:
+
+- Bahri's lie did not break when his own condition was met, twice. Whether an
+  innocent liar admits is left to the model's judgement of `admits_when`. The
+  proposed fix was to release a lie mechanically once the secret it covers is
+  out, and the player's objection to it is the right one: in this case the lie
+  (kitchen, not gallery, at 22:15) was never really covering the blackmail,
+  which happened in the long room. A lie needs a reason before it needs a way
+  out.
+- Nevzat was the only witness to the motive and also held a secret saying he
+  heard nothing he would report. Two secrets instructing one person in
+  opposite directions is detectable and is not detected.
+- A suspect repeating a secret they have already given, unprompted.
+- Killer archetypes. Measured over the shelf: the killer is the most connected
+  person in nine of twenty one cases and never the least, and always holds two
+  or three secrets. So the hub is over-represented and "the one with nothing to
+  hide" has never happened.
+
+## D-185 An instrument before any more changes
+**Date:** 2026-10-05
+**Status:** active
+
+Three batches of changes in a row (worlds, the A24 and A26 gates, evidence and
+scene repairs) were judged by one playtest each and by numbers worked out by
+hand. That stops here. `uv run python -m mystery.cli --stats` reads the shelf,
+every rejected draft and every local or copied-down session, and reports per
+prompt version: drafts, shelved, yield, cost per shelved case, why drafts were
+rejected, how deep motives and innocent trails are, and how often every check
+fires. Then the shelf, unplayed and deepest first.
+
+It is read before playing, so it names nothing: no suspect, no secret, and no
+shape unless `--spoilers` is passed. Titles and worlds are shown; they are what
+the briefing shows anyway.
+
+Rejected drafts now carry the same stamp as shelved ones (prompt version and
+model), so a yield can be computed inside one cohort. The fourteen rejected
+before this have no stamp and report as "unstamped".
+
+Cost is drafts times $0.41, the mean measured over the October batch, and the
+report says so: a draft does not record its own price.
+
+What the first run says, as the baseline everything after this is measured
+against:
+
+- Prompt 7884377a: 22 drafts, 8 shelved. Motives average 2.0 gates and
+  innocent trails 1.1.
+- Before the stamp: motives 1.4 and innocent trails 0.3. The trail is what the
+  last month of work moved.
+- S5 and A1 fire on every draft of the current prompt. A check that always
+  fires says nothing; both are first in line for step 2 (a role per check).
+- Two unplayed cases have motive 2 and trail 2: The Fourth Candle and The
+  Fourth Jump of the Day.
+
+## D-186 Four numbers instead of three families of checks
+**Date:** 2026-10-05
+**Status:** active
+
+Three families of advisories were asking one question each in several words:
+is there more than one real suspect (A4, A16, A18, A24), is the motive
+findable (A5, A13, S3), and is there a trick that names the killer without the
+case (A2, A10, A12, A20). A yes/no says a case failed; it cannot say by how
+much, and it cannot be averaged across a batch to see whether a change moved
+anything. `measures.py` replaces them, for measuring, with four numbers:
+
+- **Field.** A reason (holds something damning) and a chance (alone at the
+  murder hour, or lying about where they were then). The first prototype
+  counted anyone in a room of two as having the chance, which gave all five
+  suspects opportunity in most cases; this is the tightened version.
+- **Depth.** Gates before the motive, and before the deepest innocent trail.
+- **Shortcuts.** Eight questions a player can ask the grid or the secrets: who
+  was alone at the murder hour, who lies about it, which liar nobody can place,
+  who lies at all, whose trail is deepest, who was with the victim the hour
+  before, who has anything damning, who has a secret about the victim. A
+  shortcut counts when it returns the killer and nobody else. A shape that
+  hides one from the player by construction does not count it: mutual alibi
+  gives the killer a witness, and the wrong hour means nobody knows which hour.
+- **Lies.** People lying, and people lying about the murder hour.
+
+`--stats` now reports all four per prompt version and per case, and how many
+cases meet Normal: field 3 with the killer in it, no shortcuts, motive 2,
+trail 2, two liars at the murder hour. Which shortcut works in a given case is
+a spoiler ("whose trail is deepest" is the killer), so only the count is shown
+unless `--spoilers` is passed.
+
+What the first run says:
+
+- On the current prompt, the commonest working shortcut is "whose trail is
+  deepest", and on the rejected drafts it works in 12 of 14. A24's worry is
+  real and is the single biggest trick in the engine.
+- One unplayed case meets Normal: The Fourth Jump of the Day.
+- The Sixteen Kilometres, the best-received case, has field 3, no shortcuts and
+  a trail 3 deep, and fails Normal on one count only: its motive is one gate
+  deep. The motive floor in Normal is a guess the one good data point argues
+  against, and is the first thing to revisit when difficulty exists.
+
+The old checks stay and keep printing until each has a role (gate, signal or
+retire). Nothing here is a gate yet.

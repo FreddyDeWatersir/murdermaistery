@@ -1185,6 +1185,12 @@ def prompt_version() -> str:
     return hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:8]
 
 
+def _stamp(drafter: "Drafter") -> str:
+    """Prompt version and the model that drafted, as stamped on a case (D-166)."""
+    wrote_it = getattr(drafter, "model", "")
+    return prompt_version() + (f"/{wrote_it.removeprefix('claude-')}" if wrote_it else "")
+
+
 def _unwrap(raw: dict[str, Any]) -> dict[str, Any]:
     """Undo a degenerate wrapper if the model produced one.
 
@@ -1288,6 +1294,7 @@ def _keep_the_wreckage(
     attempt: int,
     raw: Any,
     complaints: list[str],
+    built_with: str = "",
 ) -> None:
     """Write a rejected draft down instead of dropping it (D-156).
 
@@ -1313,6 +1320,9 @@ def _keep_the_wreckage(
                     "setting": request.setting,
                     "topology": request.topology,
                     "complaints": complaints,
+                    # Which instructions wrote it, so a rejection rate can be
+                    # split by prompt version like everything else (D-185).
+                    "built_with": built_with or prompt_version(),
                     "draft": raw,
                 },
                 indent=2,
@@ -1342,6 +1352,7 @@ def generate(
     """
     from mystery.validator import validate
 
+    inherited: list[str] = []
     if cache_dir is not None:
         cached = cache_dir / f"{request.cache_key()}.json"
         if cached.exists():
@@ -1363,16 +1374,23 @@ def generate(
             # Drafts cached before D-157 include some of those. Say so and pay
             # for a new one rather than handing back a case nobody can play.
             broken = _what_no_arrangement_fixes(kept, request.seed)
-            if not broken:
+            short = [] if broken else _below_the_bar(kept)
+            if not broken and not short:
                 return kept
             log.warning(
-                "mystery.cached_draft_unplayable",
+                (
+                    "mystery.cached_draft_unplayable"
+                    if broken
+                    else "mystery.cached_draft_below_the_bar"
+                ),
                 key=request.cache_key(),
-                problems=broken,
+                problems=broken or short,
                 detail="redrafting rather than returning a case that cannot be solved",
             )
+            # The first redraft is told why, the same as any other rejection.
+            inherited = broken or short
 
-    complaints: list[str] = []
+    complaints: list[str] = inherited
 
     for attempt in range(1, attempts + 1):
         raw = _unwrap(drafter(request, complaints))
@@ -1382,14 +1400,8 @@ def generate(
             # one right answer and no judgement in it, so it costs nothing here
             # and a fresh Opus call if it goes back to the model.
             mystery = unbind_the_imaginary(unname_the_commission(Mystery.model_validate(raw)))
-            wrote_it = getattr(drafter, "model", "")
             mystery = in_its_world(
-                mystery.model_copy(
-                    update={
-                        "built_with": prompt_version()
-                        + (f"/{wrote_it.removeprefix('claude-')}" if wrote_it else "")
-                    }
-                ),
+                mystery.model_copy(update={"built_with": _stamp(drafter)}),
                 request,
             )
         except ValidationError as error:
@@ -1398,7 +1410,7 @@ def generate(
                 for e in error.errors()[:8]
             ]
             log.warning("mystery.unparseable", attempt=attempt, problems=complaints)
-            _keep_the_wreckage(cache_dir, request, attempt, raw, complaints)
+            _keep_the_wreckage(cache_dir, request, attempt, raw, complaints, _stamp(drafter))
             continue
 
         result = validate(mystery, phase="proposed")
@@ -1427,6 +1439,13 @@ def generate(
             complaints = seen + [b for b in broken if b not in seen] if broken else []
 
         if not complaints:
+            # Solvable is not the same as worth playing (D-184). These were
+            # advisories, printed after the case was already on the shelf.
+            complaints = _below_the_bar(mystery)
+            if complaints:
+                log.warning("mystery.below_the_bar", attempt=attempt, problems=complaints)
+
+        if not complaints:
             if cache_dir is not None:
                 cache_dir.mkdir(parents=True, exist_ok=True)
                 (cache_dir / f"{request.cache_key()}.json").write_text(
@@ -1435,9 +1454,43 @@ def generate(
             return mystery
 
         log.warning("mystery.rejected", attempt=attempt, problems=complaints)
-        _keep_the_wreckage(cache_dir, request, attempt, raw, complaints)
+        _keep_the_wreckage(cache_dir, request, attempt, raw, complaints, _stamp(drafter))
 
     raise GenerationFailed(complaints)
+
+
+def _below_the_bar(mystery: Mystery) -> list[str]:
+    """The quality checks a draft must pass, not merely be told about (D-184).
+
+    Two advisories promoted to gates, each on the evidence of a played evening.
+
+    A24, somebody innocent has a trail as deep as the killer's. It fired on
+    nineteen of the twenty one cases on the shelf, and the one playtest that
+    called a case the best yet was one of the two it did not fire on: the
+    second suspect with real depth was, in the player's words, what made it.
+    Everything else in that list is a way for a case to be worse; this is the
+    difference between a case and a corridor.
+
+    A26, the evidence is in its holder's hands. Cheap to satisfy and fatal when
+    it is not: the player puts an object on the table and the person it came
+    from says it was never theirs.
+
+    Everything else `assess` says stays advice. A gate costs a redraft, forty
+    cents, and it is only worth that for a fault a player would notice.
+    """
+    from mystery.critique import (
+        the_evidence_is_in_the_holders_hands,
+        the_killer_is_not_the_deepest_thing_here,
+    )
+
+    return [
+        advisory.message
+        for check in (
+            the_killer_is_not_the_deepest_thing_here,
+            the_evidence_is_in_the_holders_hands,
+        )
+        for advisory in check(mystery)
+    ]
 
 
 def _unreachable(mystery: Mystery) -> list[str]:

@@ -259,6 +259,9 @@ OPENING_NIGHT: dict[str, Any] = {
             "summary": "Bram promised Nadia the lead and went cold on it two weeks ago.",
             "breaks_when": "she is asked kindly rather than pressed",
             "known_by": ["ilse"],
+            # An object, because it now gates Ilse's secret and a gate has to be
+            # something the player can put on the table (S5, D-087).
+            "evidence": "a card in Bram's hand: the lead is yours in the autumn, B.",
         },
         {
             "id": "the_padding",
@@ -277,6 +280,11 @@ OPENING_NIGHT: dict[str, Any] = {
             "summary": "Ilse overheard Bram say she was finished after this run.",
             "breaks_when": "she is told her part was already being recast",
             "known_by": [],
+            # Behind Nadia's promise, so that somebody innocent has a trail as
+            # deep as the killer's (A24, a gate since D-184): the lead Bram
+            # promised Nadia was Ilse's part, which is what the player needs to
+            # know before Ilse's own reason to want him gone comes out.
+            "revealed_by": "the_promise",
         },
     ],
     "false_claims": [
