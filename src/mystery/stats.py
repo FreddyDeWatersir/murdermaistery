@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mystery.critique import _gates_deep, _points_at
-from mystery.measures import NORMAL, SHORTCUTS, Measures, measure
+from mystery.measures import NORMAL, SHORTCUTS, Measures, measure, position_landed
 from mystery.models import Mystery
 from mystery.palette import world_named
 from mystery.topology import assess
@@ -54,6 +54,8 @@ class Record:
     asked: int = 0  # questions asked about this case in local sessions
     case_id: str = ""
     measures: Measures | None = None
+    position: str = ""  # where the killer was dealt (D-188), a spoiler
+    landed: bool | None = None  # whether the draft put them there
 
 
 def trail_depths(mystery: Mystery) -> tuple[int, int]:
@@ -102,6 +104,11 @@ def _measure(record: Record, mystery: Mystery) -> Record:
         record.measures = measure(mystery, record.shape)
     except Exception:  # noqa: BLE001 - a draft too broken to measure is still counted
         record.measures = None
+    record.position = mystery.killer_position
+    try:
+        record.landed = position_landed(mystery)
+    except Exception:  # noqa: BLE001
+        record.landed = None
     try:
         record.fired = {a.check for a in assess(mystery, record.shape)}
     except Exception:  # noqa: BLE001 - a draft that breaks a check is still counted
@@ -225,8 +232,27 @@ def report(records: list[Record], spoilers: bool = False) -> str:
                     "    shortcuts that work: "
                     + ", ".join(f"{SHORTCUTS[n]} {c}" for n, c in tricks.most_common())
                 )
+            argued = sum(1 for m in scored if m.argued)
+            lines.append(
+                f"    gates only arguable (no object): {_mean([m.argued for m in scored])}"
+                f" per draft, in {argued} of {len(scored)}"
+            )
             normal = sum(1 for m in scored if m.meets())
             lines.append(f"    meets Normal {NORMAL}: {normal} of {len(scored)}")
+        dealt = [r for r in measured if r.landed is not None]
+        if dealt:
+            # Which position a case was dealt is a spoiler; the rate is not,
+            # unless it is broken down by position.
+            hit = sum(1 for r in dealt if r.landed)
+            line = f"    killer landed where dealt: {hit} of {len(dealt)}"
+            if spoilers:
+                by: dict[str, list[bool]] = defaultdict(list)
+                for r in dealt:
+                    by[r.position].append(bool(r.landed))
+                line += "  (" + ", ".join(
+                    f"{k} {sum(v)}/{len(v)}" for k, v in sorted(by.items())
+                ) + ")"
+            lines.append(line)
         fired = Counter(check for r in measured for check in r.fired)
         if measured and fired:
             rates = "  ".join(

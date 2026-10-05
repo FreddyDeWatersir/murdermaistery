@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
 from mystery.models import Mystery
-from mystery.palette import commission, murder_slot, world_for
+from mystery.palette import POSITIONS, commission, killer_position, murder_slot, world_for
 from mystery.palette import draw as draw_palette
 from mystery.topology import DEFAULT as DEFAULT_TOPOLOGY
 from mystery.topology import get as get_topology
@@ -170,6 +170,7 @@ def in_its_world(mystery: Mystery, request: "GenerationRequest") -> Mystery:
         update={
             "world": dealt.key if dealt else "",
             "authority": dealt.authority if dealt else "",
+            "killer_position": killer_position(request.seed),
         }
     )
 
@@ -925,7 +926,10 @@ def _casting(seed: int) -> str:
     return (
         f"Casting, not negotiable: the killer is {killer} and the victim is "
         f"{victim}. Everything else about them is yours. The rest of the cast "
-        f"must contain at least two women and at least two men."
+        f"must contain at least two women and at least two men.\n\n"
+        f"**Where the killer stands in this house, also not negotiable:** "
+        f"{POSITIONS[killer_position(seed)]}. Build the web of secrets so that it is "
+        f"true; the killer has been every kind of person except this one too often."
     )
 
 
@@ -1063,7 +1067,7 @@ def _tool_schema() -> dict[str, Any]:
 
 
 # Written by `generate` after the draft, never by the model.
-STAMPED = ("built_with", "world", "authority")
+STAMPED = ("built_with", "world", "authority", "killer_position")
 
 
 def anthropic_drafter(
@@ -1374,7 +1378,7 @@ def generate(
             # Drafts cached before D-157 include some of those. Say so and pay
             # for a new one rather than handing back a case nobody can play.
             broken = _what_no_arrangement_fixes(kept, request.seed)
-            short = [] if broken else _below_the_bar(kept)
+            short = [] if broken else _below_the_bar(kept, request.topology)
             if not broken and not short:
                 return kept
             log.warning(
@@ -1391,6 +1395,8 @@ def generate(
             inherited = broken or short
 
     complaints: list[str] = inherited
+    # The draft that came closest while failing only on quality (D-188).
+    nearest: tuple[Mystery, list[str]] | None = None
 
     for attempt in range(1, attempts + 1):
         raw = _unwrap(drafter(request, complaints))
@@ -1441,8 +1447,10 @@ def generate(
         if not complaints:
             # Solvable is not the same as worth playing (D-184). These were
             # advisories, printed after the case was already on the shelf.
-            complaints = _below_the_bar(mystery)
+            complaints = _below_the_bar(mystery, request.topology)
             if complaints:
+                if nearest is None or len(complaints) < len(nearest[1]):
+                    nearest = (mystery, complaints)
                 log.warning("mystery.below_the_bar", attempt=attempt, problems=complaints)
 
         if not complaints:
@@ -1456,41 +1464,65 @@ def generate(
         log.warning("mystery.rejected", attempt=attempt, problems=complaints)
         _keep_the_wreckage(cache_dir, request, attempt, raw, complaints, _stamp(drafter))
 
+    if nearest is not None:
+        _keep_for_review(cache_dir, request, *nearest)
     raise GenerationFailed(complaints)
 
 
-def _below_the_bar(mystery: Mystery) -> list[str]:
-    """The quality checks a draft must pass, not merely be told about (D-184).
+def _below_the_bar(mystery: Mystery, shape: str = "") -> list[str]:
+    """What a draft must reach, not merely be told about (D-184, D-188).
 
-    Two advisories promoted to gates, each on the evidence of a played evening.
+    The four numbers from D-186 against Normal, plus A26. Each number that
+    falls short sends its own sentence back, so the redraft knows what to fix:
+    a working shortcut, a field under three, an innocent trail under two gates,
+    a lone liar at the murder hour.
 
-    A24, somebody innocent has a trail as deep as the killer's. It fired on
-    nineteen of the twenty one cases on the shelf, and the one playtest that
-    called a case the best yet was one of the two it did not fire on: the
-    second suspect with real depth was, in the player's words, what made it.
-    Everything else in that list is a way for a case to be worse; this is the
-    difference between a case and a corridor.
+    A24 is gone from here. It was relative ("an innocent trail as deep as the
+    motive") and the model met it by making the motive shallower (D-186). The
+    floors cannot be met by shrinking anything, and "whose trail is deepest" is
+    still caught, as a shortcut.
 
-    A26, the evidence is in its holder's hands. Cheap to satisfy and fatal when
-    it is not: the player puts an object on the table and the person it came
-    from says it was never theirs.
-
-    Everything else `assess` says stays advice. A gate costs a redraft, forty
-    cents, and it is only worth that for a fault a player would notice.
+    A26, the evidence is in its holder's hands, stays: cheap to satisfy, fatal
+    when it is not.
     """
-    from mystery.critique import (
-        the_evidence_is_in_the_holders_hands,
-        the_killer_is_not_the_deepest_thing_here,
-    )
+    from mystery.critique import the_evidence_is_in_the_holders_hands
+    from mystery.measures import complaints, measure
 
-    return [
-        advisory.message
-        for check in (
-            the_killer_is_not_the_deepest_thing_here,
-            the_evidence_is_in_the_holders_hands,
-        )
-        for advisory in check(mystery)
+    return complaints(measure(mystery, shape)) + [
+        advisory.message for advisory in the_evidence_is_in_the_holders_hands(mystery)
     ]
+
+
+def _keep_for_review(
+    cache_dir: Path | None, request: "GenerationRequest", mystery: Mystery, short: list[str]
+) -> None:
+    """The closest miss, kept when every attempt fell short only on quality (D-188).
+
+    Three drafts that are each playable and each one number short were all
+    thrown away, at forty cents a draft. The best of them goes to
+    `var/review` with what it missed, to be read and shelved by hand or not.
+    """
+    if cache_dir is None:
+        return
+    try:
+        folder = cache_dir.parent / "review"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{request.cache_key()}.json").write_text(
+            json.dumps(
+                {
+                    "seed": request.seed,
+                    "setting": request.setting,
+                    "topology": request.topology,
+                    "short": short,
+                    "mystery": mystery.model_dump(mode="json"),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        log.warning("mystery.kept_for_review", key=request.cache_key(), short=len(short))
+    except OSError as error:  # noqa: BLE001 - best effort
+        log.warning("mystery.review_unkept", error=str(error))
 
 
 def _unreachable(mystery: Mystery) -> list[str]:

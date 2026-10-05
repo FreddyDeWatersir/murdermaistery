@@ -412,6 +412,64 @@ OCCASIONS = [
 ]
 
 
+# When the old business happened (D-188). Every case said "eleven years ago",
+# because a shared past defaults to a long time, and a long time defaults to a
+# decade. Dealt instead, from long ago to this week: something three days old
+# is still raw, and the people in it have not finished arguing about it.
+AGES = [
+    "more than thirty years ago",
+    "about twenty years ago",
+    "ten or twelve years ago",
+    "five or six years ago",
+    "two years ago",
+    "last winter",
+    "this spring, a few months back",
+    "only last month",
+    "this week",
+]
+
+# The shape of the title (D-188). Left free, the model reaches for "The Nth
+# Something" every time: the Sixth Name twice, the Fourth, Fifth and
+# Fourteenth Candle. A deck cannot be ignored the way an instruction can.
+TITLE_FORMS = [
+    "a place in or around the building, named the way the people here name it",
+    "an object that matters to the case, without saying why",
+    "a short phrase somebody says out loud tonight",
+    "a time of day, a season or a date, as the people here would say it",
+    "a person described by what they do, never by their name",
+    "the weather, the light or a sound in the house tonight",
+    "a saying, proverb or turn of phrase from this world",
+    "two nouns joined by 'and'",
+    "a single word",
+    "a question somebody in the house would ask",
+    "what is left over afterwards",
+]
+
+# Where the killer stands in the house (D-188). Measured over 21 cases, the
+# killer was the most connected person nine times and never the least, and
+# always held two or three secrets, so "the quiet one nobody asks" and "the one
+# with nothing to hide" had never happened. Dealt from the seed alone, stamped
+# on the case, and measured by `measures.position_landed` before anything gates
+# on it.
+POSITIONS = {
+    "hub": "the hub: everyone's information passes through them. They know the "
+    "most about the others, and the others come to them",
+    "outsider": "the outsider: the least connected person here. They know little "
+    "about the others and the others barely know them",
+    "clean_hands": "the one with nothing to hide: apart from the reason they killed, "
+    "they hold no secret at all, and they are the easiest person in the house to trust",
+    "mourner": "the mourner: the person closest to the victim, whose grief is real "
+    "and is the best cover in the house",
+    "small_sinner": "the small sinner: early on they own up to something lesser, "
+    "readily, and are trusted for their honesty from then on",
+}
+
+
+def killer_position(seed: int) -> str:
+    """Which position the killer is dealt (D-188), by key."""
+    return random.Random(f"position|{seed}").choice(sorted(POSITIONS))
+
+
 # Other worlds (D-182). Every region above is the present day, and every occasion
 # assumes modern life: a vote, a sale, a funding decision. The model can write
 # any century and any planet, and the cases were all the same fifty years.
@@ -768,6 +826,8 @@ class Palette:
     intrigues: list[str]
     standing: str = ""
     old_business: str = ""
+    old_business_age: str = ""
+    title_form: str = ""
     where: str = ""
     world: World | None = None
 
@@ -821,7 +881,11 @@ class Palette:
             f"{self.old_business}. Most of this cast was here for it. Nobody has "
             f"raised it since, each of them for a different reason, and it is why "
             f"they know things about each other rather than only about the "
-            f"victim.\n\n"
+            f"victim. **It happened {self.old_business_age}.** If the line above "
+            f"implies a different time, this one wins: a shared past is not always "
+            f"old history, and a recent one is still raw.\n\n"
+            f"**The title** takes this form: {self.title_form}. Not 'The Nth "
+            f"Something': there are too many of those already.\n\n"
             f"The person asking the questions is {self.standing}. Work out who "
             f"that is in *this* building and write it into `investigator`. It is "
             f"the assignment, not a suggestion, and it is different next time.\n\n"
@@ -868,6 +932,10 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
         intrigues=[rng.choice(WEIGHTY), *rng.sample(DAMAGING + AWKWARD, 2)],
         standing=rng.choice(STANDINGS),
         old_business=rng.choice(OLD_BUSINESS),
+        # Their own streams, so adding them did not reshuffle the hands every
+        # earlier seed was dealt (D-188).
+        old_business_age=random.Random(f"age|{seed}|{setting}|{topology}").choice(AGES),
+        title_form=random.Random(f"title|{seed}|{setting}|{topology}").choice(TITLE_FORMS),
         # Drawn on the seed alone, deliberately. The other decks are keyed on the
         # setting so that one seed against four settings gives four hands; this
         # one must vary even when the setting phrase does not, because the

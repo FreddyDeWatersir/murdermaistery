@@ -400,6 +400,9 @@ class Mystery(BaseModel):
     # existed, which the page reads as the present day and the police.
     world: str = ""
     authority: str = ""
+    # Where the killer was dealt to stand in the house (D-188), by key. Stamped
+    # like `world`, so `--stats` can say how often the model lands it.
+    killer_position: str = ""
 
     def accounts_of(self, constraint: str) -> list[Account]:
         return [a for a in self.accounts if a.constraint == constraint]

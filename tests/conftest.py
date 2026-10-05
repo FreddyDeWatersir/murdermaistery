@@ -138,3 +138,16 @@ def solved_alone_constraint() -> Mystery:
             TOMAS_ALONE.model_copy(update={"place": "green_room", "slot": "s2"}),
         ],
     )
+
+
+# The generation gate holds a draft to Normal (D-188). The shipped example and
+# the hand-built fixtures predate it and are about plumbing, not quality, so the
+# gate is open for every test; the tests that are about the gate close it.
+OPEN_GATE = {"field": 0, "shortcuts": 99, "motive": 0, "trail": 0, "liars_at_hour": 0}
+
+
+@pytest.fixture(autouse=True)
+def _the_quality_gate_is_open(monkeypatch):
+    import mystery.measures
+
+    monkeypatch.setattr(mystery.measures, "GATE", dict(OPEN_GATE))

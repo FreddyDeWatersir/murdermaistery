@@ -602,3 +602,32 @@ def test_world_keys_are_unique_and_colours_are_colours() -> None:
     assert len({w.key for w in WORLDS}) == len(WORLDS)
     for w in WORLDS:
         assert all(re.fullmatch(r"#[0-9a-f]{6}", c) for c in w.hues), w.key
+
+
+# --- what used to be left to the model (D-188) ---------------------------------
+
+
+def test_the_age_and_the_title_form_are_dealt_and_in_the_brief() -> None:
+    from mystery.palette import AGES, TITLE_FORMS, draw
+
+    hand = draw(7, "a house", "the_lie")
+    assert hand.old_business_age in AGES
+    assert hand.title_form in TITLE_FORMS
+    brief = hand.brief()
+    assert f"It happened {hand.old_business_age}" in brief
+    assert hand.title_form in brief
+
+
+def test_every_age_and_title_form_turns_up_across_seeds() -> None:
+    from mystery.palette import AGES, TITLE_FORMS, draw
+
+    hands = [draw(s, "a house", "the_lie") for s in range(400)]
+    assert {h.old_business_age for h in hands} == set(AGES)
+    assert {h.title_form for h in hands} == set(TITLE_FORMS)
+
+
+def test_every_position_is_dealt_across_seeds() -> None:
+    from mystery.palette import POSITIONS, killer_position
+
+    assert {killer_position(s) for s in range(200)} == set(POSITIONS)
+    assert killer_position(41) == killer_position(41)

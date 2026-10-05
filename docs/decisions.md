@@ -4868,3 +4868,76 @@ What the first run says:
 
 The old checks stay and keep printing until each has a role (gate, signal or
 retire). Nothing here is a gate yet.
+
+## D-187 A role for every check, and what comes next
+**Date:** 2026-10-05
+**Status:** active
+
+Normal's motive floor drops to one gate. The best-received case had a motive
+one gate deep and a rival trail three deep; what made it was the rival and the
+absence of tricks, not the depth of the motive.
+
+Every check now has a role, agreed before wiring:
+
+- **Measures** (D-186 numbers replace them): A2, A4, A5, A10, A12, A13, A16,
+  A18, A20, A24.
+- **Hard gates**: every validator rule, S1 to S4, A26.
+- **Advisories**: A7, A9, A14, A15, A17, A19, A22, A25, and the shape checks.
+- **Fix or retire**: A1 and S5, which fire on every draft of the current prompt
+  and so say nothing as written.
+
+Next, in order, not yet built:
+
+1. Wire the roles: the quality gate becomes "meets the picked difficulty" on
+   the D-186 numbers instead of A24, with one complaint per failing number so
+   the redraft knows what to fix; the best near-miss is kept for review rather
+   than discarded.
+2. Difficulty as an input the group picks: Easy, Normal, Hard, each a set of
+   targets plus the question clock (which stops being dealt).
+3. Deal what is not dealt: the age of the old business (decades ago to this
+   week), a title form, the killer's position (measured before it is gated).
+4. Fix or retire A1 and S5.
+5. Slim the prompt of every rule a gate or repair now enforces.
+6. A batch, half of it at `--slots 6`, measured against this baseline.
+
+## D-188 The roles wired, three more decks, A1 and S5 retired
+**Date:** 2026-10-05
+**Status:** active
+
+Steps 1, 3 and 4 of D-187. Step 2 (difficulty as an input) is skipped for now;
+the gate holds every draft to Normal until it exists.
+
+**The quality gate is the measures.** A draft that misses Normal goes back with
+one sentence per failing number, written as something the drafter can act on
+("the killer is the only person lying about the murder hour; somebody innocent
+must lie about that hour too"). A26 stays a hard gate beside it. A24 is no
+longer a gate: it was gamed within a batch (the model made motives shallower to
+pass it), and the measures cannot be passed that way. When every attempt misses,
+the nearest one is written to `var/review/` instead of thrown away, so a case
+that misses by one number can still be read and played.
+
+**Measured checks stop printing.** A2, A4, A5, A10, A12, A13, A16, A18, A20 and
+A24 are filtered out of `assess`; the numbers say the same thing with a size.
+A1 and S5 are retired. S5's question (a gate with no object to put on the
+table) survives as a count, `argued`, reported by `--stats` and not gated.
+
+**Three things the model used to choose are dealt:**
+
+- The age of the old business, from more than thirty years ago to this month.
+  Every case had been "years ago".
+- A title form (option b), one of eleven. Too many titles were "The Nth Thing".
+- The killer's position: hub, outsider, clean hands, mourner, small sinner. On
+  the seed alone, stamped on the case like the world, and told to the model in
+  the casting. Over 21 cases the killer had been the most connected person nine
+  times and never the least.
+
+Whether the model can place a killer is not assumed. `position_landed` checks
+four of the five against the ground truth (the mourner is in the writing, not
+the web) and `--stats` reports the hit rate, by position only with
+`--spoilers`. Nothing gates on it until a batch says how often it lands.
+
+The test suite opens the gate (`conftest.py`), because the shipped example and
+most fixtures fail Normal and the tests are about plumbing. Two tests close it
+again to check the gate itself.
+
+Next: slim the prompt of every rule a gate, a repair or a deck now enforces.

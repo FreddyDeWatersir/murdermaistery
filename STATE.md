@@ -1,6 +1,16 @@
 # STATE
 
-**NEXT (5 Oct 2026):** wire the check roles from D-187, step 1 of its list.
+**NEXT (5 Oct 2026):** slim the prompt (D-187 step 5). D-188 wired the gate to
+the measures, dealt the old business's age, a title form and the killer's
+position, and retired A1 and S5. Difficulty as an input is still to come; until
+then every draft is held to Normal.
+
+Before the next batch: `uv run python -m mystery.cli --stats` for the baseline.
+After it, read "killer landed where dealt" and `var/review/` (near misses).
+
+---
+
+**NEXT (earlier, 5 Oct 2026):** wire the check roles from D-187, step 1 of its list.
 Read the Engine Map first (claude.ai artifact "Engine Map") and run
 `uv run python -m mystery.cli --stats` for the baseline. The order after that
 is in D-187: difficulty as an input, deal what is not dealt, fix A1 and S5,

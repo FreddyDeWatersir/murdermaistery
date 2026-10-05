@@ -1075,39 +1075,46 @@ def test_whatever_a_draft_wrote_about_its_world_is_replaced_by_the_deal() -> Non
     assert (plain.world, plain.authority) == ("", "")
 
 
-def _a_corridor() -> dict:
-    """The shipped case with its innocent trail taken away again: solvable,
-    valid, and one thread long (A24)."""
-    import copy
+def test_a_draft_short_of_normal_is_redrafted_and_told_why(monkeypatch) -> None:
+    """The gate is the four numbers against Normal (D-188). The shipped example
+    has the killer as the only liar at the murder hour, and the redraft is told
+    exactly that."""
+    import mystery.measures
 
-    case = copy.deepcopy(SHIPPED)
-    for secret in case["secrets"]:
-        if secret["id"] == "the_replacement":
-            secret.pop("revealed_by", None)
-    return case
-
-
-def test_a_case_with_only_one_thread_is_redrafted_and_told_why() -> None:
-    """A24 is a gate now (D-184): the one playtest that called a case the best
-    yet was one of two on the shelf it did not fire on."""
-    corridor = _a_corridor()
-    assert validate(Mystery.model_validate(corridor), phase="proposed").ok
-
-    drafter = _flaky_drafter(corridor, SHIPPED)
-    generate(REQUEST, drafter=drafter)
-
-    assert len(drafter.calls) == 2, "a one-thread case has to buy a redraft"
-    assert any("gate" in c and "deepest" in c for c in drafter.calls[1])
-
-
-def test_a_cached_corridor_is_redrafted_with_the_reason_already_given(tmp_path) -> None:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / f"{REQUEST.cache_key()}.json").write_text(
-        Mystery.model_validate(_a_corridor()).model_dump_json(indent=2), encoding="utf-8"
-    )
-
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
     drafter = _flaky_drafter(SHIPPED)
-    generate(REQUEST, drafter=drafter, cache_dir=tmp_path)
+    with pytest.raises(GenerationFailed):
+        generate(REQUEST, drafter=drafter, attempts=2)
 
-    assert len(drafter.calls) == 1
-    assert drafter.calls[0], "the first redraft should already know what was wrong"
+    assert len(drafter.calls) == 2
+    assert any("only person lying about the murder hour" in c for c in drafter.calls[1])
+
+
+def test_the_closest_miss_is_kept_for_review(tmp_path, monkeypatch) -> None:
+    """Three playable drafts each one number short used to be thrown away."""
+    import mystery.measures
+
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    cache = tmp_path / "mysteries"
+    with pytest.raises(GenerationFailed):
+        generate(REQUEST, drafter=_flaky_drafter(SHIPPED), cache_dir=cache, attempts=2)
+
+    kept = list((tmp_path / "review").glob("*.json"))
+    assert len(kept) == 1
+    assert json.loads(kept[0].read_text(encoding="utf-8"))["short"]
+
+
+# --- the killer's position (D-188) ---------------------------------------------
+
+
+def test_the_position_is_stamped_from_the_deal_and_told_to_the_model() -> None:
+    from test_agent import CASE
+
+    from mystery.generator import _user_prompt, in_its_world
+    from mystery.palette import POSITIONS, killer_position
+
+    request = GenerationRequest(setting="a house", seed=41)
+    scribbled = CASE.model_copy(update={"killer_position": "whatever the model liked"})
+
+    assert in_its_world(scribbled, request).killer_position == killer_position(41)
+    assert POSITIONS[killer_position(41)] in _user_prompt(request)

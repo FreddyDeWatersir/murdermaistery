@@ -830,8 +830,20 @@ def assess(mystery: Mystery, topology_id: str = DEFAULT) -> list[Advisory]:
     that mean the case cannot be played at all (D-068), and last is where a
     person looks.
     """
-    return (
+    found = (
         critique(mystery)
         + [a for check in get(topology_id).checks for a in check(mystery)]
         + why_not(mystery)
     )
+    return [a for a in found if a.check not in MEASURED | RETIRED]
+
+
+# Checks whose question is now one of the four numbers in `measures` (D-186,
+# D-188). They still exist and are tested; they are no longer printed, because
+# the number says the same thing better and `--stats` reports it.
+MEASURED = frozenset({"A2", "A4", "A5", "A10", "A12", "A13", "A16", "A18", "A20", "A24"})
+
+# Fired on every draft of the current prompt, so they said nothing (D-188).
+# A1's threshold makes ordinary movement a fault; S5 is now a count in the
+# measures ("argued" gates) rather than a complaint on every case.
+RETIRED = frozenset({"A1", "S5"})

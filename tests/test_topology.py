@@ -304,3 +304,15 @@ def test_the_command_line_deals_an_unplayed_shape(monkeypatch, tmp_path) -> None
 
     assert asked, "nothing was generated"
     assert not {"the_lie", "the_frame"} & set(asked), "dealt a shape already on the shelf"
+
+
+def test_measured_and_retired_checks_no_longer_come_out_of_assess() -> None:
+    """The four measures replace ten checks, and A1 and S5 are retired (D-188),
+    so no advisory under those names reaches the drafter or the report."""
+    from test_agent import CASE
+
+    from mystery.topology import MEASURED, RETIRED
+
+    for shape in LIBRARY:
+        fired = {a.check for a in assess(CASE, shape)}
+        assert not fired & (MEASURED | RETIRED)
