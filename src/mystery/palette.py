@@ -465,6 +465,49 @@ POSITIONS = {
 }
 
 
+# How the innocents lie (D-192). The shape says how the killer is protected and
+# nothing else; left to itself every innocent lied about a room, for an
+# embarrassing reason, which is the sameness players felt. A hand of these is
+# dealt in order, distinct, so no two innocent lies in a case are the same
+# kind however many the case turns out to need.
+LIES = {
+    "wrong_company": "the wrong company: they were somewhere with somebody they "
+    "should not have been with, and both of them say otherwise",
+    "wrong_errand": "the wrong errand: alone somewhere, doing something they cannot "
+    "admit to, papers, a call, something taken",
+    "for_somebody": "for somebody else: they lie to protect another person's secret, "
+    "not their own, and `covers` names that person's secret",
+    "borrowed_alibi": "the borrowed alibi: two innocents swear they were together in a "
+    "room neither of them was in, each for a reason of their own",
+    "shifted_hour": "the shifted hour: the right room at the wrong time. They were "
+    "there, but earlier or later than they say, and the hour they move is the one "
+    "that matters",
+    "needless_lie": "the needless lie: they lie out of fear about something harmless, "
+    "and the truth, once out, clears them",
+}
+HAND = 4
+
+
+def innocent_lies(seed: int) -> list[str]:
+    """Which kinds of innocent lie this seed gets, in order, by key (D-192)."""
+    return random.Random(f"lies|{seed}").sample(sorted(LIES), HAND)
+
+
+# Shapes where the killer tells no lie about where they were (D-193). Honest
+# about the hour of the killing means honest about being in the room where it
+# happened, so for these the body is always carried next door, or the room it
+# is found in names the killer.
+HONEST_KILLER = frozenset({"the_frame", "the_finder"})
+
+
+def body_moved(seed: int, topology: str) -> bool:
+    """Whether the killer carried the body next door (D-193). Always for an
+    honest killer; one seed in three otherwise."""
+    if topology in HONEST_KILLER:
+        return True
+    return random.Random(f"moved|{seed}").random() < 1 / 3
+
+
 def killer_position(seed: int) -> str:
     """Which position the killer is dealt (D-188), by key."""
     return random.Random(f"position|{seed}").choice(sorted(POSITIONS))
@@ -788,16 +831,41 @@ WORLDS: list[World] = [
 ]
 
 
+def deal(deck: list, seed: int, key: str):
+    """One card, dealt in turn rather than drawn (D-194).
+
+    Every deck used to be a fresh draw per seed, and a batch is consecutive
+    seeds, so a batch of eight from thirty two occasions repeated one more often
+    than not: three pairs of near-twin cases in one evening. Now each deck has
+    one fixed shuffle and consecutive seeds take consecutive cards from it, so
+    any `len(deck)` seeds in a row see every card once. Seeds a whole deck apart
+    share a card; the other decks, of other sizes, still differ.
+    """
+    return deck[_order(len(deck), key)[seed % len(deck)]]
+
+
+def hand(deck: list, seed: int, key: str, size: int) -> list:
+    """`size` cards in turn: consecutive seeds' hands do not overlap until the
+    deck comes round again (D-194)."""
+    size = min(size, len(deck))
+    order = _order(len(deck), key)
+    start = seed * size
+    return [deck[order[(start + i) % len(deck)]] for i in range(size)]
+
+
+def _order(n: int, key: str) -> list[int]:
+    return random.Random(f"deck|{key}").sample(range(n), n)
+
+
 def world(seed: int) -> World | None:
     """The other world this seed deals, or None for the present day (D-182).
 
     Keyed on the seed alone, like `where` and `occasion`, so a case reproduces
     from the number the run prints.
     """
-    rng = random.Random(f"world|{seed}")
-    if rng.random() >= WORLD_SHARE:
+    if random.Random(f"world|{seed}").random() >= WORLD_SHARE:
         return None
-    return rng.choice(WORLDS)
+    return deal(WORLDS, seed, "world")
 
 
 def world_for(seed: int, setting: str) -> World | None:
@@ -923,25 +991,27 @@ def draw(seed: int, setting: str, topology: str, cast_size: int = 5) -> Palette:
     rng = random.Random(f"{seed}|{setting}|{topology}")
     dealt = world_for(seed, setting)
     return Palette(
-        manners=rng.sample(MANNERS, min(cast_size, len(MANNERS))),
-        voices=rng.sample(VOICES, min(cast_size, len(VOICES))),
-        motive=rng.choice(MOTIVES),
+        # Dealt across seeds, not drawn per seed (D-194): a batch is consecutive
+        # seeds, and independent draws from these decks made near-twins.
+        manners=hand(MANNERS, seed, "manners", cast_size),
+        voices=hand(VOICES, seed, "voices", cast_size),
+        motive=deal(MOTIVES, seed, "motive"),
         # One heavy one, always (D-170). The deck used to be sampled flat, and
         # with fourteen of twenty four merely awkward a hand of three was
         # usually three embarrassments, which cannot carry a rival chain.
         intrigues=[rng.choice(WEIGHTY), *rng.sample(DAMAGING + AWKWARD, 2)],
-        standing=rng.choice(STANDINGS),
-        old_business=rng.choice(OLD_BUSINESS),
+        standing=deal(STANDINGS, seed, "standing"),
+        old_business=deal(OLD_BUSINESS, seed, "old_business"),
         # Their own streams, so adding them did not reshuffle the hands every
         # earlier seed was dealt (D-188).
-        old_business_age=random.Random(f"age|{seed}|{setting}|{topology}").choice(AGES),
-        title_form=random.Random(f"title|{seed}|{setting}|{topology}").choice(TITLE_FORMS),
+        old_business_age=deal(AGES, seed, "age"),
+        title_form=deal(TITLE_FORMS, seed, "title"),
         # Drawn on the seed alone, deliberately. The other decks are keyed on the
         # setting so that one seed against four settings gives four hands; this
         # one must vary even when the setting phrase does not, because the
         # setting phrase is exactly what was dragging every cast to one country
         # (D-111).
-        where=(dealt.place if dealt else random.Random(f"where|{seed}").choice(WHERE)),
+        where=(dealt.place if dealt else deal(WHERE, seed, "where")),
         world=dealt,
     )
 
@@ -972,9 +1042,10 @@ def commission(seed: int) -> tuple[str, bool, str]:
     Roughly two in five are mistaken, which is often enough that the briefing
     cannot be trusted flatly and rare enough that trusting it is not stupid.
     """
-    rng = random.Random(f"commission|{seed}")
-    brief, wrong = rng.choice(COMMISSIONS)
-    sound = rng.random() >= 0.4
+    # Dealt in turn like the other decks (D-194); four of seven cases on one
+    # evening opened with the same agreed accident.
+    brief, wrong = deal(COMMISSIONS, seed, "commission")
+    sound = random.Random(f"commission|{seed}").random() >= 0.4
     return brief, sound, wrong
 
 
@@ -1082,5 +1153,6 @@ def occasion(seed: int) -> str:
     one of that world's own occasions (D-182).
     """
     dealt = world(seed)
-    pool = dealt.occasions if dealt is not None else OCCASIONS
-    return random.Random(f"occasion|{seed}").choice(pool)
+    if dealt is not None:
+        return deal(list(dealt.occasions), seed, f"occasion|{dealt.key}")
+    return deal(OCCASIONS, seed, "occasion")

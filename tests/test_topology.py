@@ -175,19 +175,20 @@ def test_every_shape_has_at_least_one_check_of_its_own() -> None:
     from mystery.topology import DEFAULT, LIBRARY
 
     for shape in LIBRARY.values():
-        if shape.id == DEFAULT:
-            continue  # the plain shape is what every general advisory assumes
+        if shape.id in (DEFAULT, "open"):
+            continue  # the plain shape is what every general advisory assumes, and
+            # the open experiment is whatever the model chose (D-192)
         assert shape.checks, f"{shape.id} has nothing that would notice it drifted"
 
 
 def test_the_shape_comes_from_the_seed() -> None:
     """Reproducible, not fixed: a seed reproduces the whole case rather than
     most of it."""
-    from mystery.topology import LIBRARY, drawn
+    from mystery.topology import dealt, drawn
 
     assert drawn(483102) == drawn(483102)
-    assert drawn(0) in LIBRARY
-    assert len({drawn(n) for n in range(40)}) == len(LIBRARY), (
+    assert drawn(0) in dealt()
+    assert len({drawn(n) for n in range(40)}) == len(dealt()), (
         "every shape should be reachable by some seed"
     )
 
@@ -195,9 +196,30 @@ def test_the_shape_comes_from_the_seed() -> None:
 def test_the_mapping_is_stable_when_a_shape_is_added() -> None:
     """Sorted rather than insertion-ordered, so adding a shape in the middle of
     the list does not silently repoint every existing seed."""
-    from mystery.topology import LIBRARY, drawn
+    from mystery.topology import dealt, drawn
 
-    assert drawn(2) == sorted(LIBRARY)[2 % len(LIBRARY)]
+    assert drawn(2) == sorted(dealt())[2 % len(dealt())]
+
+
+def test_the_clock_and_the_experiment_are_never_dealt() -> None:
+    """The wrong hour could not meet Normal however it was written (D-192)."""
+    from mystery.topology import LIBRARY, drawn, unplayed
+
+    assert "the_wrong_hour" in LIBRARY, "kept, so a case made with it still plays"
+    assert {drawn(n) for n in range(100)}.isdisjoint({"the_wrong_hour", "open"})
+    assert {unplayed({"the_lie"}, n) for n in range(100)}.isdisjoint({"the_wrong_hour", "open"})
+
+
+def test_the_protection_is_read_off_the_structure() -> None:
+    from test_agent import CASE
+
+    from mystery.topology import classify
+
+    assert classify(CASE) == "the_lie"
+    honest = CASE.model_copy(
+        update={"false_claims": [c for c in CASE.false_claims if c.character != CASE.killer]}
+    )
+    assert classify(honest) == "the_frame"
 
 
 def test_the_command_line_reaches_the_draw(monkeypatch, tmp_path) -> None:
@@ -254,10 +276,10 @@ def test_unplayed_deals_only_shapes_not_on_the_shelf() -> None:
 def test_unplayed_reaches_every_remaining_shape() -> None:
     """A deck that only ever deals the alphabetically first card left is a deck
     that deals one card."""
-    from mystery.topology import LIBRARY, unplayed
+    from mystery.topology import dealt, unplayed
 
     seen = {"the_lie"}
-    assert {unplayed(seen, n) for n in range(40)} == set(LIBRARY) - seen
+    assert {unplayed(seen, n) for n in range(40)} == set(dealt()) - seen
 
 
 def test_unplayed_falls_back_once_they_have_all_been_played() -> None:

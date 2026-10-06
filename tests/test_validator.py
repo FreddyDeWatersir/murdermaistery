@@ -8,7 +8,7 @@ rejects everything, which passes the suite and is useless.
 from conftest import CHARACTERS, COHERENT_GRID, MURDER, PLACES, SLOTS
 
 from mystery.models import Character, Constraint, Mystery, Place, Slot
-from mystery.validator import validate
+from mystery.validator import check_references_exist, validate
 
 # V1: bound constraints must agree with the timeline
 
@@ -832,3 +832,55 @@ def test_the_victim_being_alive_after_death_is_caught_before_the_solver() -> Non
         for v in validate(_victim_wanted_everywhere(), phase="proposed").violations
         if v.rule == "V7"
     ]
+
+
+def test_a_victim_left_out_of_the_cast_is_one_complaint_that_says_the_fix() -> None:
+    """Every redraft in the first D-189 batch dropped the victim from
+    `characters` and was told "names X, who is not in the cast" once per
+    scene, which never said what to do (D-190)."""
+    from mystery.example import OPENING_NIGHT
+
+    case = Mystery.model_validate(OPENING_NIGHT)
+    lost = case.model_copy(
+        update={"characters": [c for c in case.characters if c.id != case.victim]}
+    )
+    found = [v.message for v in check_references_exist(lost)]
+
+    assert len([m for m in found if "bram" in m]) == 1
+    assert "the victim included" in found[0]
+
+
+def test_a_moved_body_went_next_door_and_nobody_is_with_it() -> None:
+    """D-193: killed in one room, carried through one door in the same hour."""
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Discovery
+    from mystery.solver import solve
+
+    case = solve(Mystery.model_validate(OPENING_NIGHT))
+    # Prop store to the stage door is one door (the back passage). Ilse's phone
+    # call is at the stage door at the interval, so it moves to the corridor:
+    # a moved body empties the room it is carried into.
+    grid = {who: dict(cells) for who, cells in case.placements.items()}
+    grid["ilse"]["s3"] = "dressing_corridor"
+    quiet = case.model_copy(
+        update={
+            "placements": grid,
+            "constraints": [c for c in case.constraints if c.id != "the_call"],
+            "false_claims": [c for c in case.false_claims if c.character != "ilse"],
+        }
+    )
+    moved = solve(
+        quiet.model_copy(
+            update={"discovery": Discovery(finder="tomas", place="stage_door"), "moved_body": True}
+        )
+    )
+    assert validate(moved).ok, validate(moved).violations
+    assert moved.placements["bram"]["s4"] == "stage_door", "the body rests where it was found"
+
+    far = case.model_copy(
+        update={"discovery": Discovery(finder="tomas", place="green_room"), "moved_body": True}
+    )
+    assert "V15" in {v.rule for v in validate(far, phase="proposed").violations}
+
+    unstamped = case.model_copy(update={"discovery": Discovery(finder="tomas", place="green_room")})
+    assert not unstamped.body_moved, "an old case found elsewhere is not a moved body"

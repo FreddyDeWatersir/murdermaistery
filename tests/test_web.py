@@ -955,3 +955,30 @@ def test_who_is_coming_comes_from_the_world_deck_not_the_draft() -> None:
     assert _state_of(CASE.model_copy(update={"world": venice.key}))["authority"] == (
         venice.authority
     )
+
+
+def test_the_page_is_a_transcript_and_a_map_with_a_case_file_and_help() -> None:
+    """D-196: the notebook's sentences went, the case file reads in order, and
+    help is one click away."""
+    from mystery.web import PAGE
+
+    assert "[['log','Transcript'],['map','Map']]" in PAGE
+    assert "function viewBook" not in PAGE
+    order = [PAGE.index(s) for s in ("What happened", "Persons present",
+                                     "What everybody knows", "&middot; You")]
+    assert order == sorted(order), "what happened, people, shared facts, then you"
+    assert 'id="helpbtn"' in PAGE and "function showHelp" in PAGE
+    assert "function shortLabel" in PAGE and "function pencil(" in PAGE
+    assert "function underline(" in PAGE
+
+
+def test_the_tags_name_who_they_are_so_a_pencil_can_place_them() -> None:
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import Case, build_app
+
+    quiet = {"speech": "", "used": [], "refused": True}
+    client = TestClient(build_app(Case(solve(CASE, seed=0), id="t"), lambda s, q: quiet))
+    tags = client.get("/state").json()["notebook"]["tags"]
+    assert {t["id"] for t in tags} == {c.id for c in CASE.characters}

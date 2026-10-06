@@ -438,6 +438,9 @@ def _lay_the_body_to_rest(
     if after is None:
         return
 
+    # Carried next door in the hour of the killing (D-193).
+    if mystery.body_moved:
+        place = mystery.found_in
     for s in mystery.slots:
         if s.index > after:
             grid.setdefault(mystery.victim, {})[s.id] = place
@@ -472,8 +475,13 @@ def _sealed(mystery: Mystery, placed: dict[str, Cell]):
     if after is None:
         return lambda place, slot: False
 
+    # A body carried next door seals that room too, from the hour itself (D-193).
+    moved_to = mystery.found_in if mystery.body_moved else None
+
     def sealed(place: PlaceId, slot: SlotId) -> bool:
-        return place == room and index.get(slot, -1) > after
+        if place == room and index.get(slot, -1) > after:
+            return True
+        return place == moved_to and index.get(slot, -1) >= after
 
     return sealed
 

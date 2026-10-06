@@ -919,3 +919,43 @@ def test_something_of_the_victims_in_a_suspects_hands_is_a_story_not_a_fault() -
     from mystery.critique import the_evidence_is_in_the_holders_hands
 
     assert the_evidence_is_in_the_holders_hands(_with_an_envelope(owner="magnus")) == []
+
+
+def test_evidence_that_matches_two_things_is_fine_if_one_is_the_holders() -> None:
+    """D-195: "the chit page torn from the kerosene issue book" matched the page,
+    which was hers, and the book, which was not. The book was flagged and a seed
+    died on it."""
+    from mystery.critique import the_evidence_is_in_the_holders_hands
+    from mystery.models import Secret, Thing
+
+    base = Mystery.model_validate(
+        {
+            "title": "t",
+            "characters": [{"id": "lidia", "name": "Lidia"}, {"id": "arkady", "name": "Arkady"}],
+            "places": [{"id": "hut", "name": "Hut"}],
+            "slots": [{"id": "s1", "label": "1", "index": 0}],
+        }
+    )
+    case = base.model_copy(
+        update={
+            "secrets": [
+                Secret(
+                    id="fire",
+                    holder="lidia",
+                    summary="She drew the kerosene.",
+                    evidence="the chit page torn from the 1957 kerosene issue book",
+                )
+            ],
+            "things": [
+                Thing(
+                    id="page",
+                    name="The torn chit page from the 1957 kerosene issue book",
+                    belongs_to="lidia",
+                ),
+                Thing(id="book", name="The 1957 kerosene issue book", belongs_to="arkady"),
+            ],
+        }
+    )
+    assert the_evidence_is_in_the_holders_hands(case) == []
+    only_book = case.model_copy(update={"things": [case.things[1]]})
+    assert the_evidence_is_in_the_holders_hands(only_book)

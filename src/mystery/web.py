@@ -55,7 +55,7 @@ from mystery.session import KEEP, InMemorySessions, Session, Sessions
 from mystery.session import sessions as pick_sessions
 from mystery.solvable import analyse, report
 from mystery.solver import solve_until_valid
-from mystery.topology import LIBRARY, UNPLAYED, assess, drawn, unplayed
+from mystery.topology import LIBRARY, UNPLAYED, assess, dealt, drawn, unplayed
 from mystery.topology import get as get_topology
 
 log = structlog.get_logger()
@@ -644,7 +644,12 @@ class Game:
             "timeline": timeline,
             "missing": missing,
             "tags": [
-                {"tag": tags[c.id], "name": c.name, "dead": c.id == self.mystery.victim}
+                {
+                    "id": c.id,
+                    "tag": tags[c.id],
+                    "name": c.name,
+                    "dead": c.id == self.mystery.victim,
+                }
                 for c in self.mystery.characters
             ],
         }
@@ -1046,7 +1051,7 @@ PAGE = """<!doctype html>
 <title>Interrogation</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&family=Special+Elite&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap">
 <style>
 :root{--bg:#0b0d12;--deep:#070810;--panel:#141822;--panel2:#1b2029;--ink:#eceef4;
 --muted:#8992a4;--rule:#252b38;--warm:#d9a24e;--cool:#7fa9ee;--bad:#e0736b;
@@ -1054,7 +1059,8 @@ PAGE = """<!doctype html>
    notebook's paper, which is the only reason it has to be a token (D-146). */
 --contrast:#0b0d12;
 --display:"Bodoni Moda",Didot,serif;--body:"IBM Plex Sans",system-ui,sans-serif;
---mono:"IBM Plex Mono",ui-monospace,monospace}
+--mono:"IBM Plex Mono",ui-monospace,monospace;
+--typed:"Courier Prime","Courier New",monospace;--stamp:"Special Elite","Courier New",monospace}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--deep);color:var(--ink);font-family:var(--body);
@@ -1436,6 +1442,91 @@ text-transform:uppercase;color:var(--muted)}
 .thing i{font-style:italic;font-size:11px;color:var(--muted);white-space:nowrap}
 .thing.spent{opacity:.45;cursor:default}
 .thing.spent:hover{border-color:var(--rule)}
+/* Your pencil, the underlines, the help (D-196). */
+#pencilbar{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
+.pc{background:var(--panel2);border:1px dashed var(--muted);border-radius:4px;
+padding:3px 8px;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink)}
+.pc.dead{color:var(--muted)}
+.pc.on{background:var(--cool);color:var(--contrast);border-style:solid;border-color:var(--cool)}
+.pin.pencil{background:transparent;color:var(--ink);border:1.5px dashed var(--muted);
+font-style:italic;font-weight:500;padding:1px 3px}
+table.tl td.pen{cursor:crosshair}
+table.tl td.pen:hover{outline:1.5px dashed var(--cool);outline-offset:-2px}
+#plan .room.pen{cursor:crosshair}
+#plan text.who.pencil{fill:var(--muted);font-style:italic}
+#book u{text-decoration:underline;text-decoration-color:var(--bad);
+text-decoration-thickness:2px;text-underline-offset:2px;cursor:pointer}
+#book .hint{margin:6px 0 4px;font-size:11.5px}
+#help{position:fixed;inset:0;background:rgba(5,6,9,.95);display:none;
+justify-content:center;padding:24px;overflow-y:auto;z-index:12;user-select:text}
+#help.on{display:flex}
+#help .card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;
+padding:30px 34px;max-width:620px;width:100%;margin:auto;height:max-content}
+#help h3{font-family:var(--display);font-size:30px;font-weight:400;margin:0 0 14px}
+#help h4{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+color:var(--cool);margin:20px 0 6px;font-weight:400}
+#help p,#help li{font-size:14px;line-height:1.6;margin:0 0 8px}
+#help ul{padding-left:18px;margin:0}
+#help .close{margin-top:22px}
+#helpbtn{font-weight:600;width:32px;padding:7px 0}
+
+/* The case file (D-196). The briefing is a buff folder with typed pages in it:
+   what happened, who was there, what everybody agrees on, and you, in that
+   order. It is a paper world on purpose and paints every colour itself, so it
+   reads the same whatever the room behind it is doing. */
+#brief .card.file{--ink:#2a2418;--muted:#6f6249;--rule:#b8a47b;
+position:relative;background-color:#e7d8b1;color:#2a2418;
+background-image:
+  radial-gradient(circle at 14% 18%,rgba(140,110,60,.10) 0,transparent 40%),
+  radial-gradient(circle at 86% 72%,rgba(120,92,50,.12) 0,transparent 46%),
+  linear-gradient(176deg,#ecdfba 0%,#e4d3a9 55%,#dcc99c 100%);
+border:1px solid #b8a47b;border-radius:3px 3px 8px 8px;
+box-shadow:0 34px 90px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.4);
+padding:40px 46px 34px;max-width:720px;margin:44px auto auto}
+#brief .file .ftab{position:absolute;top:-27px;left:30px;background:#e7d8b1;
+border:1px solid #b8a47b;border-bottom:none;border-radius:7px 7px 0 0;
+padding:5px 20px 4px;font-family:var(--stamp);font-size:12.5px;letter-spacing:.16em;color:#4a3f2b}
+#brief .file .stamp{position:absolute;top:34px;right:36px;transform:rotate(-9deg);
+border:3px double #a3342a;color:#a3342a;font-family:var(--stamp);font-size:19px;
+letter-spacing:.2em;padding:5px 12px 3px;opacity:.78;pointer-events:none}
+#brief .file .fileno{font-family:var(--typed);font-size:12px;letter-spacing:.08em;color:#6f6249}
+#brief .file h2{font-family:var(--stamp);font-size:31px;line-height:1.12;font-weight:400;
+margin:8px 0 6px;max-width:78%;text-wrap:balance}
+#brief .file .occasion{font-family:var(--typed);font-style:italic;font-size:14px;color:#4a3f2b;
+margin-bottom:6px;max-width:78%}
+#brief .file .clipped{float:right;width:40%;margin:4px -6px 14px 22px;background:#fbf8f0;
+padding:8px 8px 26px;transform:rotate(2.2deg);position:relative;
+box-shadow:0 8px 22px rgba(40,30,10,.35)}
+#brief .file .clipped img{display:block;width:100%;filter:grayscale(.55) sepia(.25) contrast(1.05)}
+#brief .file .clipped::before{content:"";position:absolute;top:-16px;left:22px;width:12px;
+height:44px;border:2.5px solid #8b9097;border-radius:8px;transform:rotate(-4deg)}
+#brief .file .clipped span{position:absolute;bottom:6px;left:10px;font-family:var(--stamp);
+font-size:10.5px;color:#6f6249;letter-spacing:.08em}
+#brief .file h4{font-family:var(--stamp);font-size:14px;letter-spacing:.16em;text-transform:uppercase;
+color:#2a2418;border-bottom:1.5px solid #b8a47b;padding-bottom:5px;margin:28px 0 11px;
+font-weight:400;clear:none}
+#brief .file p,#brief .file li{font-family:var(--typed);font-size:14.5px;line-height:1.62;margin:0 0 9px;color:#2a2418}
+#brief .file ul{padding-left:20px;margin:0}
+#brief .file .asked{border-left:3px solid #a3342a;padding:2px 0 2px 12px;margin:12px 0}
+#brief .file .asked b{font-family:var(--stamp);font-weight:400;font-size:11.5px;letter-spacing:.14em;
+text-transform:uppercase;color:#a3342a;display:block;margin-bottom:3px}
+#brief .file .persons{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px 16px;clear:both}
+#brief .file .person{display:flex;gap:10px;align-items:flex-start}
+#brief .file .person .mug{flex:none;width:52px;background:#fbf8f0;padding:3px 3px 9px;
+box-shadow:0 3px 8px rgba(40,30,10,.3);transform:rotate(-1.5deg)}
+#brief .file .person:nth-child(2n) .mug{transform:rotate(1.4deg)}
+#brief .file .person .mug img,#brief .file .person .mug svg{display:block;width:100%;height:58px;
+object-fit:cover;filter:grayscale(.6) sepia(.2)}
+#brief .file .person b{display:block;font-family:var(--typed);font-weight:700;font-size:13.5px}
+#brief .file .person span{font-family:var(--typed);font-size:12.5px;line-height:1.4;color:#4a3f2b}
+#brief .file .clock{color:#a3342a}
+#brief .file .go{margin-top:26px;background:transparent;border:2.5px solid #2a2418;border-radius:3px;
+padding:9px 20px 7px;font-family:var(--stamp);font-size:15px;letter-spacing:.16em;
+text-transform:uppercase;color:#2a2418;cursor:pointer}
+#brief .file .go:hover{background:#2a2418;color:#e7d8b1}
+@media(max-width:600px){#brief .card.file{padding:34px 22px 26px}
+#brief .file .clipped{float:none;width:100%;margin:10px 0 16px;transform:rotate(1deg)}
+#brief .file h2,#brief .file .occasion{max-width:none}#brief .file .stamp{top:10px;right:12px;font-size:14px}}
 </style></head><body>
 <div id="scene">
   <div id="backdrop"></div><div id="backdrop2"></div><div id="shade"></div>
@@ -1444,7 +1535,8 @@ text-transform:uppercase;color:var(--muted)}
     <h1 id="title">…</h1><span class="sub" id="sub"></span>
     <div class="right">
       <span class="badge" id="count">0 questions</span>
-      <button id="briefagain" title="What you were told when you arrived">Briefing</button>
+      <button id="briefagain" title="What you were told when you arrived">Case file</button>
+      <button id="helpbtn" title="How to play">?</button>
       <button id="mute">Sound on</button>
       <button id="textsize" title="Reading size">A</button>
       <button id="booktoggle">Notebook</button>
@@ -1468,10 +1560,11 @@ text-transform:uppercase;color:var(--muted)}
 <aside id="book"><div id="pages"></div></aside>
 <div id="brief"><div class="card" id="briefcard"></div></div>
 <div id="reveal"><div class="card" id="revealcard"></div></div>
+<div id="help"><div class="card" id="helpcard"></div></div>
 <script>
 const $=i=>document.getElementById(i);
 let S=null,who=null,busy=false,typer=null,sound=true,lastConflicts=0;
-let tab='book',NB={grid:[],conflicts:[],holes:[],unasked:[],logs:{},timeline:{},
+let tab='log',NB={grid:[],conflicts:[],holes:[],unasked:[],logs:{},timeline:{},
   missing:{},tags:[],found:[],held:[],shown:{},people:[]};
 // Whose page the notebook is showing (D-135). Not the same as `who`: you read
 // one person's page while talking to another, which is most of the game.
@@ -1818,45 +1911,77 @@ function paintBrief(){
   /* Place names arrive as they are written on the plan, and about half of them
      already start with "the". */
   const at=n=>String(n||'').replace(/^[Tt]he\\s+/,'');
-  const roster=S.suspects.map(s=>
-    '<b>'+esc(s.name)+'</b><span>'+esc(s.role||'')+'</span>').join('');
-  const common=(S.common||[]).map(c=>'<li>'+esc(c)+'</li>').join('');
-  /* The cover (D-144). The establishing shot has been generated for every case
-     since D-069 and was only ever used as a backdrop behind the interface, at
-     ten per cent opacity under a vignette. Here it gets to be a picture: the
-     case named over it in display type, the occasion under that, and the cast
-     lined up below, which is the shape every mystery paperback has had for a
-     hundred years and the first thing a player sees. */
-  const faces=S.suspects.map(x=>
-    '<span class="mug" title="'+esc(x.name)+'">'+
+  /* The case file (D-196), in the order a file is read: what happened, who was
+     there, what everybody agrees on, and only then you. It used to open with
+     you, which is the one part of the evening the player already knows. */
+  const fileno=String(hash(S.title||'case')%90000+10000);
+  const persons=S.suspects.map(x=>'<div class="person"><span class="mug">'+
     (x.portrait?'<img src="'+esc(x.portrait)+'" alt="">'
       :'<svg viewBox="0 0 200 250">'+portraitSVG(x.id,x.look,x.gender)+'</svg>')+
-    '<em>'+esc(x.name.split(' ')[0])+'</em></span>').join('');
+    '</span><div><b>'+esc(x.name)+'</b><span>'+esc(x.role||'')+'</span></div></div>').join('');
+  const common=(S.common||[]).map(c=>'<li>'+esc(c)+'</li>').join('');
 
+  $('briefcard').className='card file';
   $('briefcard').innerHTML=
-    '<div class="cover'+(S.scene?'':' bare')+'"'+
-    (S.scene?' style="background-image:url('+esc(S.scene)+')"':'')+
-    '><div class="coverink"><h2>'+esc(S.title)+'</h2>'+
-    (S.occasion?'<div class="where">'+esc(S.occasion)+'</div>':'')+
-    '</div></div>'+
-    '<div class="faces">'+faces+'</div>'+
-    (you&&you.role?'<h4>You</h4><p>'+esc(you.role.replace(/\\.$/,''))+'.</p>'+
-      (you.why?'<p>'+esc(you.why)+'</p>':'')+
-      (you.standing?'<p>'+esc(you.standing)+'</p>':''):'')+
-    (S.commission?'<h4>What you were asked for</h4><p>'+esc(S.commission)+'</p>':'')+
-    '<h4>What happened</h4>'+
+    '<div class="ftab">CASE FILE</div><div class="stamp">CONFIDENTIAL</div>'+
+    '<div class="fileno">FILE No. '+fileno+'</div>'+
+    '<h2>'+esc(S.title)+'</h2>'+
+    (S.occasion?'<div class="occasion">'+esc(S.occasion)+'</div>':'')+
+    (S.scene?'<div class="clipped"><img src="'+esc(S.scene)+'" alt=""><span>Exhibit A</span></div>':'')+
+
+    '<h4>1 &middot; What happened</h4>'+
     (d?'<p><b>'+esc(S.victim)+'</b> is dead. '+esc(d.finder)+' found the body in the '+
-        esc(at(d.place))+'.</p><p>'+esc(d.summary)+'</p>'
+        esc(at(d.place))+'.</p>'+(d.summary?'<p>'+esc(d.summary)+'</p>':'')
       :'<p><b>'+esc(S.victim)+'</b> is dead, and one of the people here did it.</p>')+
+    (S.commission?'<div class="asked"><b>What you were asked for</b><p>'+esc(S.commission)+
+      '</p></div>':'')+
     '<p>You arrived after that. You saw none of it, and everything you are about '+
     'to be told, you are being told.</p>'+
+
+    '<h4>2 &middot; Persons present</h4><div class="persons">'+persons+'</div>'+
+
+    (common?'<h4>3 &middot; What everybody knows</h4><ul>'+common+'</ul>':'')+
+
+    (you&&you.role?'<h4>'+(common?'4':'3')+' &middot; You</h4><p>'+
+      esc(you.role.replace(/\\.$/,''))+'.</p>'+
+      (you.why?'<p>'+esc(you.why)+'</p>':'')+
+      (you.standing?'<p>'+esc(you.standing)+'</p>':''):'')+
+
     (S.notebook&&S.notebook.budget
       ?'<p class="clock">'+esc(Coming())+' are on the road. You have about <b>'+
         S.notebook.budget+'</b> questions before they are at the door.</p>':'')+
-    '<h4>Who is here</h4><div class="roster">'+roster+'</div>'+
-    (common?'<h4>What everybody knows</h4><ul>'+common+'</ul>':'')+
-    '<button class="go" id="briefgo">Begin</button>';
+    '<button class="go" id="briefgo">Open the case</button>';
   $('briefgo').onclick=()=>{$('brief').classList.remove('on');save('briefed',S.title)};
+}
+
+/* How to play (D-196), one click from anywhere. Not hints: what the screen
+   does, so a first evening is spent on the case rather than on the controls. */
+function showHelp(){
+  $('helpcard').innerHTML='<h3>How to play</h3>'+
+    '<p>Somebody in this house killed '+esc(S.victim||'the victim')+'. You have a '+
+    'limited number of questions before '+esc(coming())+' arrive. Find out who, and why.</p>'+
+    '<h4>Asking</h4><ul>'+
+    '<li>Pick a person along the bottom and ask anything, in plain words. They answer '+
+    'as themselves: they evade, they lie about where they were, they get rattled.</li>'+
+    '<li>People give things up when you know enough to press them, or when you show them '+
+    'something. Objects you come across appear under the cast; click one to put it in '+
+    'front of whoever you are talking to.</li>'+
+    '<li>Every question counts down the clock in the corner.</li></ul>'+
+    '<h4>The notebook</h4><ul>'+
+    '<li><b>Transcript</b>: one page per person, with what they have given up at the top, '+
+    'everything they said, and your own notes. Search finds a word across everybody. '+
+    'Select words to underline them; click an underline to rub it out.</li>'+
+    '<li><b>Map</b>: the building, and where people say everybody was, hour by hour. Red '+
+    'means two people put somebody in different rooms at the same hour. A ringed tag was '+
+    'confirmed by somebody else. Your pencil puts anyone anywhere, dashed, so you can '+
+    'try a theory without mistaking it for testimony.</li></ul>'+
+    '<h4>Ending it</h4><ul>'+
+    '<li>When you are ready, press <b>Accuse</b>, name who did it and say why. You can do '+
+    'this even after the questions run out.</li>'+
+    '<li>The <b>Case file</b> button brings back everything you were told on arrival.</li></ul>'+
+    '<button class="close" id="helpclose">Back to the case</button>';
+  $('help').classList.add('on');
+  $('helpclose').onclick=()=>$('help').classList.remove('on');
 }
 function showBrief(){paintBrief();$('brief').classList.add('on')}
 
@@ -1910,6 +2035,8 @@ async function boot(){
   };
   $('accusebtn').onclick=()=>who&&accuse(who);
   $('briefagain').onclick=showBrief;
+  $('helpbtn').onclick=showHelp;
+  $('help').onclick=e=>{if(e.target.id==='help')$('help').classList.remove('on')};
   paintBook(S.notebook);
   select(S.suspects[0].id);
   /* Shown once per case rather than once ever: a different evening is a
@@ -2017,17 +2144,31 @@ function paintBook(n){
 function render(){
   const n=NB;
   let h='<div id="tabs">'+
-    [['book','Notebook'],['log','Transcript'],['map','Map']].map(([k,l])=>
+    [['log','Transcript'],['map','Map']].map(([k,l])=>
       '<button data-tab="'+k+'" class="'+(tab===k?'on':'')+'">'+l+'</button>').join('')+
     '</div>';
-  if(tab==='book')h+=viewBook(n);
   if(tab==='log')h+=viewLog(n);
   if(tab==='map')h+=viewMap(n);
   $('pages').innerHTML=h;
   document.querySelectorAll('#tabs button').forEach(b=>
     b.onclick=()=>{tab=b.dataset.tab;render()});
-  document.querySelectorAll('th.rm.clickable,#plan .room.clickable').forEach(b=>
+  document.querySelectorAll('th.rm.clickable').forEach(b=>
     b.onclick=()=>showScene(b.dataset.scene,b.dataset.room));
+  // On the plan a room is either a door into its picture or, with the pencil
+  // up, the place to put somebody at this hour (D-196).
+  document.querySelectorAll('#plan .room').forEach(b=>b.onclick=()=>{
+    if(pencilWho)pencil(atSlot,pencilWho,b.dataset.place);
+    else if(b.classList.contains('clickable'))showScene(b.dataset.scene,b.dataset.room);
+  });
+  document.querySelectorAll('#pencilbar .pc').forEach(b=>b.onclick=()=>{
+    pencilWho=pencilWho===b.dataset.id?null:b.dataset.id;render()});
+  document.querySelectorAll('table.tl td[data-slot]').forEach(b=>b.onclick=()=>{
+    if(pencilWho)pencil(b.dataset.slot,pencilWho,b.dataset.place)});
+  document.querySelectorAll('#pages [data-k] u').forEach(u=>u.onclick=e=>{
+    const el=u.closest('[data-k]');
+    const s=offsetIn(el,u,0),len=u.textContent.length;
+    rubOut(el.dataset.k,s,s+len);render();e.stopPropagation();
+  });
   document.querySelectorAll('#hours .hr').forEach(b=>
     b.onclick=()=>{atSlot=b.dataset.slot;render()});
   document.querySelectorAll('#dossiers .dt').forEach(b=>
@@ -2045,134 +2186,134 @@ function render(){
   if(mine)mine.oninput=()=>save(noteKey(mine.dataset.who||who),mine.value);
 }
 
-/* The notebook, built around the person rather than the grid (D-135).
-
-   It used to open with a table of every claim anybody had made, which is the
-   axis the case is deliberately least decided by, and the two other axes we
-   added — where a thing was, what somebody says happened in a room — had
-   nowhere at all to be read. A player was handed a spreadsheet and told the
-   answer was not in the spreadsheet.
-
-   So: one page per suspect, and the page answers the four questions a player
-   actually holds in their head. What have they admitted. What has anybody else
-   said about them. What have they said about everybody else. What will they not
-   say. The evening's grid is still there, one row deep, on the page of the
-   person whose evening it is. */
-function viewBook(n){
-  let h='';
-  /* Who you are, kept where you can reread it (D-101). It is the answer to
-     "why is anybody telling me anything", and the player is entitled to it. */
-  if(S.you)h+='<h2>You</h2><div class="item soft">'+esc(S.you.role)+
-    (S.you.why?'<br><span class="empty">'+esc(S.you.why)+'</span>':'')+
-    (S.you.standing?'<br><span class="empty">'+esc(S.you.standing)+'</span>':'')+
-    '</div>';
-
-  const people=(n.people||[]).filter(p=>!p.dead);
-  if(!people.length)return h+'<div class="empty">Nothing established yet.</div>';
-  if(!people.some(p=>p.id===page))page=(people.find(p=>p.id===who)||people[0]).id;
-
-  // Who the page is about. The tab carries what has been asked of them, which
-  // is the one number that tells you where you have not been looking.
-  h+='<div id="dossiers">'+people.map(p=>
-    '<button class="dt'+(p.id===page?' on':'')+'" data-who="'+esc(p.id)+'">'+
-    esc(p.name.split(' ')[0])+'<span>'+p.asked+'</span></button>').join('')+'</div>';
-
-  const p=people.find(x=>x.id===page);
-  const mine=(n.conflicts||[]).filter(c=>(c.who||[]).includes(p.id));
-  // On their own page "their own word" is in every row, so it is not in any.
-  const rows=(r,src)=>'<table>'+r.map(x=>'<tr class="'+(x.odd?'disputed':'')+
-    '"><td>'+esc(x.time)+'</td><td>'+esc(x.place)+'</td>'+
-    (src?'<td>'+esc(x.who)+'</td>':'')+'</tr>').join('')+'</table>';
-  const none=t=>'<div class="empty">'+t+'</div>';
-
-  h+='<div class="dossier"><h3>'+esc(p.name)+'</h3>'+
-    (p.role?'<div class="who-is">'+esc(p.role)+'</div>':'');
-
-  h+='<h4>What they admit</h4>';
-  h+=p.own.length?rows(p.own,false)
-    :none('They have not put themselves anywhere yet.');
-  if(p.admits.length)h+=p.admits.map(a=>'<div class="item'+(a.mine?'':' soft')+'">'+
-    esc(a.text)+'<br><span class="empty">'+
-    (a.mine?'they told you':esc(a.from)+' told you')+'</span></div>').join('');
-
-  h+='<h4>What others say about them</h4>';
-  h+=p.heard.length?rows(p.heard,true)
-    :none('Nobody else has placed them anywhere.');
-  if(p.about.length)h+=p.about.map(a=>'<div class="item soft">'+esc(a.text)+
-    '<br><span class="empty">from '+esc(a.from)+'</span></div>').join('');
-
-  h+='<h4>What they say about everyone else</h4>';
-  h+=p.told.length?rows(p.told,true)
-    :none('They have not placed anybody but themselves.');
-
-  if(mine.length)h+='<h4>Where it does not add up</h4>'+mine.map(c=>
-    '<div class="item hard">'+esc(c.text)+'<br><span class="empty">'+esc(c.kind)+
-    '</span></div>').join('');
-
-  // Two ways a lead touches a page. On the page of the person whose story it
-  // is, it is a gap in their account. On the page of the person who could
-  // settle it, it is a question you have not asked yet.
-  const open=(n.holes||[]).filter(x=>x.of===p.id||x.ask===p.id);
-  const ask=(n.unasked||[]).filter(x=>x.of===p.id||x.ask===p.id);
-  if(p.refused)h+='<div class="item cold">Refused to answer '+p.refused+
-    (p.refused===1?' time':' times')+'</div>';
-  if(open.length)h+='<h4>Accounts that do not line up</h4>'+open.map(x=>
-    '<div class="item soft">'+esc(x.text)+'</div>').join('');
-  if(ask.length)h+='<h4>'+(ask.some(x=>x.ask===p.id)?'Worth asking them':
-    'Nobody has confirmed this')+'</h4>'+ask.map(x=>
-    '<div class="item cold">'+esc(x.text)+'</div>').join('');
-
-  h+='<h4>Your notes</h4><textarea id="mynotes" data-who="'+esc(p.id)+
-    '" rows="4" placeholder="What you make of them, what to come back to'+
-    '\u2026">'+esc(noteFor(p.id))+'</textarea>';
-  return h+'</div>';
-}
-
-/* The transcript, searchable, and across everybody rather than one person
-   (D-106). Forty answers in, "who mentioned the gearbox" is a real question and
-   scrolling five separate logs is not an answer to it. With no search it stays
-   what it was: this person, in order. */
+/* The transcript is the notebook now (D-196). The per-person pages repeated
+   the timeline as sentences ("X says the cellar, Y says the kitchen") and a
+   player called it what it was. What the timeline does not repeat is what each
+   person has given up, so that stays, short, at the top of their transcript.
+   Then everything they said, which you can underline, then your notes. */
 function viewLog(n){
   const logs=n.logs||{}, term=find.trim().toLowerCase();
-  let h='<h2>'+(term?'Everything anybody said about it':
-    'Everything '+esc(nameOf(who))+' has said')+'</h2>'+
-    '<input id="find" placeholder="Search the transcript" value="'+esc(find)+'">';
+  const people=(n.people||[]).filter(p=>!p.dead);
+  if(!people.some(p=>p.id===page))page=((people.find(p=>p.id===who)||people[0])||{}).id;
+
+  let h='<div id="dossiers">'+people.map(p=>
+    '<button class="dt'+(p.id===page&&!term?' on':'')+'" data-who="'+esc(p.id)+'">'+
+    esc(p.name.split(' ')[0])+'<span>'+p.asked+'</span></button>').join('')+'</div>'+
+    '<input id="find" placeholder="Search everything anybody said" value="'+esc(find)+'">';
+
+  const p=people.find(x=>x.id===page);
+  if(!term&&p){
+    h+='<div class="dossier"><h3>'+esc(p.name)+'</h3>'+
+      (p.role?'<div class="who-is">'+esc(p.role)+'</div>':'');
+    const given=(p.admits||[]).map(a=>({t:a.text,f:a.mine?'they told you':a.from+' told you',
+      mine:a.mine})).concat((p.about||[]).map(a=>({t:a.text,f:'from '+a.from,mine:false})));
+    if(given.length)h+='<h4>Given up</h4>'+given.map(g=>'<div class="item'+
+      (g.mine?'':' soft')+'">'+esc(g.t)+'<br><span class="empty">'+esc(g.f)+
+      '</span></div>').join('');
+    if(p.refused)h+='<div class="item cold">Refused to answer '+p.refused+
+      (p.refused===1?' time':' times')+'</div>';
+    h+='<h4>What they said</h4></div>';
+  }else if(term)h+='<h2>Everything anybody said about it</h2>';
 
   const rows=[];
   Object.keys(logs).forEach(id=>{
-    if(!term&&id!==who)return;
-    (logs[id]||[]).forEach(x=>{
+    if(!term&&id!==page)return;
+    (logs[id]||[]).forEach((x,i)=>{
       if(term&&!(x.q+' '+x.a).toLowerCase().includes(term))return;
-      rows.push({id:id,q:x.q,a:x.a});
+      rows.push({id:id,i:i,q:x.q,a:x.a});
     });
   });
-
   if(!rows.length)h+='<div class="empty">'+(term?'Nothing matches that.':
     'You have not asked them anything yet.')+'</div>';
   else h+=rows.map(r=>'<div class="qa">'+
     (term?'<div class="whose">'+esc(nameOf(r.id))+'</div>':'')+
-    '<div class="qq">'+mark(r.q,term)+'</div>'+
-    '<div class="aa">'+mark(r.a,term)+'</div></div>').join('');
+    '<div class="qq" data-k="'+esc(r.id+'|'+r.i+'|q')+'">'+rich(r.q,r.id+'|'+r.i+'|q',term)+'</div>'+
+    '<div class="aa" data-k="'+esc(r.id+'|'+r.i+'|a')+'">'+rich(r.a,r.id+'|'+r.i+'|a',term)+'</div></div>').join('')+
+    '<div class="empty hint">Select words to underline them. Click an underline to rub it out.</div>';
 
-  return h+notes();
+  if(!term&&p)h+='<h2>Your notes on '+esc(p.name.split(' ')[0])+'</h2>'+
+    '<textarea id="mynotes" data-who="'+esc(p.id)+'" rows="5" placeholder="What you make '+
+    'of them, what to come back to…">'+esc(noteFor(p.id))+'</textarea>';
+  return h;
 }
 
-function mark(text,term){
-  if(!term)return esc(text);
-  const at=text.toLowerCase().indexOf(term);
-  if(at<0)return esc(text);
-  return esc(text.slice(0,at))+'<mark>'+esc(text.slice(at,at+term.length))+
-    '</mark>'+mark(text.slice(at+term.length),term);
+/* Underlines and search hits in one pass, so a word can be both. */
+function rich(text,k,term){
+  text=String(text||'');
+  const flags=new Array(text.length).fill(0);
+  (underlines()[k]||[]).forEach(([s,e])=>{for(let i=s;i<e&&i<text.length;i++)flags[i]|=1});
+  if(term){const low=text.toLowerCase();let at=0;
+    while(term&&(at=low.indexOf(term,at))>=0){for(let i=at;i<at+term.length;i++)flags[i]|=2;at+=term.length}}
+  const open=f=>(f&1?'<u>':'')+(f&2?'<mark>':''),shut=f=>(f&2?'</mark>':'')+(f&1?'</u>':'');
+  let out='',cur=null,buf='';
+  for(let i=0;i<=text.length;i++){
+    const f=i<text.length?flags[i]:null;
+    if(f!==cur){if(cur!==null)out+=open(cur)+esc(buf)+shut(cur);buf='';cur=f}
+    if(i<text.length)buf+=text[i];
+  }
+  return out;
 }
 
-/* Somewhere to write down what you think, per person, kept in this browser
-   (D-106). The notebook records what was said; this is the other half, which is
-   what you made of it. */
-function notes(){
-  if(!who)return '';
-  return '<h2>Your notes on '+esc(nameOf(who).split(' ')[0])+'</h2>'+
-    '<textarea id="mynotes" data-who="'+esc(who)+'" rows="5" placeholder="What '+
-    'you make of them, what to come back to\u2026">'+esc(noteFor(who))+'</textarea>';
+/* Kept in this browser, like the notes (D-196). */
+function underKey(){return 'under.'+(S.title||'case')}
+function underlines(){try{return JSON.parse(load(underKey())||'{}')}catch(e){return {}}}
+function keepUnderlines(U){save(underKey(),JSON.stringify(U))}
+function underline(k,s,e){
+  const U=underlines(),all=(U[k]||[]).concat([[s,e]]).sort((a,b)=>a[0]-b[0]),out=[];
+  all.forEach(r=>{const last=out[out.length-1];
+    if(last&&r[0]<=last[1])last[1]=Math.max(last[1],r[1]);else out.push([r[0],r[1]])});
+  U[k]=out;keepUnderlines(U);
+}
+function rubOut(k,s,e){
+  const U=underlines();
+  U[k]=(U[k]||[]).filter(r=>r[1]<=s||r[0]>=e);
+  if(!U[k].length)delete U[k];
+  keepUnderlines(U);
+}
+function offsetIn(el,node,offset){
+  const r=document.createRange();r.selectNodeContents(el);r.setEnd(node,offset);
+  return r.toString().length;
+}
+document.addEventListener('mouseup',()=>{
+  const sel=window.getSelection();
+  if(!sel||sel.isCollapsed||!sel.rangeCount)return;
+  const up=n=>n&&(n.nodeType===1?n:n.parentElement);
+  const a=up(sel.anchorNode),b=up(sel.focusNode);
+  const el=a&&a.closest('#pages [data-k]');
+  if(!el||!b||b.closest('#pages [data-k]')!==el)return;
+  const r=sel.getRangeAt(0);
+  const s=offsetIn(el,r.startContainer,r.startOffset),e=offsetIn(el,r.endContainer,r.endOffset);
+  if(e>s){underline(el.dataset.k,s,e);sel.removeAllRanges();render()}
+});
+
+/* Your pencil (D-196). Anybody, in any room, at any hour, drawn differently
+   from what people told you so a guess never passes for testimony. It is also
+   how the victim gets onto the grid when nobody alive will put them there. */
+let pencilWho=null;
+function pencilKey(){return 'pencil.'+(S.title||'case')}
+function pencils(){try{return JSON.parse(load(pencilKey())||'{}')}catch(e){return {}}}
+function pencil(slot,id,place){
+  const P=pencils();P[slot]=P[slot]||{};
+  if(P[slot][id]===place)delete P[slot][id];else P[slot][id]=place;
+  save(pencilKey(),JSON.stringify(P));render();
+}
+function pencilledIn(slot,place){
+  const P=pencils()[slot]||{},tags=NB.tags||[];
+  return Object.keys(P).filter(id=>P[id]===place).map(id=>
+    tags.find(k=>k.id===id)).filter(Boolean);
+}
+
+/* The timeline is titled by the hour alone (D-196). Slot names are free text
+   ("19:00, the papers come out", "First Bell — the seating", "Vespers") and
+   the whole of each one across the top made the grid scroll sideways. The full
+   name stays on the map's hour buttons and in the tooltip here. */
+function shortLabel(label){
+  const l=String(label||'');
+  const clock=l.match(/\\b\\d{1,2}[:.h]\\d{2}\\b/);
+  if(clock)return clock[0];
+  const head=l.split(/\\s*(?:,|—|–| - |;|:)\\s*/)[0];
+  const words=head.split(/\\s+/);
+  return words.length>3?words.slice(0,3).join(' ')+'…':head;
 }
 
 function noteKey(id){return 'note.'+(S.title||'case')+'.'+id}
@@ -2381,7 +2522,11 @@ function plan(n){
   P.forEach(p=>{
     const q=at[p.id];if(!q)return;
     const inside=here[p.id]||[];
+    const pencilled=pencilledIn(atSlot,p.id);
+    const shown=inside.concat(pencilled.map(k=>({tag:k.tag,name:k.name,pencil:true,
+      source:'your pencil'})));
     rooms+='<g class="room'+(inside.length?' seen':'')+(p.scene?' clickable':'')+
+      (pencilWho?' pen':'')+'" data-place="'+esc(p.id)+
       '" data-scene="'+esc(p.scene||'')+'" data-room="'+esc(p.name)+'">'+
       '<rect x="'+q.x.toFixed(1)+'" y="'+q.y.toFixed(1)+
       '" width="'+CW.toFixed(1)+'" height="'+CH.toFixed(1)+'"/>'+
@@ -2390,9 +2535,9 @@ function plan(n){
       Math.max(6,Math.min(9,(CW-16)/(p.name.length*0.66))).toFixed(1)+
       '" x="'+(q.x+8).toFixed(1)+'" y="'+
       (q.y+15).toFixed(1)+'">'+esc(p.name)+'</text>'+
-      inside.map((x,i)=>{
-        const span=(inside.length-1)*21;
-        return '<text class="who'+(x.disputed?' bad':(dead.has(x.tag)?' dead':''))+
+      shown.map((x,i)=>{
+        const span=(shown.length-1)*21;
+        return '<text class="who'+(x.pencil?' pencil':x.disputed?' bad':(dead.has(x.tag)?' dead':''))+
           (x.firm?' firm':'')+'" x="'+(q.x+CW/2-span/2+i*21).toFixed(1)+'" y="'+
           (q.y+CH-13).toFixed(1)+'"><title>'+esc(x.name+', from '+x.source)+
           '</title>'+esc(x.tag)+'</text>';
@@ -2424,16 +2569,28 @@ function viewMap(n){
      movement is the only thing on this screen worth seeing. */
   const T=n.timeline||{}, M=n.missing||{}, K=n.tags||[];
   const dead=new Set(K.filter(k=>k.dead).map(k=>k.tag));
-  let h=plan(n)+'<h2>Where they say they were</h2><div class="tlwrap"><table class="tl">'+
-    '<tr><th></th>'+S.times.map(t=>'<th>'+esc(t.label)+'</th>').join('')+'</tr>';
+  const pencilBar='<h2>Your pencil</h2><div id="pencilbar">'+K.map(k=>
+    '<button class="pc'+(pencilWho===k.id?' on':'')+(k.dead?' dead':'')+'" data-id="'+
+    esc(k.id)+'" title="'+esc(k.name)+'">'+esc(k.tag)+'</button>').join('')+'</div>'+
+    '<div class="empty">'+(pencilWho?'Click a cell below, or a room on the plan, to pencil '+
+      esc((K.find(k=>k.id===pencilWho)||{}).name||'')+' in at that hour. Click again to rub '+
+      'it out, or pick them again to put the pencil down.'
+      :'Pick somebody to pencil them in yourself, the victim included. Your marks are '+
+      'dashed: a guess, not testimony.')+'</div>';
+  let h=plan(n)+pencilBar+'<h2>Where they say they were</h2><div class="tlwrap"><table class="tl">'+
+    '<tr><th></th>'+S.times.map(t=>'<th title="'+esc(t.label)+'">'+
+      esc(shortLabel(t.label))+'</th>').join('')+'</tr>';
   S.places.forEach(p=>{
     h+='<tr><th class="rm'+(p.scene?' clickable" data-scene="'+esc(p.scene)+
       '" data-room="'+esc(p.name):'')+'">'+esc(p.name)+'</th>'+S.times.map(t=>{
       const cell=((T[t.id]||{})[p.id])||[];
-      return '<td>'+cell.map(x=>'<span class="pin'+(x.disputed?' bad':
+      return '<td data-slot="'+esc(t.id)+'" data-place="'+esc(p.id)+'"'+
+        (pencilWho?' class="pen"':'')+'>'+cell.map(x=>'<span class="pin'+(x.disputed?' bad':
         (dead.has(x.tag)?' dead':''))+(x.firm?' firm':'')+'" title="'+
         esc(x.name+', from '+x.source)+
-        '">'+esc(x.tag)+'</span>').join('')+'</td>';
+        '">'+esc(x.tag)+'</span>').join('')+
+        pencilledIn(t.id,p.id).map(k=>'<span class="pin pencil" title="'+
+          esc(k.name+', your pencil')+'">'+esc(k.tag)+'</span>').join('')+'</td>';
     }).join('')+'</tr>';
   });
   // Before a single claim exists, every person is unaccounted for at every
@@ -2642,10 +2799,10 @@ def _draw(args, store=None, announce: bool = True) -> None:
             print(f"  Seed {args.seed}. Pass --seed {args.seed} for this case again.")
 
     if args.topology == UNPLAYED:
-        seen = played(store) & set(LIBRARY)
+        seen = played(store) & set(dealt())
         args.topology = unplayed(seen, args.seed)
         if announce:
-            left = len(LIBRARY) - len(seen)
+            left = len(dealt()) - len(seen)
             print(f"  Shape: {args.topology}. {get_topology(args.topology).blurb}.")
             print(
                 f"  Dealt from the {left} shape{'' if left == 1 else 's'} "

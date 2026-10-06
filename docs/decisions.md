@@ -4991,3 +4991,244 @@ reads the same way as a secret's.
 
 Measured by the next batch against the D-188 baseline. D-188 and D-189 land in
 one cohort, by choice: both aim at the same numbers.
+
+## D-190 The victim is in the cast, said out loud
+**Date:** 2026-10-05
+**Status:** active
+
+The first batch on the D-189 prompt left the victim out of `characters` in
+most drafts, redrafts above all, and every scene with the victim failed V4 as
+"names X, who is not in the cast". Drafts from the day before listed the
+victim, so the slim removed whatever implied it (most likely the grid's "every
+character has a place in every slot", which put the victim in the cast without
+saying so). The redraft complaint never said what to do, so attempts two and
+three repeated it. Five seeds, fifteen drafts, nothing shelved.
+
+Now the prompt says it (`characters` is everybody, the victim included, and the
+request gives the count), and V4 reports a missing victim once, with the fix.
+Lesson for the next slim: a rule can be implied by a sentence that looks like
+it is about something else.
+
+## D-191 A skeleton first, the prose second, and every redraft a revision
+**Date:** 2026-10-05
+**Status:** active
+
+Two findings from the first batches on D-188 to D-190. A redraft was told to
+"fix exactly these problems and change nothing else" about a draft it was
+never shown: input tokens were the same on every attempt, so each redraft was
+a new case with a longer list of warnings, and the batch showed it fixing one
+number and breaking another, attempt after attempt. And every rejection threw
+away a whole draft, prose included, when nothing any gate reads is in the
+prose.
+
+Chosen at the fork, with the player's prediction that a skeleton passes more
+often on the first try than a whole draft:
+
+- **Two calls.** The skeleton (premise, cast with names and roles, rooms,
+  slots, scenes, grid, secrets with their gates and evidence, lies with what
+  they cover, discovery, objects) is gated on everything: the validator, the
+  arrangement, reachability, the measures, A26. Only a skeleton that passes
+  gets prose. Up to four skeletons, two prose attempts.
+- **The prose cannot touch the structure.** It writes title, investigator,
+  commission, common ground, accounts, and per id the look, wants, manner,
+  voice, impressions, breaking points and admissions. Code puts them on the
+  skeleton, so a gate passed cannot be undone; the full checks run once more
+  anyway before anything is shelved. Prose fails only on something missing.
+- **A skeleton is a story, not a graph.** `premise` comes first in the tool,
+  a paragraph of what happened and why, and every gated secret carries
+  `how_it_opens`: why having the first thing brings this one out. The prose
+  stage writes breaking points from it. This is the guard against what D-189
+  rejected as E, a gate with no reason behind it.
+- **Revisions (B).** Each stage is handed its own previous attempt, what was
+  wrong, and which numbers it already meets, and asked to mend rather than
+  start again.
+- **Everything is kept (for C).** Rejected skeletons and prose go to
+  `var/rejected` with their stage and price; the nearest skeleton miss, and
+  any skeleton that passed but whose prose did not, go to `var/review`.
+- **Prices are recorded per call**, prompt caching included (the standing
+  instructions are cached across a seed's attempts), and `--stats` reports
+  seeds, rejected calls by stage, and recorded spend per shelved case instead
+  of drafts times a flat $0.41.
+
+A (a plan field) folded into the skeleton: a plan written before the case and a
+skeleton written before the prose are the same idea.
+
+The single-call path stays for fakes and `--dry-run`, which hand back a whole
+case at once. It is no longer sent to a model.
+
+The last single-call batch (seeds 300001 on, same prompt otherwise) is the
+baseline: first four seeds, twelve drafts, about $5, nothing shelved, three
+near misses. Measured against it by the next batch.
+
+## D-192 Shapes protect the killer; the innocents' lies are dealt; the clock retired; an open experiment
+**Date:** 2026-10-05
+**Status:** active
+
+The player's sense was that shapes were flopping. Two things were. The clock
+shape ("nobody lies about where they were") could never meet Normal, which
+needs two people lying about the murder hour, and since D-189 the request
+printed both rules side by side: one seed in seven was paying for four
+skeletons that could not pass. And the shapes counted the innocent liars and
+said nothing about how they lied, so every innocent lied about a room for an
+embarrassing reason.
+
+The player's alternative was examples instead of shapes, with the killer's
+position (D-188) taking over the role. Pushed back on half of it: position is
+who the killer is to the house, the shape is what the player has to take
+apart, and a hub can be framed or vouched for or lie about a room. And free
+choice is what D-067 found converging on one solution. Agreed on the other
+half, for the innocents.
+
+- **The clock is retired from the deal**, kept in the library so a case made
+  with it still plays. Six shapes are dealt.
+- **A shape says how the killer is protected and nothing else.** The counting
+  of innocent liars came out of the plain lie and the false confession: the
+  targets already say how many lie at the murder hour. The conspiracy keeps its
+  rule, being a lie everybody tells.
+- **How the innocents lie is dealt** (`palette.LIES`): the wrong company, the
+  wrong errand, for somebody else, the borrowed alibi, the shifted hour, the
+  needless lie. Four in an order per seed, used one kind per lie and never
+  twice, so however many lies a case needs none repeats (the player's
+  condition). Not for the conspiracy.
+- **The open experiment (C).** `--topology open` gives the model the six
+  protections as examples, in an order of the seed's, and lets it choose.
+  `--skeleton-only` drafts one skeleton, no revision, no prose, writes it to
+  `var/skeletons`, and prints nothing about the case. `topology.classify` reads
+  which protection a skeleton gave its killer off the structure, and `--stats`
+  counts them. The player predicted a spread; D-067 predicts convergence on the
+  plain lie. If it spreads, shapes can become examples.
+- **`prompt_version` now hashes the shapes and the decks** that only reach the
+  request, so a change to any of them is a new cohort. D-188's decks changed
+  what the model was told without moving it.
+
+Classifying from structure has one known blur: two people claiming the same
+room at the same hour count as one vouching for the other, the same reading T1
+has always used, even where each lies for their own reason.
+
+## D-193 The honest killer is guarded, the body is sometimes moved, half the gates open with an object
+**Date:** 2026-10-05
+**Status:** active
+
+The open experiment (D-192) chose the frame ten times in ten, and the player
+asked the question that explained it: when the killer tells no lie, what do
+they say about the hour of the killing? The answer in the code was the truth,
+plainly: "at nine I was in the cellar", the room the body was found in. Two of
+the seven best cases on the shelf had exactly that. The gate could not see it,
+which is why an honest killer looked like the cheap way to pass. So D-067 held,
+converging on the frame rather than the plain lie, and shapes stay dealt.
+
+Chosen with the player:
+
+- **a. Guarded, not lying.** An honest killer's whereabouts at the murder hour
+  are a guarded fact: truthful and unspecific, never denied, the room named
+  only once somebody can already place them there. In the agent, so it also
+  helps cases already on the shelf.
+- **b. A new shortcut,** "who says they were where the body was found, at the
+  murder hour", by their own account (a liar's claim, anyone else's truth). The
+  room the body was found in is the one fact about the killing every player is
+  told. Hidden in the clock shape, where nobody knows the hour.
+- **The body is sometimes moved** (the player's addition). Dealt: always for the
+  frame and the finder, where an honest killer would otherwise be standing in
+  the room the body is found in; one seed in three for the rest. The killer
+  carries it through one door in the hour of the killing. Stamped as
+  `moved_body`, so an old case that found its body elsewhere for its own reasons
+  (a fall from an aircraft) is not reread as moved. V15 checks the door; V7 and
+  V10 follow the body to the room it was found in, which is sealed from that
+  hour; the solver lays it there; the killer's agent conceals the carrying.
+- **Objects: half the gates, including the key roads.** Not every secret needs
+  one (the player). A new target: at least half the gates open with an object,
+  and at least one on the road to the motive and one on the deepest innocent
+  trail. Measured, gated, said in the request, mended in revisions.
+
+Against the new Normal, three of the seven best cases still pass. The two
+with an honest killer fail on the new shortcut, and two fail on objects.
+
+## D-194 Decks are dealt in turn, not drawn
+**Date:** 2026-10-05
+**Status:** active
+
+One evening of eight-seed batches made three pairs of near-twins: Duckboards
+and Ladle (same occasion, same country, same kind of investigator, nearly the
+same voices), and two families signing the sale of a business. Every deck was a
+fresh draw per seed, and a batch is consecutive seeds, so eight draws from
+thirty two occasions repeat one more often than not, and from twelve
+standings, nearly always.
+
+Each deck now has one fixed shuffle, and consecutive seeds take consecutive
+cards from it (`palette.deal`, and `palette.hand` for the cast-sized hands of
+manners and voices): occasion, the world and that world's occasion, the
+region, the standing, the motive, the old business and its age, the title
+form, the commission. Any run of seeds as long as a deck sees every card once;
+neighbouring seeds share no voice and no manner. Seeds a whole deck apart share
+that card, and the other decks, of other sizes, differ.
+
+The decks used to be keyed on the setting too, so one seed against four typed
+settings gave four hands. Dropped: seeds are fresh by default (D-102), and
+keying on the setting is exactly what lets a batch draw independently.
+
+Also in the prose prompt: whatever the dealt standing, the investigator is
+not an insurer's assessor or adjuster. Three of the seven best cases had one,
+from three different standings.
+
+## D-195 First batch on D-193 and D-194, and two fixes it found
+**Date:** 2026-10-06
+**Status:** active
+
+Eight seeds (500001 to 500008), six shelved, all six meeting the new Normal,
+$10.14 in all, $1.69 per shelved case (the D-192 batch was $0.91 against a
+looser Normal). No skeleton passed first time; revisions carried every one that
+passed, in two to four. Every setting different, two other worlds (Asturias
+1080, South Georgia 1912), and no insurance investigator: D-194 worked.
+
+The two seeds that died showed two faults, both fixed:
+
+- **A26 matched the wrong object.** Evidence is matched to objects by words, and
+  "the chit page torn from the 1957 kerosene issue book" matched the page,
+  which was the holder's, and the book, which was not. The book was flagged,
+  twice, and the seed died one complaint short. A26 now passes a secret if any
+  object its evidence matches is in the holder's hands. Six of the seven A26
+  rejections in the batch were real: asked for more objects, the model reaches
+  for things that belong to somebody else, and revisions fix that.
+- **The conspiracy collided with the targets.** Everyone joins the shared lie,
+  and if it is not about the murder hour the targets need more liars at that
+  hour, which means second lies, which the validator forbids (one account of
+  where you were per person). The brief now puts the shared lie at the murder
+  hour, one lie each.
+
+Revisions cost the batch most of its extra spend. Not yet acted on.
+
+## D-196 The case file, the transcript as notebook, a pencil, underlines, help
+**Date:** 2026-10-06
+**Status:** active
+
+From the player, after a run of playtests:
+
+- **The briefing is a case file:** a buff folder, typed pages, a CONFIDENTIAL
+  stamp, the cover picture clipped on as Exhibit A, and the order a file is
+  read in: what happened (the death, who found it where, what you were asked
+  for), the persons present with their photographs, what everybody knows, and
+  only then you. It opened with you, the one part the player already knows.
+  "Briefing" is now "Case file".
+- **The notebook is the transcript.** The per-person pages restated the
+  timeline as sentences ("X says the cellar, Y says the kitchen", "where it does
+  not add up", "accounts that do not line up"), and the player called it slop.
+  What the timeline does not restate stays, short, at the top of each person's
+  transcript: what they have given up, and what others gave up about them.
+  Then everything they said, then your notes on them. Search still runs across
+  everybody. The contradiction count and its chime stay.
+- **Underlines.** Select words in the transcript and they stay underlined;
+  click one to rub it out. Kept in the browser, like the notes.
+- **A pencil, for anybody.** Pick a person on the map, then a cell or a room,
+  and they are pencilled in at that hour, dashed and italic so a guess never
+  passes for testimony. It is also how the victim gets onto the grid when
+  nobody alive places them. Kept in the browser.
+- **The timeline is titled by the hour.** Slot names are free text, and the
+  whole of each across the top made the grid scroll sideways. The header takes
+  a clock time if there is one, else the words before the first comma or dash,
+  three at most; the full name is in the tooltip and on the map's hour buttons.
+  Works on every case already made.
+- **"?"** opens how to play: asking, showing objects, the clock, the two tabs,
+  the pencil, accusing.
+
+Agreed and not yet built: French and Italian on demand, one language per room
+(translate a finished case once; the page text into a dictionary).

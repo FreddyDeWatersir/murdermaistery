@@ -61,9 +61,25 @@ def check_references_exist(mystery: Mystery) -> list[Violation]:
 
     violations: list[Violation] = []
 
+    # The commonest way to fail this rule since D-189: the victim left out of
+    # the cast, which used to come back as one line per scene they were in and
+    # never said what to do. One line, and the fix.
+    lost = mystery.victim and mystery.victim not in people
+    if lost:
+        violations.append(
+            Violation(
+                rule="V4",
+                message=(
+                    f"The victim {mystery.victim!r} is not in `characters`. The cast "
+                    f"lists everybody, the victim included: add them as a character "
+                    f"with at least `role`, `gender` and `look`, under that id"
+                ),
+            )
+        )
+
     for constraint in mystery.constraints:
         for person in constraint.people:
-            if person not in people:
+            if person not in people and not (lost and person == mystery.victim):
                 violations.append(
                     Violation(
                         rule="V4",
@@ -433,6 +449,9 @@ def check_the_victim_stays_dead(mystery: Mystery) -> list[Violation]:
             )
 
     resting_place = mystery.placements.get(mystery.victim, {}).get(killed_at)
+    if mystery.body_moved:
+        # Carried next door in the hour of the killing, and still there (D-193).
+        resting_place = mystery.found_in
     for slot in mystery.slots:
         if slot.index <= after:
             continue
@@ -490,6 +509,31 @@ def check_the_body_is_not_stepped_over(mystery: Mystery) -> list[Violation]:
     )
     violations: list[Violation] = []
 
+    # A body carried next door is in that room from the hour of the killing
+    # (D-193): nobody else is there then or afterwards.
+    if mystery.body_moved:
+        found = mystery.found_in
+        for slot in sorted(mystery.slots, key=lambda s: s.index):
+            if slot.index < when:
+                continue
+            there = sorted(
+                character.id
+                for character in mystery.characters
+                if character.id not in (mystery.victim, mystery.killer)
+                and mystery.placements.get(character.id, {}).get(slot.id) == found
+            )
+            if there:
+                violations.append(
+                    Violation(
+                        rule="V10",
+                        message=(
+                            f"{there} are in {found!r} at {slot.id!r}, where the body "
+                            f"was carried at {killed_at!r} and later found. Nobody "
+                            f"else is in that room from the hour of the killing on"
+                        ),
+                    )
+                )
+
     for slot in later:
         intruders = sorted(
             character.id
@@ -512,6 +556,34 @@ def check_the_body_is_not_stepped_over(mystery: Mystery) -> list[Violation]:
             )
 
     return violations
+
+
+def check_the_body_was_carried_next_door(mystery: Mystery) -> list[Violation]:
+    """V15: a moved body went through one door, not across the building (D-193).
+
+    The killer carries it in the hour of the killing, so the room it was found
+    in is next to the room it fell in.
+    """
+    if not mystery.body_moved:
+        return []
+    scene = mystery.murder_scene
+    found = mystery.found_in
+    doors = {
+        (place.id, other) for place in mystery.places for other in place.adjacent
+    }
+    if (scene.place, found) in doors or (found, scene.place) in doors:
+        return []
+    return [
+        Violation(
+            rule="V15",
+            message=(
+                f"The body was killed in {scene.place!r} and found in {found!r}, "
+                f"which are not next to each other. It was carried in the hour of "
+                f"the killing, through one door: find it in a room next door, or "
+                f"put a door between them"
+            ),
+        )
+    ]
 
 
 def check_every_lie_covers_something(mystery: Mystery) -> list[Violation]:
@@ -708,6 +780,7 @@ PROPOSED_RULES = [
     check_constraints_do_not_contradict,
     check_exclusive_scenes_do_not_collide,
     check_the_body_is_not_stepped_over,
+    check_the_body_was_carried_next_door,
     # Both about the victim's timeline, and both here rather than only at the
     # final gate so that the complaint the model reads names the real problem
     # rather than the solver's symptom of it (D-158). Neither costs a draft on
@@ -730,6 +803,7 @@ FINAL_RULES = [
     check_every_constraint_was_placed,
     check_exclusive_scenes_do_not_collide,
     check_the_body_is_not_stepped_over,
+    check_the_body_was_carried_next_door,
 ]
 
 

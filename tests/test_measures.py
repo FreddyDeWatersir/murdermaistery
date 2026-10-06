@@ -78,3 +78,55 @@ def test_clean_hands_means_the_motive_is_all_they_hold() -> None:
         }
     )
     assert position_landed(only_motive) is True
+
+
+# --- the room the body was found in, and objects (D-193) -------------------------
+
+
+def _shipped():
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Mystery
+    from mystery.solver import solve
+
+    return solve(Mystery.model_validate(OPENING_NIGHT))
+
+
+def test_an_honest_killer_in_the_room_the_body_was_found_is_a_shortcut() -> None:
+    """Telling no lie about the hour of the killing is saying you were where it
+    happened, and where the body was found is the one thing everybody is told."""
+    case = _shipped()
+    honest = case.model_copy(
+        update={"false_claims": [c for c in case.false_claims if c.character != case.killer]}
+    )
+    assert "found_room" not in measure(case, "the_lie").shortcuts, "the liar names elsewhere"
+    assert "found_room" in measure(honest, "the_frame").shortcuts
+
+
+def test_a_body_carried_next_door_is_not_that_shortcut() -> None:
+    from mystery.models import Discovery
+
+    case = _shipped()
+    honest = case.model_copy(
+        update={
+            "false_claims": [c for c in case.false_claims if c.character != case.killer],
+            "discovery": Discovery(finder="tomas", place="stage_door"),
+            "moved_body": True,
+        }
+    )
+    assert honest.body_moved and honest.found_in == "stage_door"
+    assert "found_room" not in measure(honest, "the_frame").shortcuts
+
+
+def test_half_the_gates_open_with_an_object_and_the_key_roads_have_one() -> None:
+    case = _shipped()
+    m = measure(case, "the_lie")
+    assert m.gates == 3 and m.argued == 0 and m.objects_met(NORMAL)
+    bare = case.model_copy(
+        update={"secrets": [s.model_copy(update={"evidence": None}) for s in case.secrets]}
+    )
+    stripped = measure(bare, "the_lie")
+    assert not stripped.objects_met(NORMAL)
+    assert not stripped.motive_object and not stripped.trail_object
+    from mystery.measures import complaints
+
+    assert any("open with an object" in c for c in complaints(stripped, NORMAL))

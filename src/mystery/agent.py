@@ -223,6 +223,8 @@ def build_brief(
     claim = mystery.lie_by(character)
     lying_about = claim.slot if claim else None
     is_the_killer = character == mystery.killer
+    scene = mystery.murder_scene
+    killed_at = scene.slot if scene is not None else None
 
     for slot in sorted(mystery.slots, key=lambda s: s.index):
         where = know.movements.get(slot.id)
@@ -274,6 +276,26 @@ def build_brief(
                         place=where,
                     )
                 )
+        elif is_the_killer and slot.id == killed_at:
+            # An honest killer (D-193). Telling no lie about the hour of the
+            # killing used to mean saying, plainly and first time, that they were
+            # in the room where it happened. True is not the same as forthcoming:
+            # guarded, so it is citable when it does come out.
+            guarded.append(
+                Fact(
+                    id=f"self:{slot.id}",
+                    text=(
+                        f"At {times[slot.id]} you were in {places.get(where, where)}. "
+                        f"You will not lie about it and you will not offer it either. "
+                        f"Asked about that hour, be truthful and unspecific: what you "
+                        f"were doing, the part of the building, not the room. Name the "
+                        f"room only once somebody can already place you there."
+                    ),
+                    subject=character,
+                    slot=slot.id,
+                    place=where,
+                )
+            )
         else:
             facts.append(
                 Fact(
@@ -284,6 +306,20 @@ def build_brief(
                     place=where,
                 )
             )
+
+    if is_the_killer and mystery.body_moved and killed_at:
+        found = mystery.found_in
+        conceals.append(
+            Fact(
+                id="truth:moved",
+                text=(
+                    f"At {times[killed_at]}, after it was done, you carried "
+                    f"{names.get(mystery.victim, mystery.victim)} into "
+                    f"{places.get(found, found)}. You will not say this. Not to "
+                    f"anyone, not ever."
+                ),
+            )
+        )
 
     for observation in know.observations:
         if observation.slot == lying_about:

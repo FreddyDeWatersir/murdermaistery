@@ -1,11 +1,10 @@
 # STATE
 
-**NEXT (5 Oct 2026):** a batch on the slimmed prompt (D-189), then read it with
-`uv run python -m mystery.cli --stats`. Compare the newest cohort with the one
-above it: yield, cost per shelved case, "meets Normal", "killer landed where
-dealt", and which numbers the rejected drafts missed. Near misses are in
-`var/review/`. Difficulty as an input is still to come; until then every draft
-is held to Normal.
+**NEXT (6 Oct 2026):** beta evenings with friends on the new page (D-196): case file,
+transcript with underlines, pencil, help. Suggested cases: The Oath and the Snow,
+What the Season Leaves, The Sea Is Behind the House. Collect: solved, questions,
+wrong accusations, fair/clever 1-5, where stuck (`sudo mysteryctl transcripts`).
+Then: French and Italian on demand (agreed, not built), and a batch on D-195.
 
 ---
 

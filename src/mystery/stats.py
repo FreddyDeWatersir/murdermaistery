@@ -36,6 +36,10 @@ from mystery.topology import assess
 # is drafts times this, and the report says it is an estimate.
 DRAFT_USD = 0.41
 
+# Checks that read what only the prose stage writes: A22 the accounts, A11 a
+# lie's admission. Not counted against a skeleton.
+PROSE_CHECKS = {"A11", "A22"}
+
 
 @dataclass
 class Record:
@@ -54,6 +58,8 @@ class Record:
     asked: int = 0  # questions asked about this case in local sessions
     case_id: str = ""
     measures: Measures | None = None
+    usd: float | None = None  # what the call(s) cost, where recorded (D-191)
+    stage: str = "whole"  # "skeleton", "prose", or a single-call draft
     position: str = ""  # where the killer was dealt (D-188), a spoiler
     landed: bool | None = None  # whether the draft put them there
 
@@ -122,6 +128,10 @@ def _measure(record: Record, mystery: Mystery) -> Record:
         record.landed = None
     try:
         record.fired = {a.check for a in assess(mystery, record.shape)}
+        if record.stage == "skeleton":
+            # Accounts and admissions are the prose stage's to write (D-191), so
+            # a skeleton always "has" these two and saying so is noise.
+            record.fired -= PROSE_CHECKS
     except Exception:  # noqa: BLE001 - a draft that breaks a check is still counted
         record.fired = set()
     return record
@@ -159,6 +169,7 @@ def collect(var: Path = Path("var")) -> list[Record]:
             world=mystery.world if world_named(mystery.world) else "",
             asked=asked.get(saved.get("id", ""), 0),
             case_id=saved.get("id", ""),
+            usd=mystery.spent_usd or None,
         )
         records.append(_measure(record, mystery))
 
@@ -176,9 +187,20 @@ def collect(var: Path = Path("var")) -> list[Record]:
             seed=str(kept.get("seed", "")),
             shape=kept.get("topology", ""),
             reason=_why(complaints),
+            usd=kept.get("usd"),
+            stage=kept.get("stage", "whole"),
         )
         try:
-            mystery = Mystery.model_validate(kept["draft"])
+            draft = kept["draft"]
+            if record.stage == "prose":
+                # Prose on its own is not a case; it is counted and priced, and
+                # there is nothing in it to measure.
+                record.reason = "prose"
+                records.append(record)
+                continue
+            if record.stage == "skeleton":
+                draft = {"title": "", **draft}
+            mystery = Mystery.model_validate(draft)
         except Exception:  # noqa: BLE001 - an unparseable draft is still a draft paid for
             record.reason = "unparseable"
             records.append(record)
@@ -208,19 +230,31 @@ def report(records: list[Record], spoilers: bool = False) -> str:
         shelved = [r for r in group if r.source == "shelf"]
         rejected = [r for r in group if r.source == "rejected"]
         lines.append(f"\n  PROMPT {cohort}")
-        if rejected and shelved:
-            share = len(shelved) / len(group)
-            per = len(group) * DRAFT_USD / len(shelved)
-            lines.append(
-                f"    drafts {len(group)}   shelved {len(shelved)}   yield {share:.0%}"
-                f"   about ${per:.2f} per shelved case"
+        # Recorded prices where there are any (D-191), the old flat estimate
+        # where there are not.
+        spent = sum(r.usd if r.usd is not None else DRAFT_USD for r in group)
+        priced = all(r.usd is not None for r in group)
+        seeds = len({r.seed for r in group if r.seed})
+        stages = Counter(r.stage for r in rejected)
+        lines.append(
+            f"    seeds {seeds}   shelved {len(shelved)}   rejected calls {len(rejected)}"
+            + (
+                f" ({', '.join(f'{k} {v}' for k, v in sorted(stages.items()))})"
+                if len(stages) > 1 or "whole" not in stages
+                else ""
             )
-        else:
-            lines.append(f"    shelved {len(shelved)}   rejected {len(rejected)}")
+        )
+        if shelved:
+            lines.append(
+                f"    {'' if priced else 'about '}${spent / len(shelved):.2f} per shelved case,"
+                f" ${spent:.2f} in all"
+            )
+        elif rejected:
+            lines.append(f"    {'' if priced else 'about '}${spent:.2f} spent, nothing shelved")
         if rejected:
             why = Counter(r.reason for r in rejected)
             lines.append("    rejected for: " + ", ".join(f"{k} {v}" for k, v in why.most_common()))
-        measured = [r for r in group if r.reason != "unparseable"]
+        measured = [r for r in group if r.reason not in ("unparseable", "prose")]
         lines.append(
             f"    depth: motive {_mean([r.motive_depth for r in measured])}"
             f" (shelved {_mean([r.motive_depth for r in shelved])}),"
@@ -300,4 +334,36 @@ def report(records: list[Record], spoilers: bool = False) -> str:
         lines.append(f"\n    ids: {', '.join(r.case_id for r in shelf if not r.asked)}")
     if not spoilers:
         lines.append("\n  Shapes and which shortcuts work are hidden. --spoilers shows them.")
+    return "\n".join(lines)
+
+
+def experiments(var: Path = Path("var")) -> str:
+    """The skeleton-only runs (D-192), one block per prompt version and mode.
+
+    Nothing in `var/skeletons` is ever played, so which protection each one
+    chose is not a spoiler and is shown in full.
+    """
+    runs: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for path in sorted((var / "skeletons").glob("*.json")):
+        try:
+            kept = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        mode = "open" if kept.get("topology") == "open" else "dealt"
+        runs[(kept.get("built_with", ""), mode)].append(kept)
+    if not runs:
+        return ""
+    lines = ["\n  SKELETON EXPERIMENTS (never played, so nothing here spoils anything)"]
+    for (version, mode), group in sorted(runs.items()):
+        passed = sum(1 for k in group if k.get("passed"))
+        spent = sum(k.get("usd") or 0 for k in group)
+        lines.append(
+            f"    {version}, protection {mode}: {len(group)} skeletons, {passed} passed "
+            f"first try, ${spent:.2f}"
+        )
+        chose = Counter(k.get("protection") or "unparseable" for k in group)
+        lines.append("      chose: " + ", ".join(f"{p} {n}" for p, n in chose.most_common()))
+        if mode == "dealt":
+            landed = sum(1 for k in group if k.get("protection") == k.get("topology"))
+            lines.append(f"      built the shape it was dealt: {landed} of {len(group)}")
     return "\n".join(lines)

@@ -1321,3 +1321,35 @@ def test_a_room_already_called_the_something_is_not_the_the_something():
     assert in_the("Octavio's office") == "Octavio's office"
     assert in_the("Rear cabin bench") == "the Rear cabin bench"
     assert in_the("Theatre bar") == "the Theatre bar"
+
+
+def test_an_honest_killer_is_vague_about_the_hour_not_lying() -> None:
+    """D-193: no lie, and no volunteering the room where it happened."""
+    from mystery.example import OPENING_NIGHT
+    from mystery.solver import solve
+
+    case = solve(Mystery.model_validate(OPENING_NIGHT))
+    honest = case.model_copy(
+        update={"false_claims": [c for c in case.false_claims if c.character != case.killer]}
+    )
+    brief = build_brief(honest, derive(honest), honest.killer)
+    murder = honest.murder_scene.slot
+    assert not any(f.id == f"self:{murder}" for f in brief.facts)
+    held = next(f for f in brief.guarded if f.id == f"self:{murder}")
+    assert "not lie" in held.text and "unspecific" in held.text
+
+
+def test_a_killer_who_moved_the_body_never_says_so() -> None:
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Discovery
+    from mystery.solver import solve
+
+    case = solve(
+        Mystery.model_validate(OPENING_NIGHT).model_copy(
+            update={"discovery": Discovery(finder="tomas", place="stage_door"), "moved_body": True}
+        )
+    )
+    brief = build_brief(case, derive(case), case.killer)
+    assert any(f.id == "truth:moved" for f in brief.conceals)
+    innocent = build_brief(case, derive(case), "tomas")
+    assert not any(f.id == "truth:moved" for f in innocent.conceals)

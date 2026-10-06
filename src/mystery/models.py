@@ -252,6 +252,10 @@ class Secret(BaseModel):
     # reason to kill the victim" are not the same thing and only the writer
     # knows which one this is.
     damning: bool = False
+    # Why having `revealed_by` makes this come out, in one sentence (D-191).
+    # Written with the skeleton, so a gate has a reason before anybody writes a
+    # breaking point, and the prose stage writes `breaks_when` from it.
+    how_it_opens: str = ""
 
 
 def with_doors_both_ways(places: list[Place]) -> list[Place]:
@@ -403,6 +407,14 @@ class Mystery(BaseModel):
     # Where the killer was dealt to stand in the house (D-188), by key. Stamped
     # like `world`, so `--stats` can say how often the model lands it.
     killer_position: str = ""
+    # Whether the deal said the body was moved next door (D-193). Stamped.
+    moved_body: bool = False
+    # What happened and why, in a paragraph, written first with the skeleton
+    # (D-191). The prose stage writes from it. Never shown to a player.
+    premise: str = ""
+    # What the calls that made this case cost, in dollars, rejected ones not
+    # included: those are in `var/rejected` with their own price (D-191).
+    spent_usd: float = 0.0
 
     def accounts_of(self, constraint: str) -> list[Account]:
         return [a for a in self.accounts if a.constraint == constraint]
@@ -420,6 +432,32 @@ class Mystery(BaseModel):
 
     def lie_by(self, character: CharacterId) -> "FalseClaim | None":
         return next((c for c in self.false_claims if c.character == character), None)
+
+    @property
+    def found_in(self) -> "PlaceId | None":
+        """Where the body was found: the discovery's room, else where it fell."""
+        if self.discovery is not None and self.discovery.place:
+            return self.discovery.place
+        scene = self.murder_scene
+        return scene.place if scene is not None else None
+
+    @property
+    def body_moved(self) -> bool:
+        """Killed in one room, found in another (D-193). The killer carried the
+        body next door in the hour of the killing.
+
+        Only when the deal said so (`moved_body`, stamped like the world). Older
+        cases sometimes found the body somewhere else for reasons of their own,
+        a fall from an aircraft, and were valid as written."""
+        scene = self.murder_scene
+        return bool(
+            self.moved_body
+            and scene is not None
+            and scene.place
+            and self.discovery is not None
+            and self.discovery.place
+            and self.discovery.place != scene.place
+        )
 
     @property
     def murder_scene(self) -> "Constraint | None":

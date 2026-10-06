@@ -38,7 +38,16 @@ from mystery.models import Mystery
 # What a Normal case should reach (D-186, motive lowered to 1 by D-187: the best-
 # received case had a one-gate motive). Difficulty will move these; until it
 # exists they are what `--stats` reports against.
-NORMAL = {"field": 3, "shortcuts": 0, "motive": 1, "trail": 2, "liars_at_hour": 2}
+NORMAL = {
+    "field": 3,
+    "shortcuts": 0,
+    "motive": 1,
+    "trail": 2,
+    "liars_at_hour": 2,
+    # Per cent of gates opened by an object, with at least one on the road to
+    # the motive and one on the deepest innocent trail (D-193).
+    "objects": 50,
+}
 
 # What the generation gate holds a draft to (D-188). Normal until difficulty is
 # an input. Read at call time, so the test suite can open it for the tests that
@@ -55,6 +64,7 @@ SHORTCUTS = {
     "last_with": "who was with the victim the hour before",
     "only_reason": "who has anything damning",
     "only_about_victim": "who has a secret about the victim",
+    "found_room": "who says they were where the body was found, at the murder hour",
 }
 
 # Some shapes hide a shortcut from the player by construction, so it cannot be
@@ -63,7 +73,7 @@ SHORTCUTS = {
 # murder was, so nothing keyed on it is a question a player can ask.
 HIDDEN_BY_SHAPE = {
     "mutual_alibi": {"alone", "unplaced_liar"},
-    "the_wrong_hour": {"alone", "lies_at_hour", "last_with"},
+    "the_wrong_hour": {"alone", "lies_at_hour", "last_with", "found_room"},
 }
 
 
@@ -79,10 +89,24 @@ class Measures:
     # Gates the player can only argue open, because the secret in front has no
     # object to put on the table (S5, retired as a warning in D-188).
     argued: int = 0
+    gates: int = 0
+    # Whether the road to the motive, and the deepest innocent trail, each have
+    # at least one gate opened by an object (D-193). True where there is no gate.
+    motive_object: bool = True
+    trail_object: bool = True
     shortcuts: list[str] = listed(default_factory=list)
+
+    def objects_met(self, targets: dict[str, int] = NORMAL) -> bool:
+        share = targets.get("objects", 0)
+        if not share or not self.gates:
+            return True
+        opened = self.gates - self.argued
+        return opened * 100 >= share * self.gates and self.motive_object and self.trail_object
 
     def meets(self, targets: dict[str, int] = NORMAL) -> bool:
         return (
+            self.objects_met(targets)
+            and
             self.field >= targets["field"]
             and self.killer_in_field
             and len(self.shortcuts) <= targets["shortcuts"]
@@ -96,6 +120,11 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
     """Everything above, from the ground truth. No model, no solving."""
     from mystery.stats import trail_depths
 
+    if shape == "open":
+        # The model chose the protection (D-192); hide what that choice hides.
+        from mystery.topology import classify
+
+        shape = classify(mystery)
     killer, victim = mystery.killer, mystery.victim
     suspects = [c.id for c in mystery.characters if c.id != victim]
     scene = mystery.murder_scene
@@ -143,6 +172,17 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
         p for p in suspects if before and where(p, before) == where(victim, before)
     }
 
+    # By their own account (D-193): where a liar says they were, where anyone
+    # else was. The room the body was found in is the one thing about the
+    # killing every player is told.
+    found = mystery.found_in
+    said = {
+        p: (mystery.lie_by(p).place if mystery.lie_by(p) and mystery.lie_by(p).slot == hour
+            else where(p, hour))
+        for p in suspects
+    }
+    in_found_room = {p for p, room in said.items() if found and room == found}
+
     opportunity = alone | at_hour
     candidates = {
         "alone": alone,
@@ -153,12 +193,40 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
         "last_with": last_with,
         "only_reason": reason,
         "only_about_victim": about_victim,
+        "found_room": in_found_room,
     }
     argued = sum(
         1
         for s in mystery.secrets
         if s.revealed_by and by.get(s.revealed_by) and not by[s.revealed_by].evidence
     )
+    def chain(secret) -> list:
+        seen, out, step = set(), [], secret
+        while step is not None and step.id not in seen:
+            seen.add(step.id)
+            out.append(step)
+            step = by.get(step.revealed_by) if step.revealed_by else None
+        return out
+
+    def has_object(secret) -> bool:
+        gated = [s for s in chain(secret) if s.revealed_by and by.get(s.revealed_by)]
+        return not gated or any(by[s.revealed_by].evidence for s in gated)
+
+    gates = sum(1 for s in mystery.secrets if s.revealed_by and by.get(s.revealed_by))
+    motive_secret = next((s for s in mystery.secrets if s.is_motive), None)
+    road = {s.id for s in chain(motive_secret)} if motive_secret else set()
+    innocent = [
+        s
+        for s in mystery.secrets
+        if s.damning
+        and s.id not in road
+        and _points_at(s, mystery) not in (killer, victim)
+    ]
+    deepest_innocent = max((_gates_deep(s, by) for s in innocent), default=0)
+    trail_object = not deepest_innocent or any(
+        has_object(s) for s in innocent if _gates_deep(s, by) == deepest_innocent
+    )
+
     hidden = HIDDEN_BY_SHAPE.get(shape, set())
     motive, trail = trail_depths(mystery)
     return Measures(
@@ -170,6 +238,9 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
         liars=len(liars),
         liars_at_hour=len(at_hour),
         argued=argued,
+        gates=gates,
+        motive_object=has_object(motive_secret) if motive_secret else True,
+        trail_object=trail_object,
         shortcuts=[
             name for name, found in candidates.items() if name not in hidden and found == {killer}
         ],
@@ -196,6 +267,11 @@ _FIX = {
     "a secret that would put them on the list on its own.",
     "only_about_victim": "Only the killer has a secret about the victim. At least two "
     "innocents need one too.",
+    "found_room": "The killer is the only one who, by their own account, was in the room "
+    "where the body was found at the murder hour. That room is the one fact about the "
+    "killing everybody is told. Either the body was carried out of the room the killer "
+    "was in, or the killer gives a different room, or somebody innocent puts themselves "
+    "there too.",
 }
 
 
@@ -220,6 +296,17 @@ def complaints(m: Measures, targets: dict[str, int] | None = None) -> list[str]:
             f"The deepest innocent trail is {m.trail} gate(s) deep; it must be at least "
             f"{targets['trail']}: a damning secret about somebody innocent, behind other "
             f"secrets, and not on the road to the killer's motive."
+        )
+    if not m.objects_met(targets):
+        share = targets.get("objects", 0)
+        opened = m.gates - m.argued
+        found.append(
+            f"{opened} of {m.gates} gates open with an object the player can put on the "
+            f"table; at least {share}% must, including at least one on the road to the "
+            f"killer's motive and one on the deepest innocent trail. A gate opens with an "
+            f"object when the secret named in `revealed_by` carries `evidence`."
+            + ("" if m.motive_object else " The road to the motive has none.")
+            + ("" if m.trail_object else " The deepest innocent trail has none.")
         )
     if m.liars_at_hour < targets["liars_at_hour"]:
         found.append(

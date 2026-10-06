@@ -49,28 +49,10 @@ The killer's protection is a **false account of where they were**. They name a \
 room they were not in, at the moment of the murder, and the case is taken apart \
 by establishing that they were somewhere else.
 
-**Three people appear in `false_claims`: the killer, and two innocents who lied \
-for their own reasons.** If the killer is the only one whose account is wrong, \
-then finding the liar is finding the murderer and every secret you have written \
-is decoration.
-
 This is the plainest shape and it lives or dies on the witnesses. The room the \
 killer names must hold **two** other people, all of them concealing something of \
 their own, because a witness with nothing to hide is believed at once and ends \
-the game in a single question.
-
-Two further requirements, both there to stop a rule of thumb solving the case:
-
-**One of the innocent liars must also have been alone.** The killer is \
-unwitnessed at the murder because they were alone with the victim. If every \
-innocent liar can be vouched for, the player stops thinking and asks which liar \
-has no witness, and the answer is always the killer.
-
-**One innocent must lie about the same slot the killer lies about.** The killer \
-lies about the hour they killed in, necessarily, so if theirs is the only lie \
-covering that hour the case reduces to one question. In five real cases out of \
-twelve nobody else was lying about it and a player found that out unprompted, \
-and said the game had a rule of thumb that beat it.\
+the game in a single question.\
 """
 
 
@@ -115,10 +97,8 @@ because the timeline does not support it: they were somewhere else, seen by \
 somebody, at the moment it happened. A confession that cannot be disproved is not \
 a twist, it is a coin flip.
 
-The killer still lies about where they were, and two innocents do as well, so \
-that `false_claims` has three entries and finding a liar is not the same as \
-finding the murderer. The killer still has a motive gated behind another \
-secret. The confession sits on top: it is \
+The killer still lies about where they were, and still has a motive gated \
+behind another secret. The confession sits on top: it is \
 the wrong ending, offered to the player, gift-wrapped, at the moment they are \
 most tired of asking questions.
 
@@ -134,7 +114,9 @@ themselves does not lie about anything.
 
 Give the killer no entry in `false_claims`. They do not need one. Their account \
 of the evening is entirely true, which is why pressing them produces nothing and \
-why the player keeps going back to somebody else.
+why the player keeps going back to somebody else. True is not the same as \
+forthcoming: they are vague about the hour it happened, and the body was carried \
+out of the room where they were.
 
 That somebody else is the framed suspect, and the case against them should be \
 better than the case against the killer. At least two pieces of evidence point \
@@ -182,7 +164,10 @@ THE_CONSPIRACY = """\
 **All of them are lying about the same thing, and it is not the murder.**
 
 Every suspect appears in `false_claims` naming the same room at the same hour, \
-and none of them was there. What they are covering is real, shared, serious, and \
+and none of them was there. **That hour is the murder hour, and it is the only \
+lie each of them tells**: one entry per person, all at that hour, because each \
+person has one account of where they were. The killer's own lie is the shared \
+one. What they are covering is real, shared, serious, and \
 has nothing to do with the death: money they all took, a fire they all caused, a \
 patient or a client or a student they all failed and agreed never to discuss, an \
 affair the whole department protected. Put its id in `covers` for every one of \
@@ -765,6 +750,71 @@ LIBRARY: dict[str, Topology] = {
 
 DEFAULT = "the_lie"
 
+OPEN = """\
+**The killer's protection is yours to choose.** How does the person who did it \
+get through the evening without being caught? These have all worked:
+
+{ways}
+
+Pick one of these or another you can make work, and build the case around it. \
+Whatever you pick, the player has to be able to take it apart, and the targets \
+below still hold.\
+"""
+
+LIBRARY["open"] = Topology(
+    id="open",
+    name="The protection, chosen",
+    blurb="the model picks how the killer is protected (an experiment)",
+    brief=OPEN.format(
+        ways="\n".join(
+            f"- {t.blurb[0].upper() + t.blurb[1:]}."
+            for key, t in sorted(LIBRARY.items())
+            if key != "the_wrong_hour"
+        )
+    ),
+)
+
+# Shapes that exist but are not dealt (D-192). The wrong hour says nobody lies
+# about where they were, and Normal needs two people lying about the murder
+# hour, so a seed dealt it could not pass however it was written. Kept in the
+# library so a case already made with it still plays. `open` is the experiment
+# where the model picks the protection itself, asked for by name only.
+NOT_DEALT = frozenset({"the_wrong_hour", "open"})
+
+
+def dealt() -> list[str]:
+    return sorted(set(LIBRARY) - NOT_DEALT)
+
+
+def classify(mystery: Mystery) -> str:
+    """Which protection a case actually gives its killer, read off the structure.
+
+    For the open experiment (D-192): the model chose, and this says what it
+    chose, so a run can be counted without anybody reading the cases. Checked in
+    order of how specific each sign is.
+    """
+    killer = mystery.killer
+    suspects = {c.id for c in mystery.characters if c.id != mystery.victim}
+    claims = mystery.false_claims
+    if suspects and {c.character for c in claims} >= suspects and len(
+        {(c.place, c.slot) for c in claims}
+    ) == 1:
+        return "the_conspiracy"
+    if mystery.false_confessor and mystery.false_confessor != killer:
+        return "false_confession"
+    if mystery.discovery and mystery.discovery.finder == killer:
+        return "the_finder"
+    mine = [c for c in claims if c.character == killer]
+    if not mine:
+        return "the_frame"
+    if any(
+        c.character != killer and (c.place, c.slot) == (k.place, k.slot)
+        for k in mine
+        for c in claims
+    ):
+        return "mutual_alibi"
+    return "the_lie"
+
 # What `--topology` accepts instead of a shape's name, to mean "one I have not
 # played". Not a member of LIBRARY, and deliberately not spellable as one.
 UNPLAYED = "unplayed"
@@ -778,7 +828,7 @@ def drawn(seed: int) -> str:
     means, exactly like the casting bits. Sorted, so the mapping does not
     silently change the next time a shape is added to the middle of the list.
     """
-    return sorted(LIBRARY)[seed % len(LIBRARY)]
+    return dealt()[seed % len(dealt())]
 
 
 def unplayed(played: Iterable[str], seed: int) -> str:
@@ -802,7 +852,7 @@ def unplayed(played: Iterable[str], seed: int) -> str:
     what comes back depends on the shelf, and that is the honest cost of the
     whole idea (D-103 bought the shorter version and this spends some of it).
     """
-    left = sorted(set(LIBRARY) - set(played))
+    left = sorted(set(dealt()) - set(played))
     if not left:
         return drawn(seed)
     return left[seed % len(left)]

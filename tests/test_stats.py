@@ -60,8 +60,34 @@ def test_yield_and_rejections_are_counted_per_prompt_version(tmp_path) -> None:
 
     text = report(collect(tmp_path))
     assert "PROMPT abcd1234/opus-5" in text
-    assert "drafts 3   shelved 1   yield 33%" in text
+    assert "shelved 1   rejected calls 2" in text
+    assert "about $1.23 per shelved case" in text, "unpriced drafts at the flat estimate"
     assert "A24 1" in text and "structure 1" in text
+
+
+def test_recorded_prices_replace_the_estimate(tmp_path) -> None:
+    """Two stages cost different amounts, so each call carries its own (D-191)."""
+    _shelve(tmp_path, CASE.model_copy(update={"built_with": "v2", "spent_usd": 0.5}))
+    folder = tmp_path / "rejected"
+    folder.mkdir(exist_ok=True)
+    (folder / "k-skeleton-1.json").write_text(
+        json.dumps(
+            {
+                "stage": "skeleton",
+                "usd": 0.15,
+                "built_with": "v2",
+                "complaints": ["x"],
+                "draft": {k: v for k, v in CASE.model_dump(mode="json").items() if k != "title"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    records = collect(tmp_path)
+    text = report(records)
+    assert "$0.65 per shelved case" in text
+    assert "skeleton 1" in text
+    skeleton = next(r for r in records if r.stage == "skeleton")
+    assert not skeleton.fired & {"A11", "A22"}, "the prose stage writes those"
 
 
 def test_a_played_case_is_marked_and_counted_once(tmp_path) -> None:

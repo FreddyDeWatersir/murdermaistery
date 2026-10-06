@@ -1376,19 +1376,28 @@ def the_evidence_is_in_the_holders_hands(mystery: Mystery) -> list[Advisory]:
     for secret in mystery.secrets:
         if not secret.evidence:
             continue
-        for thing in mystery.things:
+        matches = [t for t in mystery.things if _same_object(secret.evidence, t.name)]
+
+        def theirs(thing, secret=secret) -> bool:
             owner = thing.belongs_to
             # The dead are left out on purpose. A living owner will say "that is
             # mine, it has been in my pocket all evening" the moment it is put
             # in front of them, which is what broke the played case. A suspect
             # holding something of the victim's is a story, not a contradiction,
             # and often a very good one.
-            if not owner or owner == secret.holder or owner == mystery.victim:
-                continue
-            if secret.holder in thing.moved_by.values():
-                continue
-            if _same_object(secret.evidence, thing.name):
-                flagged.append((secret, thing, owner))
+            return (
+                not owner
+                or owner in (secret.holder, mystery.victim)
+                or secret.holder in thing.moved_by.values()
+            )
+
+        # Any match in the holder's hands settles it (D-195). Matching is by
+        # words, so "the chit page torn from the kerosene issue book" matched
+        # both the page, which was hers, and the book, which was not, and the
+        # book was flagged: a seed spent two revisions and died on it.
+        if matches and not any(theirs(t) for t in matches):
+            thing = matches[0]
+            flagged.append((secret, thing, thing.belongs_to))
 
     return [
         Advisory(

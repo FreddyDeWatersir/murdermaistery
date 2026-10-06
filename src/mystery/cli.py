@@ -382,6 +382,13 @@ def main(argv: list[str] | None = None) -> int:
         "--topologies", action="store_true", help="list the shapes a case can have and stop"
     )
     parser.add_argument(
+        "--skeleton-only",
+        action="store_true",
+        help="draft one skeleton, judge it, write it to var/skeletons and stop. "
+        "No revision, no prose, nothing shelved: an experiment at a third of the "
+        "price of a case. Prints nothing about the case (D-192)",
+    )
+    parser.add_argument(
         "--no-cache", action="store_true", help="ignore var/mysteries and call the model"
     )
     parser.add_argument(
@@ -481,10 +488,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.stats:
-        from mystery.stats import collect
+        from mystery.stats import collect, experiments
         from mystery.stats import report as stats_report
 
         print(stats_report(collect(), spoilers=args.spoilers))
+        print(experiments())
         return 0
 
     if args.casts:
@@ -567,6 +575,14 @@ def main(argv: list[str] | None = None) -> int:
         topology=args.topology,
         seed=args.seed,
     )
+
+    if args.skeleton_only:
+        from mystery.generator import sketch
+
+        kept = sketch(request, anthropic_drafter())
+        verdict = "passed" if kept["passed"] else f"sent back ({len(kept['complaints'])})"
+        print(f"  Skeleton {verdict}, ${kept['usd']:.2f}. Kept in var/skeletons.")
+        return 0
 
     # The dry run swaps the model for a case that is already in the repo. Every
     # other stage is the real one, parse boundary included (D-070).

@@ -19,12 +19,25 @@ def test_different_seeds_are_dealt_different_hands() -> None:
     assert len(motives) >= 8, "twelve cases should not keep killing for one reason"
 
 
-def test_the_same_seed_in_a_different_house_is_a_different_hand() -> None:
-    """Otherwise every seed 0 case anybody ever runs shares a motive."""
-    theatre = draw(0, "a theatre", "the_lie")
-    salt = draw(0, "a salt works", "the_lie")
+def test_a_batch_of_consecutive_seeds_never_repeats_a_card() -> None:
+    """D-194. Independent draws from a deck of thirty two made three pairs of
+    near-twins in one evening of eight-seed batches. The seed now decides the
+    hand, not the house: seeds are fresh by default, so nobody runs seed 0
+    against four houses any more (D-102)."""
+    from mystery.palette import STANDINGS, occasion
 
-    assert (theatre.motive, theatre.manners) != (salt.motive, salt.manners)
+    for start in (0, 300011, 500001, 999_983):
+        seeds = range(start, start + len(STANDINGS))
+        hands = [draw(s, occasion(s), "the_lie") for s in seeds]
+        assert len({h.standing for h in hands}) == len(STANDINGS)
+        assert len({h.motive for h in hands}) == len(hands)
+        here = [h.where for h in hands if not h.world]
+        assert len(set(here)) == len(here)
+        for a, b in zip(hands, hands[1:], strict=False):
+            assert not set(a.voices) & set(b.voices), "neighbours share no voice"
+            assert not set(a.manners) & set(b.manners)
+        batch = [occasion(s) for s in range(start, start + 8)]
+        assert len(set(batch)) == 8, "eight seeds in a row, eight occasions"
 
 
 def test_nobody_in_a_cast_gets_the_same_manner_twice() -> None:
@@ -631,3 +644,12 @@ def test_every_position_is_dealt_across_seeds() -> None:
 
     assert {killer_position(s) for s in range(200)} == set(POSITIONS)
     assert killer_position(41) == killer_position(41)
+
+
+def test_an_honest_killer_always_moved_the_body_and_others_sometimes() -> None:
+    """D-193: honest about the hour means in the room where it happened."""
+    from mystery.palette import body_moved
+
+    assert all(body_moved(s, "the_frame") and body_moved(s, "the_finder") for s in range(50))
+    share = sum(body_moved(s, "the_lie") for s in range(600)) / 600
+    assert 0.25 < share < 0.42

@@ -579,14 +579,40 @@ def test_the_standing_instructions_do_not_decide_who_lies() -> None:
     assert "the shape wins" in SYSTEM_PROMPT
 
 
-def test_every_shape_says_who_appears_in_false_claims() -> None:
-    """The doctrine moved out of the standing instructions, so each shape now
-    has to carry its own. A shape that says nothing gets whatever the model
-    remembers from the examples, which is how this went wrong."""
+def test_a_shape_says_how_the_killer_is_protected_and_not_who_else_lies() -> None:
+    """Counting innocent liars moved to the targets, and how they lie to a dealt
+    hand (D-192). The conspiracy is the exception: it is a lie everybody tells."""
     from mystery.topology import LIBRARY
 
     for name, shape in LIBRARY.items():
-        assert "false_claims" in shape.brief, f"{name} does not say who lies"
+        if name == "the_conspiracy":
+            continue
+        assert "two innocents" not in shape.brief, f"{name} still counts the innocents"
+        assert "three entries" not in shape.brief, name
+
+
+def test_the_innocents_are_dealt_distinct_kinds_of_lie() -> None:
+    from mystery.generator import _user_prompt
+    from mystery.palette import HAND, LIES, innocent_lies
+
+    hand = innocent_lies(7)
+    assert len(set(hand)) == HAND and set(hand) <= set(LIES)
+    assert {k for s in range(200) for k in innocent_lies(s)} == set(LIES)
+    prompt = _user_prompt(GenerationRequest(setting="a house", seed=7, topology="the_lie"))
+    assert LIES[hand[0]] in prompt and "never use the same kind twice" in prompt
+    together = _user_prompt(GenerationRequest(setting="a house", seed=7, topology="the_conspiracy"))
+    assert LIES[hand[0]] not in together
+
+
+def test_a_skeleton_alone_is_judged_and_written_down(tmp_path) -> None:
+    from mystery.generator import sketch
+
+    kept = sketch(REQUEST, _staged([_bones()], usd=0.25), var=tmp_path)
+    # Wouter and Ilse both claim the corridor at the interval, which is what the
+    # mutual alibi check (T1) counts as one person backing the other.
+    assert kept["passed"] and kept["protection"] == "mutual_alibi"
+    stored = json.loads(next((tmp_path / "skeletons").glob("*.json")).read_text("utf-8"))
+    assert stored["usd"] == pytest.approx(0.25)
 
 
 def test_the_prompt_does_not_ask_for_what_nothing_shows() -> None:
@@ -1160,3 +1186,156 @@ def test_the_position_is_stamped_from_the_deal_and_told_to_the_model() -> None:
 
     assert in_its_world(scribbled, request).killer_position == killer_position(41)
     assert POSITIONS[killer_position(41)] in _user_prompt(request)
+
+
+# --- two stages (D-191) ----------------------------------------------------------
+
+
+def _bones() -> dict:
+    from mystery.generator import _bare
+
+    return _bare(Mystery.model_validate(SHIPPED))
+
+
+def _prose_for(bones: dict, *, skip_voice_of: str = "") -> dict:
+    """Everything the prose stage writes, for a skeleton, filled in plainly."""
+    victim = bones["victim"]
+    people = [c["id"] for c in bones["characters"]]
+    return {
+        "title": "Opening Night",
+        "investigator": {"role": "An assessor", "why_here": "a claim", "standing": "none"},
+        "commission": "Find out what happened at the interval.",
+        "common_ground": ["It is opening night."],
+        "characters": [
+            {"id": victim, "look": "a man of fifty five"}
+            if who == victim
+            else {
+                "id": who,
+                "look": "somebody",
+                "wants": "something",
+                "manner": "a manner",
+                **({} if who == skip_voice_of else {"voice": "short"}),
+                "under_pressure": "goes quiet",
+                "impressions": {victim: "He was hard work."},
+                # Structure in the prose is ignored, not applied.
+                "role": "the prose tried to recast this",
+            }
+            for who in people
+        ],
+        "secrets": [{"id": s["id"], "breaks_when": "once it is out"} for s in bones["secrets"]],
+        "lies": [
+            {"character": c["character"], "slot": c["slot"], "admits_when": "once caught"}
+            for c in bones["false_claims"]
+        ],
+        "accounts": [{"constraint": "the_sacking", "character": "tomas", "says": "He sacked me."}],
+    }
+
+
+def _staged(skeletons: list[dict], proses: list[dict] | None = None, usd: float = 0.1):
+    from mystery.generator import Staged
+
+    calls = {"skeleton": [], "prose": []}
+    queue = list(skeletons)
+    pqueue = list(proses or [])
+
+    def skeleton(_request, complaints, previous):
+        calls["skeleton"].append((list(complaints), previous))
+        staged.last_usd = usd
+        return queue.pop(0) if queue else skeletons[-1]
+
+    def prose(_request, bones, complaints, previous):
+        calls["prose"].append((list(complaints), previous))
+        staged.last_usd = usd * 2
+        if pqueue:
+            return pqueue.pop(0)
+        return proses[-1] if proses else _prose_for(bones)
+
+    staged = Staged(skeleton=skeleton, prose=prose)
+    staged.calls = calls
+    return staged
+
+
+def test_the_skeleton_tool_has_no_prose_and_starts_with_the_premise() -> None:
+    from mystery.generator import PROSE_CHARACTER, PROSE_TOP, _skeleton_schema
+
+    schema = _skeleton_schema()
+    assert next(iter(schema["properties"])) == "premise"
+    assert not set(PROSE_TOP) & set(schema["properties"])
+    assert not set(PROSE_CHARACTER) & set(schema["$defs"]["Character"]["properties"])
+    assert "breaks_when" not in schema["$defs"]["Secret"]["properties"]
+    assert "how_it_opens" in schema["$defs"]["Secret"]["properties"]
+
+
+def test_a_staged_draft_is_the_skeleton_dressed_and_says_what_it_cost() -> None:
+    drafter = _staged([_bones()], usd=0.1)
+    case = generate(REQUEST, drafter=drafter)
+
+    assert len(drafter.calls["skeleton"]) == 1 and len(drafter.calls["prose"]) == 1
+    tomas = next(c for c in case.characters if c.id == "tomas")
+    assert tomas.voice == "short"
+    assert tomas.role == "The director", "the prose cannot recast anybody"
+    assert case.placements == Mystery.model_validate(SHIPPED).placements
+    assert case.spent_usd == pytest.approx(0.3)
+
+
+def test_a_skeleton_short_of_normal_is_revised_from_its_own_previous_version(
+    monkeypatch,
+) -> None:
+    """The redraft used to be told to "change nothing else" about a draft it was
+    never shown (D-191)."""
+    import mystery.measures
+    from mystery.generator import _bare
+
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    short = _bare(Mystery.model_validate(_SHORT))
+    drafter = _staged([short, _bones()])
+    generate(REQUEST, drafter=drafter)
+
+    (first, none), (told, previous) = drafter.calls["skeleton"]
+    assert first == [] and none is None
+    assert previous == short, "the revision is handed what it wrote"
+    assert any("only person lying about the murder hour" in c for c in told)
+
+
+def test_missing_prose_is_mended_without_a_new_skeleton() -> None:
+    bones = _bones()
+    drafter = _staged([bones], [_prose_for(bones, skip_voice_of="ilse"), _prose_for(bones)])
+    generate(REQUEST, drafter=drafter)
+
+    assert len(drafter.calls["skeleton"]) == 1
+    complaints, previous = drafter.calls["prose"][1]
+    assert any("'ilse'" in c and "`voice`" in c for c in complaints)
+    assert previous is not None
+
+
+def test_a_skeleton_that_passed_is_kept_when_the_prose_never_does(tmp_path) -> None:
+    bones = _bones()
+    cache = tmp_path / "mysteries"
+    with pytest.raises(GenerationFailed):
+        generate(
+            REQUEST,
+            drafter=_staged([bones], [_prose_for(bones, skip_voice_of="ilse")]),
+            cache_dir=cache,
+        )
+
+    kept = json.loads(next((tmp_path / "review").glob("*.json")).read_text(encoding="utf-8"))
+    assert kept["stage"] == "skeleton"
+    rejected = [
+        json.loads(p.read_text(encoding="utf-8")) for p in (tmp_path / "rejected").glob("*.json")
+    ]
+    assert {r["stage"] for r in rejected} == {"prose"}
+    assert all(r["usd"] == pytest.approx(0.2) for r in rejected)
+
+
+def test_a_revision_names_what_already_passes(monkeypatch) -> None:
+    import mystery.measures
+    from mystery.generator import _holding, _revision
+    from mystery.solver import solve
+
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+
+    held = _holding(solve(Mystery.model_validate(SHIPPED)), "the_lie")
+    assert "3 suspects with a reason and the chance" in held
+    text = _revision({"premise": "x"}, ["a problem"], held, "skeleton")
+    assert "YOUR PREVIOUS SKELETON" in text and '"premise": "x"' in text
+    assert "a problem" in text and held in text
