@@ -1226,6 +1226,12 @@ font-size:11px;width:100%}
 table.tl th{font-weight:500;color:var(--muted);font-size:9.5px;letter-spacing:.09em;
 text-transform:uppercase;padding:2px 4px;text-align:center;white-space:nowrap}
 table.tl th.rm{text-align:left;max-width:96px;white-space:normal;line-height:1.3}
+/* Rooms by their letters, like people (D-197), and pinned to the left so the
+   row stays readable however far the hours scroll. */
+table.tl th.rm{width:34px;max-width:34px;text-align:center;position:sticky;left:0;
+z-index:1;background:var(--panel);font-size:10.5px;letter-spacing:.06em;color:var(--ink)}
+table.tl th.rm.clickable{color:var(--cool)}
+.key.rooms{margin-top:6px}
 table.tl td{background:var(--panel2);border:1px solid var(--rule);border-radius:5px;
 min-width:44px;height:34px;padding:3px;text-align:center;vertical-align:middle}
 table.tl tr.gap td{background:transparent;border-style:dashed}
@@ -1401,6 +1407,7 @@ letter-spacing:.04em;cursor:pointer}
 #plan text.rn{fill:var(--muted);font-family:var(--mono);font-size:9px;
 letter-spacing:.06em;text-anchor:start;text-transform:uppercase}
 #plan .room.seen text.rn{fill:var(--ink)}
+#plan text.rn .rt{font-weight:700;fill:var(--ink)}
 #plan text.who{fill:var(--ink);font-family:var(--mono);font-size:11px;
 font-weight:600;text-anchor:middle}
 #plan text.who.bad{fill:var(--bad)}
@@ -2307,6 +2314,31 @@ function pencilledIn(slot,place){
    ("19:00, the papers come out", "First Bell — the seating", "Vespers") and
    the whole of each one across the top made the grid scroll sideways. The full
    name stays on the map's hour buttons and in the tooltip here. */
+/* Two or three letters per room, the way people get initials (D-197), so the
+   timeline's left column is a sliver instead of a third of the panel. Initials
+   of the words that matter; a one-word room takes its first two letters; a
+   clash takes more of the name until it is unique. */
+let ROOMTAGS=null;
+function roomTags(){
+  if(ROOMTAGS)return ROOMTAGS;
+  const small=/^(the|of|and|a|an|at|to|in|on|off|by|with|behind|under|facing|where|de|del|della|di|la|le|les|du|des|el|los|las|von|van|der)$/i;
+  const taken={},out={};
+  (S.places||[]).forEach(p=>{
+    const words=String(p.name||p.id).split(/[,(]/)[0].replace(/[^\\p{L}\\p{N}\\s'-]/gu,' ')
+      .split(/[\\s-]+/).filter(w=>w&&!small.test(w));
+    const flat=words.join('').toUpperCase()||String(p.id).toUpperCase();
+    const tries=[];
+    if(words.length>1)tries.push(words.slice(0,3).map(w=>w[0]).join('').toUpperCase());
+    tries.push(flat.slice(0,2));
+    if(words.length>1)tries.push((words[0].slice(0,2)+words[words.length-1][0]).toUpperCase());
+    tries.push(flat.slice(0,3));
+    let tag=tries.find(x=>x&&!taken[x]);
+    for(let i=2;!tag;i++)if(!taken[flat.slice(0,2)+i])tag=flat.slice(0,2)+i;
+    taken[tag]=1;out[p.id]=tag;
+  });
+  return ROOMTAGS=out;
+}
+
 function shortLabel(label){
   const l=String(label||'');
   const clock=l.match(/\\b\\d{1,2}[:.h]\\d{2}\\b/);
@@ -2532,9 +2564,10 @@ function plan(n){
       '" width="'+CW.toFixed(1)+'" height="'+CH.toFixed(1)+'"/>'+
       // "Dressing Corridor" in a narrow cell would run out through the wall.
       '<text class="rn" font-size="'+
-      Math.max(6,Math.min(9,(CW-16)/(p.name.length*0.66))).toFixed(1)+
+      Math.max(6,Math.min(9,(CW-16)/((p.name.length+4)*0.66))).toFixed(1)+
       '" x="'+(q.x+8).toFixed(1)+'" y="'+
-      (q.y+15).toFixed(1)+'">'+esc(p.name)+'</text>'+
+      (q.y+15).toFixed(1)+'"><tspan class="rt">'+esc(roomTags()[p.id])+'</tspan> '+
+      esc(p.name)+'</text>'+
       shown.map((x,i)=>{
         const span=(shown.length-1)*21;
         return '<text class="who'+(x.pencil?' pencil':x.disputed?' bad':(dead.has(x.tag)?' dead':''))+
@@ -2582,7 +2615,8 @@ function viewMap(n){
       esc(shortLabel(t.label))+'</th>').join('')+'</tr>';
   S.places.forEach(p=>{
     h+='<tr><th class="rm'+(p.scene?' clickable" data-scene="'+esc(p.scene)+
-      '" data-room="'+esc(p.name):'')+'">'+esc(p.name)+'</th>'+S.times.map(t=>{
+      '" data-room="'+esc(p.name):'')+'" title="'+esc(p.name)+'">'+
+      esc(roomTags()[p.id])+'</th>'+S.times.map(t=>{
       const cell=((T[t.id]||{})[p.id])||[];
       return '<td data-slot="'+esc(t.id)+'" data-place="'+esc(p.id)+'"'+
         (pencilWho?' class="pen"':'')+'>'+cell.map(x=>'<span class="pin'+(x.disputed?' bad':
@@ -2598,7 +2632,7 @@ function viewMap(n){
   // nothing (D-106). The empty grid above is worth showing: it is the shape of
   // the evening and the player can see the building. This row is not.
   if(Object.keys(T).length)
-  h+='<tr class="gap"><th class="rm">unaccounted for</th>'+S.times.map(t=>
+  h+='<tr class="gap"><th class="rm" title="unaccounted for">?</th>'+S.times.map(t=>
     '<td>'+((M[t.id]||[]).map(x=>'<span class="pin off" title="'+esc(x.name)+
       ' — nobody has placed them here yet">'+esc(x.tag)+'</span>').join(''))+
     '</td>').join('')+'</tr>';
@@ -2608,6 +2642,8 @@ function viewMap(n){
   // of the thing they explain. Only visible before the first answer, which is
   // exactly when a new player is looking.
   h+='</table></div>';
+  h+='<div class="key rooms">'+S.places.map(p=>'<span><b>'+esc(roomTags()[p.id])+'</b>'+
+    esc(p.name)+'</span>').join('')+'<span><b>?</b>unaccounted for</span></div>';
   h+='<div class="key">'+K.map(k=>'<span><b>'+esc(k.tag)+'</b>'+esc(k.name)+
     (k.dead?' (the deceased)':'')+'</span>').join('')+'</div>';
   return h+'<div class="empty" style="margin-top:12px">Only what somebody has '+

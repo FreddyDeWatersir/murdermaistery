@@ -5232,3 +5232,17 @@ From the player, after a run of playtests:
 
 Agreed and not yet built: French and Italian on demand, one language per room
 (translate a finished case once; the page text into a dictionary).
+
+## D-197 Rooms by their letters
+**Date:** 2026-10-06
+**Status:** active
+
+The timeline's left column carried each room's full name ("The kitchen with
+the long table", "The board passage to the sauna block") and took a third of
+the panel. Rooms now get letters the way people get initials: the initials of
+the words that matter, filler words and anything after a comma left out, a
+one-word room taking its first two letters, a clash taking more of the name.
+The column is pinned to the left so it stays put when the hours scroll, the
+legend sits under the grid beside the people's, the full name is in the
+tooltip, and the plan writes the letters in front of each room's name so the
+two are learned together. Checked against sixteen real floor plans: no clash.

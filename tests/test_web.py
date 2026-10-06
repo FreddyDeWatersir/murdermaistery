@@ -982,3 +982,12 @@ def test_the_tags_name_who_they_are_so_a_pencil_can_place_them() -> None:
     client = TestClient(build_app(Case(solve(CASE, seed=0), id="t"), lambda s, q: quiet))
     tags = client.get("/state").json()["notebook"]["tags"]
     assert {t["id"] for t in tags} == {c.id for c in CASE.characters}
+
+
+def test_rooms_are_letters_on_the_timeline_with_a_legend() -> None:
+    """D-197: the room names down the side took a third of the panel."""
+    from mystery.web import PAGE
+
+    assert "function roomTags" in PAGE
+    assert 'class="key rooms"' in PAGE
+    assert "esc(roomTags()[p.id])+'</th>'" in PAGE
