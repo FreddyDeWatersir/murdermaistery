@@ -73,6 +73,9 @@ class Brief:
     # arrived where five people knew Mohanan had witnessed a will in 2011 and
     # Mohanan was the only one who had not been told (D-137).
     role: str = ""
+    # Their age now (D-201), so nobody improvises having been a child at
+    # something they were forty at.
+    age: int | None = None
     wants: str = ""
     manner: str = ""
     voice: str = ""
@@ -497,7 +500,51 @@ def build_brief(
     # actually know, in the third person, with a fence around it.
     asking = []
     if mystery.investigator and mystery.investigator.role.strip():
-        asking = [f"They are: {mystery.investigator.role.strip()}"]
+        you = mystery.investigator
+        role = you.role.strip()
+        if you.name.strip():
+            # "Brother Lope, a Benedictine", not "Brother Lope, A Benedictine".
+            first, _, rest = role.partition(" ")
+            if first in ("A", "An", "The"):
+                role = f"{first.lower()} {rest}"
+            role = f"{you.name.strip()}, {role}"
+        asking = [f"They are: {role}"]
+
+    # The old business as a roster (D-201), so that "who stood in that choir"
+    # and "how old was everybody" have one answer, the same for everybody. Each
+    # person hears the presences the house knows of, and their own.
+    asker = (
+        mystery.investigator.name.strip()
+        if mystery.investigator and mystery.investigator.name.strip()
+        else "the person asking you questions"
+    )
+    for event in mystery.history:
+        heard = [p for p in event.present if p.known or p.who == character]
+        when = (
+            "Earlier this year" if event.years_ago == 0
+            else "A year ago" if event.years_ago == 1
+            else f"{event.years_ago} years ago"
+        )
+
+        def who_was(p) -> str:
+            if p.who == character:
+                return "you"
+            return asker if p.who == "investigator" else names.get(p.who, p.who)
+
+        there = [
+            f"{who_was(p)} (then {p.age_then}{', ' + p.role if p.role else ''})"
+            for p in heard
+        ]
+        line = f"{when}: {event.what}." + (
+            f" Of the people here tonight, these were there: {'; '.join(there)}. "
+            f"Nobody else here tonight is known to have been there."
+            if there
+            else " Nobody here tonight is known to have been there."
+        )
+        mine = next((p for p in event.present if p.who == character and not p.known), None)
+        if mine:
+            line += " The house does not know you were there."
+        common.append(line)
 
     roster = []
     for other in mystery.characters:
@@ -603,6 +650,7 @@ def build_brief(
         character=character,
         name=names.get(character, character),
         role=person.role if person else "",
+        age=person.age if person else None,
         on_the_table=on_the_table,
         wants=person.wants if person else "",
         manner=person.manner if person else "",
@@ -883,6 +931,7 @@ def render_person(brief: Brief) -> str:
         f"claim about where anybody stood."
         if brief.role
         else "",
+        f"  You are {brief.age} years old." if brief.age is not None else "",
         f"  You want: {brief.wants}" if brief.wants else "",
         f"  Your manner: {brief.manner}" if brief.manner else "",
         # How the sentences come out. Above the manner in weight, because a

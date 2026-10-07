@@ -441,6 +441,52 @@ def test_the_state_carries_everything_the_briefing_needs() -> None:
     assert [s["role"] for s in got["suspects"]], "the roster needs roles"
 
 
+def test_the_briefing_names_the_player() -> None:
+    """D-198: the suspects call the player by name, so the file must say whose
+    name that is, near the top and not only in the role at the bottom."""
+    from fastapi.testclient import TestClient
+
+    from mystery.models import Investigator
+    from mystery.solver import solve
+    from mystery.web import PAGE, Case, build_app
+
+    you = Investigator(name="Brother Lope", role="A cantor of Sahagún")
+    mystery = solve(CASE, seed=0).model_copy(update={"investigator": you})
+    case = Case(mystery, id="named", setting="a monastery in the snow")
+    client = TestClient(build_app(case, lambda s, q: {"speech": "", "used": [], "refused": True}))
+
+    assert client.get("/state").json()["you"]["name"] == "Brother Lope"
+    assert "'You are <b>'+esc(you.name)" in PAGE
+
+
+def test_the_file_says_what_was_found_with_the_body() -> None:
+    """D-199: what lay in the room of the finding at the last hour is told at
+    the door; what was elsewhere then, or only passed through, is not."""
+    from fastapi.testclient import TestClient
+
+    from mystery.models import Thing
+    from mystery.solver import solve
+    from mystery.web import PAGE, Case, build_app
+
+    base = solve(CASE, seed=0)
+    room, last = base.found_in, base.slots[-1].id
+    other = next(p.id for p in base.places if p.id != room)
+    first = base.slots[0].id
+    things = [
+        Thing(id="case", name="A stylus-case", where={first: other, last: room}),
+        Thing(id="mortar", name="A bronze mortar", where={first: room, last: other}),
+    ]
+    mystery = base.model_copy(update={"things": things})
+    assert [t.id for t in mystery.found_with] == ["case"]
+
+    case = Case(mystery, id="found", setting="a monastery in the snow")
+    client = TestClient(build_app(case, lambda s, q: {"speech": "", "used": [], "refused": True}))
+    got = client.get("/state").json()
+    if got["discovery"] is not None:
+        assert got["discovery"]["found"] == ["A stylus-case"]
+    assert "Found with the body" in PAGE
+
+
 def test_the_briefing_holds_no_secret() -> None:
     """It is what a person arriving would have been told at the door. Nothing in
     it is evidence, and the suspects have had every word of it from the start."""

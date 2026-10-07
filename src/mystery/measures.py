@@ -45,8 +45,14 @@ NORMAL = {
     "trail": 2,
     "liars_at_hour": 2,
     # Per cent of gates opened by an object, with at least one on the road to
-    # the motive and one on the deepest innocent trail (D-193).
-    "objects": 50,
+    # the motive and one on the deepest innocent trail (D-193). A third since
+    # D-203: objects help, they are not the case.
+    "objects": 33,
+    # Fewest people who could have moved an object the killer could have moved
+    # (D-202). Hard will ask three.
+    "movers": 2,
+    # Whether the objects must play the roles they were dealt (D-203).
+    "dealt_objects": 1,
 }
 
 # What the generation gate holds a draft to (D-188). Normal until difficulty is
@@ -95,6 +101,12 @@ class Measures:
     motive_object: bool = True
     trail_object: bool = True
     shortcuts: list[str] = listed(default_factory=list)
+    # For every object move the killer could have made: how many people could
+    # have made it (D-202). One is the killer, named by an object.
+    movers: list[int] = listed(default_factory=list)
+
+    def movers_met(self, targets: dict[str, int] = NORMAL) -> bool:
+        return all(n >= targets.get("movers", 0) for n in self.movers)
 
     def objects_met(self, targets: dict[str, int] = NORMAL) -> bool:
         share = targets.get("objects", 0)
@@ -106,6 +118,7 @@ class Measures:
     def meets(self, targets: dict[str, int] = NORMAL) -> bool:
         return (
             self.objects_met(targets)
+            and self.movers_met(targets)
             and
             self.field >= targets["field"]
             and self.killer_in_field
@@ -114,6 +127,81 @@ class Measures:
             and self.trail >= targets["trail"]
             and self.liars_at_hour >= targets["liars_at_hour"]
         )
+
+
+@dataclass
+class Move:
+    """An object leaving a room, and who could have taken it (D-202)."""
+
+    thing: str
+    name: str
+    room: str
+    slot: str
+    could: set[str]
+
+
+def possible_movers(mystery: Mystery) -> list[Move]:
+    """Every object move the killer could have made, with everybody who could.
+
+    Who could have taken a thing out of a room is everybody who was in that
+    room between the last time somebody other than its mover saw it there and
+    the hour it was gone. Not "who was in the room the hour it moved": in the
+    Oath, a witness who saw the stylus-case on the bench at collation pinned it
+    there an hour before it vanished, and left the killer alone with it (D-198).
+
+    The victim takes nothing. A move the killer could not have made is an
+    innocent's business and is not counted here.
+    """
+    victim, killer = mystery.victim, mystery.killer
+    ordered = [s.id for s in sorted(mystery.slots, key=lambda s: s.index)]
+    living = {p: rows for p, rows in mystery.placements.items() if p != victim}
+
+    def in_room(room: str, slot: str) -> set[str]:
+        return {p for p, rows in living.items() if rows.get(slot) == room}
+
+    moves: list[Move] = []
+    for thing in mystery.things:
+        for i in range(1, len(ordered)):
+            before, after = ordered[i - 1], ordered[i]
+            room, then = thing.where.get(before), thing.where.get(after)
+            if room is None or then is None or room == then:
+                continue
+            mover = thing.moved_by.get(after)
+            seen = next(
+                (j for j in range(i - 1, -1, -1) if in_room(room, ordered[j]) - {mover}),
+                -1,
+            )
+            could = set().union(*(in_room(room, ordered[j]) for j in range(seen + 1, i + 1)))
+            if killer in could:
+                moves.append(Move(thing.id, thing.name, room, after, could))
+    return moves
+
+
+def mover_complaints(mystery: Mystery, targets: dict[str, int] | None = None) -> list[str]:
+    """Objects that name the killer, said so the redraft can fix them (D-202).
+
+    Soft: sent back while there are drafts left, and a case still like this
+    after the last one is kept and counted easier, not thrown away.
+    """
+    least = (targets if targets is not None else GATE).get("movers", 0)
+    names = {c.id: c.name for c in mystery.characters}
+    places = {p.id: p.name for p in mystery.places}
+    labels = {s.id: s.label for s in mystery.slots}
+    out = []
+    for move in possible_movers(mystery):
+        if len(move.could) >= least:
+            continue
+        who = ", ".join(sorted(names.get(p, p) for p in move.could))
+        out.append(
+            f"`{move.thing}` leaves {places.get(move.room, move.room)} at "
+            f"{labels.get(move.slot, move.slot)}, and only {len(move.could)} "
+            f"{'person' if len(move.could) == 1 else 'people'} could have taken it "
+            f"({who}), the killer among them; at least {least} must have had the "
+            f"chance. Put somebody else through that room between the last time it "
+            f"was seen there and then, or let nobody see it there for longer, or do "
+            f"not move it at all."
+        )
+    return out
 
 
 def measure(mystery: Mystery, shape: str = "") -> Measures:
@@ -244,6 +332,7 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
         shortcuts=[
             name for name, found in candidates.items() if name not in hidden and found == {killer}
         ],
+        movers=[len(m.could) for m in possible_movers(mystery)],
     )
 
 

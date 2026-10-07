@@ -12,6 +12,8 @@ The other half, that every character has *some* placement in every slot, is not
 free. Nothing here stops a hole in the grid. That is a rule, not a type.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 CharacterId = str
@@ -69,6 +71,10 @@ class Character(BaseModel):
     gender: str = ""
     impressions: dict[CharacterId, str] = Field(default_factory=dict)
     look: str = ""
+    # A number, from the skeleton (D-201). In the prose only, a woman of
+    # fifty-six was "a girl of nineteen" twelve years ago and nothing could
+    # notice. As a number it can be subtracted.
+    age: int | None = None
 
 
 class Slot(BaseModel):
@@ -182,11 +188,39 @@ class Thing(BaseModel):
     moved_by: dict[SlotId, CharacterId] = Field(default_factory=dict)
     # What its path is worth knowing. One sentence, for the reveal.
     matters: str = ""
+    # Which dealt role it plays (D-203): residue, killer_trace, misleading,
+    # carried, weapon. Empty on every case before the deck.
+    role: str = ""
 
     @property
     def moves(self) -> int:
         seen = list(self.where.values())
         return sum(1 for a, b in zip(seen, seen[1:], strict=False) if a != b)
+
+
+_ONES = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+    "seventeen", "eighteen", "nineteen",
+]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+
+def age_words(n: int) -> list[str]:
+    """Ways an age is written in prose: "61", "sixty-one", "sixty one" (D-201)."""
+    if n < 0 or n > 119:
+        return [str(n)]
+    if n < 20:
+        word = [_ONES[n]]
+    elif n < 100:
+        tens, ones = divmod(n, 10)
+        word = [_TENS[tens]] if not ones else [f"{_TENS[tens]}-{_ONES[ones]}",
+                                                f"{_TENS[tens]} {_ONES[ones]}"]
+    else:
+        rest = n - 100
+        tail = age_words(rest)[1:] if rest >= 20 or rest == 0 else [_ONES[rest]]
+        word = [f"a hundred and {t}" for t in tail if t != "zero"] or ["a hundred"]
+    return [str(n), *word]
 
 
 def with_article(name: str) -> str:
@@ -283,6 +317,42 @@ def with_doors_both_ways(places: list[Place]) -> list[Place]:
     ]
 
 
+# How old somebody was at a past event, in the three words that matter for what
+# they could have done there (D-201). Bounds overlap at sixteen to nineteen on
+# purpose: a novice of seventeen can be either.
+STAGES: dict[str, tuple[int, int]] = {"child": (3, 12), "youth": (13, 19), "adult": (16, 200)}
+Stage = Literal["child", "youth", "adult"]
+
+
+class Presence(BaseModel):
+    """One person at a past event (D-201)."""
+
+    # A character id, or "investigator" for the player.
+    who: str
+    age_then: int
+    stage: Stage
+    # What they were there, in a few words: "a brother of the choir", "a girl
+    # in the stalls". Said to anybody who knows they were there.
+    role: str = ""
+    # Whether the house knows they were there. A presence nobody knows about is
+    # told only to the person themselves.
+    known: bool = True
+
+
+class PastEvent(BaseModel):
+    """The old business, as a roster (D-201).
+
+    "Four of us stood in that choir" left the case to say who, and five suspects
+    each said someone different. Here the who is a list, the when is a number,
+    and a count in the prose has something to agree with.
+    """
+
+    id: str
+    what: str
+    years_ago: int
+    present: list[Presence] = Field(default_factory=list)
+
+
 class Investigator(BaseModel):
     """Who the player is tonight, and why anybody is talking to them (D-101).
 
@@ -297,8 +367,13 @@ class Investigator(BaseModel):
     The compliance model is not authority: it is that the police are an hour away
     and everybody would rather their version reached them first, through
     somebody, than be the subject of somebody else's.
+
+    `name` came last (D-198): the suspects call the player by it, and a player
+    who only read "a Benedictine of Sahagún" at the bottom of the file did not
+    know that "Brother Lope" was them. Empty on every case before it.
     """
 
+    name: str = ""
     role: str = ""
     why_here: str = ""
     standing: str = ""
@@ -383,6 +458,8 @@ class Mystery(BaseModel):
     # can be somewhere, and therefore the second thing anybody can be wrong
     # about.
     things: list[Thing] = Field(default_factory=list)
+    # The old business, with who was there and how old (D-201).
+    history: list[PastEvent] = Field(default_factory=list)
     # What people say happened in the scenes they were in (D-132). The third
     # thing that can be wrong, and the first that can be wrong innocently.
     accounts: list[Account] = Field(default_factory=list)
@@ -440,6 +517,20 @@ class Mystery(BaseModel):
             return self.discovery.place
         scene = self.murder_scene
         return scene.place if scene is not None else None
+
+    @property
+    def found_with(self) -> "list[Thing]":
+        """What lay in the room with the body when it was found (D-199).
+
+        The first thing anyone at the door would be told, and the natural first
+        question about an object: when did that get there? Read off the paths,
+        at the last hour, in the room of the finding.
+        """
+        room = self.found_in
+        if room is None or not self.slots:
+            return []
+        last = self.slots[-1].id
+        return [t for t in self.things if t.where.get(last) == room]
 
     @property
     def body_moved(self) -> bool:

@@ -43,12 +43,15 @@ from mystery import measures
 from mystery.models import Mystery
 from mystery.palette import (
     LIES,
+    OBJECT_ROLES,
     POSITIONS,
     body_moved,
     commission,
     innocent_lies,
     killer_position,
     murder_slot,
+    object_hand,
+    scene_object,
     world_for,
 )
 from mystery.palette import draw as draw_palette
@@ -426,6 +429,18 @@ MATERIAL FOR THIS CASE is the usual thread between them. **The victim should \
 have been working on all of them, tonight**: five things happening this evening, \
 not five old grievances.
 
+**Ages and the old business are numbers.** Give every person, the victim too, \
+an `age`. Somebody is over sixty; somebody is under twenty five. Put the old \
+business dealt under MATERIAL FOR THIS CASE in `history`: `what` happened, \
+exactly how many `years_ago`, and who of the people here was there \
+(`present`), each with `age_then` (their `age` now minus the years, to the \
+year), `stage` (child up to twelve, youth thirteen to nineteen, adult from \
+sixteen; it must fit `age_then`), `role` (what they were there, in a few \
+words) and `known: false` if the house does not know they were there. The \
+questioner may be there too, as `"investigator"`. Anybody not in `present` \
+was not there. A number of people never stands in for their names: if the \
+story says "four of us", the four are in `present`.
+
 **Build depth as an order of discovery, not as a lock on a box.** The first \
 thing is something anybody would let slip. The second is what that first thing \
 gives you leverage to ask about. The third is what somebody will only say once \
@@ -514,7 +529,10 @@ the evening carries on around a room nobody goes into again.
 - Fill in `discovery`: who found the body, in which room, and a sentence about \
 how, after the last slot.
 - `things` are objects whose whereabouts matter, with where each one is in each \
-slot. A secret's `evidence` is something its holder could actually produce.
+slot, and the `role` each was dealt under THE OBJECTS. A secret's `evidence` is \
+something its holder could actually produce. Objects help a player build the \
+picture and open secrets, and no object names the killer on its own: object, \
+then a fact, then testimony, then a person.
 
 Design rules:
 
@@ -607,7 +625,8 @@ know, they were told.
 
 **`title`** takes the form dealt under MATERIAL FOR THIS CASE.
 
-**`investigator`** is the person the player is tonight: `role` (what they are, \
+**`investigator`** is the person the player is tonight: `name` (the name the \
+household calls them by, the same one the premise uses), `role` (what they are, \
 in a few words), `why_here` (the reason they were in this building before \
 anybody died, or arrived within the hour), and `standing` (what they can and \
 cannot do). They are **never police**: they cannot arrest, charge or compel \
@@ -621,9 +640,9 @@ request describes under WHAT THEY ASKED YOU FOR.
 **For every suspect** (`characters`, by id): `look`, `wants`, `manner`, \
 `voice`, `under_pressure` and `impressions`. For the victim, `look` only.
 
-`look` is one sentence: roughly how old, build, and how they are dressed this \
-evening. Be concrete, and vary it. Somebody is over sixty. Somebody is under \
-twenty five.
+`look` is one sentence that opens with their `age` from the skeleton, in \
+words ("Sixty-one, long and stooped…"), then build, and how they are dressed \
+this evening. Be concrete, and vary it.
 
 `wants` is private: what they are actually after tonight. **Make it something \
 tonight can still change, and something another person could imaginably help \
@@ -683,7 +702,8 @@ would say the same way. What the gathering is, what happens in the morning, how 
 long people have been here, who pays for it. **Every number that matters goes \
 here and nowhere else**, because each suspect is forbidden to invent a figure \
 that is not in it. Write no secret here: this is only what is said out loud at \
-breakfast.
+breakfast. When the old business in `history` comes up, name who was there \
+(only the `known` ones) and how old they were, never a count instead of names.
 
 Two things make a case feel alive at the table, and both are cheap. Every \
 character has a manner that survives contact with a hostile question. And every \
@@ -869,6 +889,14 @@ def _targets(shape: str = "", gate: dict[str, int] | None = None) -> str:
             f"`revealed_by` carries `evidence`. Not every secret needs one, but a "
             f"case the player can only argue open is a case of talk."
         )
+    if gate.get("movers"):
+        rules.append(
+            f"- **No object names the killer.** If the killer could have moved a "
+            f"thing out of a room, at least {gate['movers']} people must have had the "
+            f"chance: everybody in that room between the last time somebody else saw "
+            f"it there and the hour it was gone. An object narrows the field or "
+            f"confirms a fact; it never points at one person."
+        )
     hidden = measures.HIDDEN_BY_SHAPE.get(shape, set())
     asked = [q for name, q in measures.SHORTCUTS.items() if name not in hidden]
     allowed = gate["shortcuts"]
@@ -937,6 +965,25 @@ def _lies(request: GenerationRequest) -> str:
     )
 
 
+def _objects(request: GenerationRequest) -> str:
+    """The roles the objects play, and what lies with the body, dealt (D-203)."""
+    held = object_hand(request.seed)
+    hand = "\n".join(f"  {n}. `{k}`, {OBJECT_ROLES[k]}" for n, k in enumerate(held, 1))
+    scene = scene_object(request.seed)
+    with_body = (
+        "**Nothing** lies in the room of the finding at the last hour: no object's "
+        "`where` puts it there then."
+        if scene == "nothing"
+        else f"The `{scene}` object lies in the room of the finding at the last hour, "
+        f"and is the first thing the player is told about (\"found with the body\")."
+    )
+    return (
+        f"**THE OBJECTS, dealt.** Write exactly {len(held)} `things`, one for each "
+        f"of these roles, and set its `role` to the name in backticks:\n{hand}\n"
+        f"{with_body}\n\n"
+    )
+
+
 def _user_prompt(request: GenerationRequest, targets: bool = True) -> str:
     # The shape goes first, and says so (D-151). It used to sit on the fifth line
     # of the request, after the cast size, while the system prompt spent three
@@ -961,6 +1008,7 @@ def _user_prompt(request: GenerationRequest, targets: bool = True) -> str:
         f"{_casting(request.seed)}\n\n"
         f"{_lies(request)}"
         f"{_body(request)}"
+        f"{_objects(request)}"
         f"{_material(request)}\n"
         f"Variation key {request.seed}: use it to take a different angle on this "
         f"setting than you otherwise would. Take it seriously at step 0: a "
@@ -1040,11 +1088,15 @@ def _skeleton_schema() -> dict[str, Any]:
     defs["FalseClaim"]["properties"].pop("admits_when", None)
     for unused in ("Investigator", "Account"):
         defs.pop(unused, None)
+    # A number for everybody, and the old business as a roster (D-201).
+    character = defs["Character"]
+    character["required"] = [*character.get("required", []), "age"]
     # Generated in schema order, so the story comes before the structure.
     schema["properties"] = {"premise": props.pop("premise"), **props}
     schema["required"] = [
         "premise", "killer", "victim", "murder", "characters", "places", "slots",
         "placements", "constraints", "secrets", "false_claims", "discovery",
+        "history",
     ]
     return schema
 
@@ -1140,6 +1192,14 @@ def _dress(skeleton: Mystery, prose: dict[str, Any]) -> Mystery:
     return Mystery.model_validate(data)
 
 
+def _says_age(character) -> bool:
+    """Whether the `look` sentence states the skeleton's age (D-201)."""
+    from mystery.models import age_words
+
+    look = character.look.lower()
+    return any(re.search(rf"\b{re.escape(w)}\b", look) for w in age_words(character.age))
+
+
 def _prose_gaps(mystery: Mystery) -> list[str]:
     """What the prose left unwritten. The only things a prose draft can fail on."""
     gaps: list[str] = []
@@ -1154,8 +1214,18 @@ def _prose_gaps(mystery: Mystery) -> list[str]:
         if character.id == mystery.victim:
             if not character.look.strip():
                 gaps.append(f"the victim {character.id!r} has no `look`")
+            elif character.age is not None and not _says_age(character):
+                gaps.append(
+                    f"the victim {character.id!r} is {character.age} in the skeleton, "
+                    f"and `look` does not say so: open it with the age, in words"
+                )
             continue
         missing = [n for n in PROSE_CHARACTER if not getattr(character, n)]
+        if character.age is not None and character.look and not _says_age(character):
+            gaps.append(
+                f"{character.id!r} is {character.age} in the skeleton, and `look` "
+                f"does not say so: open it with the age, in words"
+            )
         if missing:
             gaps.append(f"{character.id!r} has no {', '.join(f'`{n}`' for n in missing)}")
     gaps += [f"secret {s.id!r} has no `breaks_when`" for s in mystery.secrets if not s.breaks_when]
@@ -1359,6 +1429,7 @@ def prompt_version() -> str:
         + "".join(SHAPES[k].brief for k in sorted(SHAPES))
         + "".join(LIES[k] for k in sorted(LIES))
         + "".join(POSITIONS[k] for k in sorted(POSITIONS))
+        + "".join(OBJECT_ROLES[k] for k in sorted(OBJECT_ROLES))
     )
     return hashlib.sha256(standing.encode("utf-8")).hexdigest()[:8]
 
@@ -1680,6 +1751,9 @@ def _in_two_stages(
     nearest: tuple[Mystery, list[str]] | None = None
     bones: Mystery | None = None
     bones_usd = 0.0
+    # A skeleton whose only fault is soft (D-202): an object that names the
+    # killer. Sent back while there are drafts left; kept if none fixes it.
+    softly: tuple[Mystery, float, int] | None = None
 
     for attempt in range(1, SKELETON_ATTEMPTS + 1):
         raw = _unwrap(drafter.skeleton(request, complaints, previous))
@@ -1688,9 +1762,16 @@ def _in_two_stages(
             {"title": "", **raw}, request, built_with, attempt
         )
         if mystery is not None and not complaints:
-            bones, bones_usd = mystery, drafter.last_usd
-            log.info("mystery.skeleton_passed", attempt=attempt)
-            break
+            soft = measures.mover_complaints(mystery) + _object_complaints(mystery, request)
+            if not soft:
+                bones, bones_usd = mystery, drafter.last_usd
+                log.info("mystery.skeleton_passed", attempt=attempt)
+                break
+            if softly is None or len(soft) <= softly[2]:
+                softly = (mystery, drafter.last_usd, len(soft))
+            complaints = soft
+            log.warning("mystery.soft", stage="skeleton", attempt=attempt, problems=soft)
+            continue
         if quality_only and (nearest is None or len(complaints) < len(nearest[1])):
             nearest = (mystery, complaints)
         log.warning("mystery.rejected", stage="skeleton", attempt=attempt, problems=complaints)
@@ -1698,6 +1779,9 @@ def _in_two_stages(
             cache_dir, request, attempt, raw, complaints, built_with, "skeleton", drafter.last_usd
         )
 
+    if bones is None and softly is not None:
+        bones, bones_usd = softly[0], softly[1]
+        log.warning("mystery.kept_soft", objects_naming_the_killer=softly[2])
     if bones is None:
         if nearest is not None:
             _keep_for_review(cache_dir, request, *nearest, stage="skeleton")
@@ -1740,6 +1824,43 @@ def _in_two_stages(
     # so the prose can be written again later rather than the whole thing.
     _keep_for_review(cache_dir, request, bones, complaints, stage="skeleton")
     raise GenerationFailed(complaints)
+
+
+def _object_complaints(mystery: Mystery, request: GenerationRequest) -> list[str]:
+    """Objects that do not play the roles they were dealt (D-203). Soft, like
+    D-202: sent back while there are drafts left, kept if none fixes it."""
+    if not measures.GATE.get("dealt_objects"):
+        return []
+    held = object_hand(request.seed)
+    roles = [t.role for t in mystery.things]
+    out: list[str] = []
+    if sorted(roles) != sorted(held):
+        out.append(
+            f"The objects play {', '.join(roles) or 'no roles'}; they were dealt "
+            f"{', '.join(held)}. One `thing` per dealt role, with its `role` set."
+        )
+    killer, victim = mystery.killer, mystery.victim
+    for t in mystery.things:
+        moved = t.moves > 0
+        if t.role == "residue" and moved:
+            out.append(f"`{t.id}` is residue, and residue does not move.")
+        elif t.role == "killer_trace" and killer not in {t.belongs_to, *t.moved_by.values()}:
+            out.append(f"`{t.id}` is the killer's trace: it is the killer's, or the "
+                       f"killer moves it.")
+        elif t.role == "misleading" and t.belongs_to in (None, killer, victim):
+            out.append(f"`{t.id}` is misleading: it belongs to an innocent "
+                       f"(`belongs_to`), not the killer or the victim.")
+        elif t.role == "carried" and not (moved and set(t.moved_by.values()) - {killer}):
+            out.append(f"`{t.id}` is carried: an innocent moves it.")
+    scene = scene_object(request.seed)
+    found = {t.role for t in mystery.found_with}
+    if scene == "nothing" and found:
+        out.append("Nothing was dealt to lie with the body, and an object is in the "
+                   "room of the finding at the last hour. Move it out.")
+    elif scene != "nothing" and scene not in found:
+        out.append(f"The `{scene}` object must be in the room of the finding at the "
+                   f"last hour.")
+    return out
 
 
 def _below_the_bar(mystery: Mystery, shape: str = "") -> list[str]:

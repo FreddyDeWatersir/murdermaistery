@@ -5246,3 +5246,208 @@ The column is pinned to the left so it stays put when the hours scroll, the
 legend sits under the grid beside the people's, the full name is in the
 tooltip, and the plan writes the letters in front of each room's name so the
 two are learned together. Checked against sixteen real floor plans: no clash.
+
+## D-198 The player has a name, and the Oath is edited by hand
+**Date:** 2026-10-06
+**Status:** active
+
+First beta case, The Oath and the Snow: good, one of the best yet, and four
+faults a player found that no check could.
+
+- **Who you are.** The suspects called the player "Brother Lope" from the first
+  answer, and the file only said "a Benedictine of Sahagún", in section 4.
+  `Investigator.name` is new (empty on every older case), the prose stage is
+  asked for it, and the file says "You are **Brother Lope de Carrión**" where
+  it first matters, in section 1, as well as in section 4 and the subtitle.
+- **Objects named the killer.** The stylus-case and the mortar both left the
+  scriptorium at the murder hour, and Nuño was the only person ever in it. No
+  testimony needed. Fixed in the case by making neither move: Fruela drops the
+  case in the store at supper (he was there, quarrelling), and the mortar never
+  leaves the scriptorium. Nuño's secret "I planted it" is gone; he now arranges
+  nothing, which is the case's own idea of him. A first fix (Fruela in the
+  scriptorium at collation) passed every check and made it worse: his word
+  pins the case there an hour before it moves, with only Nuño left.
+- **Ages.** Sancha was fifty-six and "a girl of nineteen" twelve years ago. She
+  is thirty-one now.
+- **Two fours.** "Four of us stood in that choir" and "the four who would not
+  swear", and the case never said who the first four were. The shared line now
+  names them.
+
+The edited file carries `"edited"` so its origin is on it. It still passes the
+validator in both phases, the solver, and Normal.
+
+Decided, not built:
+
+- **Objects: who could have moved it.** Between the last time somebody other
+  than the mover saw it and the move, everybody who was in that room could
+  have taken it. If the killer is among fewer than **2** (Normal) or **3**
+  (Hard), the draft is sent back; still there after the redrafts, it is kept
+  and counts as easier. On the shelf: 16 of 29 cases with objects fail Normal.
+- **Ages as numbers.** Every person gets a numeric age; the old business gets
+  exact years and a roster of who was there and as what. The validator checks
+  age then against the role then, and that any count in the story matches a
+  roster. Structural, not read out of the prose.
+- **Editing cases by hand** should get a `--recheck CASE`.
+
+## D-199 Found with the body
+**Date:** 2026-10-06
+**Status:** active
+
+Objects failed before (D-131, D-139) because a player never knew they existed.
+The first place any investigator hears of one is at the door, so the case file
+now lists what lay in the room with the body when it was found: `found_with`,
+read off every object's path at the last hour in the room of the finding.
+Works on every case with objects. The question it invites is the right one,
+"when did that get there?", and not "whose is it?".
+
+Also on the Oath: everyone's age at the oath is now in the shared line, because
+the suspects improvised being children twelve years ago while being painted in
+their fifties, and Nuño's "forty years" with Elvira is twenty, as it is
+everywhere else in the case.
+
+Next: a deck of object roles, dealt per case (agreed), drafted for review.
+
+## D-200 Objects, lies and the hour: what was decided
+**Date:** 2026-10-06
+**Status:** decided, not built
+
+A design round after the Oath. Measured on the shelf first: 16 of 29 cases
+with objects let an object name the killer; 71% of all lies sit at the murder
+hour, 15 of 41 cases have no lie anywhere else, and no killer in 42 cases
+lies about any hour but the murder's.
+
+**Objects are dealt** (a deck of roles, like the lies):
+
+| card | dealt |
+|---|---|
+| Residue: the trace a secret left (the ash) | always |
+| Killer's trace, never a teller | about half |
+| Misleading: an innocent's, for an innocent reason | about half |
+| Carried, Weapon | from what is left |
+| Missing, Out of place | in the deck, not dealt until rooms can be examined |
+
+Three or four objects a case. What lies with the body is dealt too
+(misleading, the killer's trace, another secret's residue, or nothing), so no
+rule about the scene object holds every time. Objects narrow or confirm, never
+name: object, then fact, then testimony, then person. Murky combinations are
+welcome: a fair plant (two or three could have moved it), an innocent moving
+the killer's thing for their own secret, a borrowed weapon, an object that
+proves an hour or a room.
+
+**Measures:**
+
+- Who could have moved it: the killer among at least 2 (Normal) or 3 (Hard)
+  possible movers, or the draft goes back; kept and counted easier if it
+  survives the redrafts (D-198).
+- Gates opened by an object: about a third, down from half. On the motive
+  road and the killer's trail every object gate also has a person who opens
+  it; on innocents' trails an object may be the only key.
+- Lies at other hours than the murder's: at least 1 (Normal), 2 (Hard).
+- Ages as numbers, structural (D-198).
+
+**The killer's earlier lie**, one card, about a third of the cases where the
+killer lies: they lie about an earlier hour to hide the preparation, near an
+innocent busy with their own secret; when it breaks they own up to being
+there and add something true about somebody else's secret or object. True,
+so every check passes; it points away.
+
+**The hour of death is a window.** The file gives when the victim was last
+seen alive and when found, never the hour; the house's version may claim one.
+Made meaningful by **hidden visits**: one or more people (an innocent, or the
+killer) were with the victim inside the window and hide it for a secret of
+their own. Each one that comes out moves "last seen alive" later, so closing
+the window is progress, and the last person to see her alive is the oldest
+suspect in the book. Window by what people first admit: at least 2 hours
+(Normal), 3 (Hard); with every secret open, it closes on the true hour.
+
+Parked: lies travelling between people (word gets back, for lies). To check
+with the Oath's transcript: whether the killer gets more bodily reactions than
+the rest; if so, one stage direction at most, only from the written manner,
+the same for everybody.
+
+## D-201 Ages are numbers, and the old business is a roster
+**Date:** 2026-10-07
+**Status:** active
+
+Step 1 of D-200. In the Oath a widow of fifty-six had been "a girl of
+nineteen" twelve years before, "four of us stood in that choir" never said
+which four, and the suspects, painted in their fifties and sixties, said they
+had been children at it. Nothing could notice, because ages and the past were
+only prose.
+
+- **`Character.age`**, a number, written by the skeleton for everybody,
+  the victim too. Required in the skeleton's schema.
+- **`Mystery.history`**: the old business as `PastEvent`s, each with `what`,
+  exact `years_ago`, and `present`: who of the people here was there, with
+  `age_then`, `stage` (child 3 to 12, youth 13 to 19, adult from 16; the
+  overlap is on purpose) , `role` there, and `known` (whether the house knows
+  they were there). The questioner can be present as `"investigator"`.
+- **V16**, both phases: once a case has ages, everybody has one; `age_then` is
+  age now minus the years, to the year; the stage fits the age; nobody is at
+  an event twice; everybody present is in the case. Older cases have neither
+  and pass.
+- **The prose** opens every `look` with the skeleton's age, in words, and a
+  look that does not is a prose gap. `common_ground` names who was there (the
+  known ones) and how old, never a count instead of names.
+- **The suspects** are told their own age, and get the roster as shared
+  ground: the known presences, their own even when unknown ("the house does
+  not know you were there"), and "nobody else here tonight is known to have
+  been there". They also hear the player's name with the role.
+
+The Oath now carries its ages and the oath as a roster, and passes V16, the
+solver and Normal. The prompt changed, so new drafts are a new cohort.
+
+## D-202 Who could have moved it
+**Date:** 2026-10-07
+**Status:** active
+
+Step 2 of D-200. An object the killer could have moved counts everybody who
+could have: everyone in its room between the last time somebody other than
+its mover saw it there and the hour it was gone (`possible_movers`). Not "who
+was in the room the hour it moved": the Oath's first fix had a witness pin the
+stylus-case on the bench at collation, which left the killer alone with it an
+hour later, and passed every check.
+
+- `Measures.movers`: that count for every move the killer could have made.
+  Normal needs at least 2 (`NORMAL["movers"]`), Hard will ask 3. `meets`
+  counts it, so `--stats` does.
+- **Soft at the gate**, as decided: a skeleton whose only fault is an object
+  that names the killer is sent back with the reason
+  (`mover_complaints`), and if no redraft fixes it the best such skeleton is
+  kept and dressed rather than the case being lost. It then fails Normal in
+  the record, which is what "counted easier" means until difficulty exists.
+- The prompt's targets say it once, from the gate, like the others.
+
+On the shelf, cases meeting Normal go from 10 to 2: the Oath as edited, and
+one with no objects. Every case of the D-193/194 batch that met Normal had an
+object that named the killer. The next batch says whether drafts can meet it.
+
+## D-203 The object deck
+**Date:** 2026-10-07
+**Status:** active
+
+Step 3 of D-200. Objects are dealt like the lies (`palette.object_hand`):
+residue always; the killer's trace and a misleading object about half the time
+each; three or four in all, the rest from carried and the weapon. Missing and
+out of place are in the deck (`OBJECT_ROLES`) and not dealt (`NOT_YET_DEALT`)
+until a player can look round a room. What lies with the body is dealt from
+the hand or is nothing (`scene_object`), so no rule about the scene object
+holds every time.
+
+- `Thing.role` records which role an object plays.
+- The request carries THE OBJECTS: the hand, with what each role is for, and
+  what lies with the body. The standing prompt says what objects are for:
+  they help build the picture and open secrets, and none names the killer on
+  its own (object, fact, testimony, person).
+- **Soft check** (`_object_complaints`, gated on `GATE["dealt_objects"]`), in
+  the same place as D-202's: the roles match the hand; residue does not move;
+  the killer's trace is the killer's or moved by them; a misleading object is
+  an innocent's; a carried one is moved by an innocent; the scene object is
+  where it was dealt, or nothing is.
+- **Gates opened by an object: a third** (`NORMAL["objects"] = 33`), down from
+  half. The second way into an object gate on the motive road is not built:
+  undecided.
+- `prompt_version` hashes the object deck, so this is a new cohort.
+
+Hand frequencies over ten thousand seeds: 3 objects 63%, 4 37%; killer's
+trace 49%, misleading 50%; nothing with the body 28%.

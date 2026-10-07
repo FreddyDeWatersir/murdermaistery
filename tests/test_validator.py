@@ -884,3 +884,75 @@ def test_a_moved_body_went_next_door_and_nobody_is_with_it() -> None:
 
     unstamped = case.model_copy(update={"discovery": Discovery(finder="tomas", place="green_room")})
     assert not unstamped.body_moved, "an old case found elsewhere is not a moved body"
+
+
+# V16: ages add up (D-201)
+
+
+def _aged(**overrides):
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import PastEvent, Presence
+
+    m = Mystery.model_validate(OPENING_NIGHT)
+    people = [c.model_copy(update={"age": 50 + 2 * i}) for i, c in enumerate(m.characters)]
+    first = people[0]
+    event = PastEvent(
+        id="the_fire",
+        what="the old theatre burned",
+        years_ago=12,
+        present=[Presence(who=first.id, age_then=first.age - 12, stage="adult")],
+    )
+    return m.model_copy(update={"characters": people, "history": [event], **overrides})
+
+
+def _v16(m: Mystery) -> list[str]:
+    from mystery.validator import check_ages_add_up
+
+    return [v.message for v in check_ages_add_up(m)]
+
+
+def test_accepts_ages_that_add_up() -> None:
+    assert _v16(_aged()) == []
+
+
+def test_a_case_from_before_ages_passes() -> None:
+    from mystery.example import OPENING_NIGHT
+
+    assert _v16(Mystery.model_validate(OPENING_NIGHT)) == []
+
+
+def test_rejects_an_age_then_that_is_not_now_minus_the_years() -> None:
+    m = _aged()
+    wrong = m.history[0].present[0].model_copy(update={"age_then": 19})
+    m.history[0].present[0] = wrong
+    assert any("not 19" in msg for msg in _v16(m))
+
+
+def test_rejects_a_grown_woman_who_was_a_girl() -> None:
+    """The Oath: fifty-six now, "a girl of nineteen" twelve years ago."""
+    m = _aged()
+    p = m.history[0].present[0]
+    m.history[0].present[0] = p.model_copy(update={"stage": "youth"})
+    assert any("not a youth" in msg for msg in _v16(m))
+
+
+def test_rejects_somebody_at_the_old_business_who_is_not_in_the_case() -> None:
+    from mystery.models import Presence
+
+    m = _aged()
+    m.history[0].present.append(Presence(who="nobody", age_then=40, stage="adult"))
+    assert any("not in the case" in msg for msg in _v16(m))
+
+
+def test_once_anybody_has_an_age_everybody_needs_one() -> None:
+    m = _aged()
+    m.characters[1] = m.characters[1].model_copy(update={"age": None})
+    assert any("No `age`" in msg for msg in _v16(m))
+
+
+def test_the_investigator_can_be_there_as_a_child() -> None:
+    from mystery.models import Presence
+
+    m = _aged()
+    m.history[0].present.append(Presence(who="investigator", age_then=11, stage="child"))
+    assert _v16(m) == []

@@ -1353,3 +1353,49 @@ def test_a_killer_who_moved_the_body_never_says_so() -> None:
     assert any(f.id == "truth:moved" for f in brief.conceals)
     innocent = build_brief(case, derive(case), "tomas")
     assert not any(f.id == "truth:moved" for f in innocent.conceals)
+
+
+def test_everybody_hears_the_roster_and_their_own_age() -> None:
+    """D-201: who was at the old business and how old, one answer for all.
+    A presence the house does not know of is told only to its owner."""
+    from mystery.example import OPENING_NIGHT
+    from mystery.models import Investigator, PastEvent, Presence
+
+    m = Mystery.model_validate(OPENING_NIGHT)
+    alive = [c for c in m.characters if c.id != m.victim]
+    a, b, c = alive[0], alive[1], alive[2]
+    people = [x.model_copy(update={"age": 50}) for x in m.characters]
+    event = PastEvent(
+        id="the_fire",
+        what="the old theatre burned",
+        years_ago=12,
+        present=[
+            Presence(who=a.id, age_then=38, stage="adult", role="the stage manager"),
+            Presence(who=b.id, age_then=38, stage="adult", role="an usher", known=False),
+            Presence(who="investigator", age_then=12, stage="child", role="a call boy"),
+        ],
+    )
+    m = m.model_copy(
+        update={
+            "characters": people,
+            "history": [event],
+            "investigator": Investigator(name="Mr Hale", role="the insurer's clerk"),
+        }
+    )
+    knowledge = derive(m)
+
+    def common(who):
+        return " ".join(build_brief(m, knowledge, who).common)
+
+    seen_by_c = common(c.id)
+    assert "12 years ago: the old theatre burned." in seen_by_c
+    assert a.name in seen_by_c and "then 38, the stage manager" in seen_by_c
+    assert "Mr Hale (then 12, a call boy)" in seen_by_c
+    assert b.name not in seen_by_c.split("burned.")[1]
+
+    seen_by_b = common(b.id)
+    assert "you (then 38, an usher)" in seen_by_b
+    assert "does not know you were there" in seen_by_b
+
+    assert build_brief(m, knowledge, c.id).age == 50
+    assert "They are: Mr Hale, the insurer's clerk" in build_brief(m, knowledge, c.id).investigator

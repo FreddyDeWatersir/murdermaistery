@@ -891,6 +891,7 @@ def build_app(
             # player cannot see is not a position they can play.
             "you": (
                 {
+                    "name": game.mystery.investigator.name,
                     "role": game.mystery.investigator.role,
                     "why": game.mystery.investigator.why_here,
                     "standing": game.mystery.investigator.standing,
@@ -907,6 +908,8 @@ def build_app(
                         game.mystery.discovery.place, game.mystery.discovery.place
                     ),
                     "summary": game.mystery.discovery.summary,
+                    # Told at the door, like the finding itself (D-199).
+                    "found": [t.name for t in game.mystery.found_with],
                 }
                 if game.mystery.discovery
                 else None
@@ -1938,18 +1941,26 @@ function paintBrief(){
 
     '<h4>1 &middot; What happened</h4>'+
     (d?'<p><b>'+esc(S.victim)+'</b> is dead. '+esc(d.finder)+' found the body in the '+
-        esc(at(d.place))+'.</p>'+(d.summary?'<p>'+esc(d.summary)+'</p>':'')
+        esc(at(d.place))+'.</p>'+(d.summary?'<p>'+esc(d.summary)+'</p>':'')+
+        /* What lay in the room with the body (D-199): the first objects a
+           player hears of, so "when did that get there?" can be asked early. */
+        (d.found&&d.found.length?'<div class="asked"><b>Found with the body</b><ul>'+
+          d.found.map(f=>'<li>'+esc(f)+'</li>').join('')+'</ul></div>':'')
       :'<p><b>'+esc(S.victim)+'</b> is dead, and one of the people here did it.</p>')+
     (S.commission?'<div class="asked"><b>What you were asked for</b><p>'+esc(S.commission)+
       '</p></div>':'')+
-    '<p>You arrived after that. You saw none of it, and everything you are about '+
-    'to be told, you are being told.</p>'+
+    /* Who you are, said where it is first needed (D-198). Section 4 keeps the
+       rest; the name alone belongs here, because the suspects use it from the
+       first answer. */
+    '<p>'+(you&&you.name?'You are <b>'+esc(you.name)+'</b>. ':'')+'You arrived after that. '+
+    'You saw none of it, and everything you are about to be told, you are being told.</p>'+
 
     '<h4>2 &middot; Persons present</h4><div class="persons">'+persons+'</div>'+
 
     (common?'<h4>3 &middot; What everybody knows</h4><ul>'+common+'</ul>':'')+
 
     (you&&you.role?'<h4>'+(common?'4':'3')+' &middot; You</h4><p>'+
+      (you.name?'<b>'+esc(you.name)+'</b>, ':'')+
       esc(you.role.replace(/\\.$/,''))+'.</p>'+
       (you.why?'<p>'+esc(you.why)+'</p>':'')+
       (you.standing?'<p>'+esc(you.standing)+'</p>':''):'')+
@@ -2009,7 +2020,8 @@ async function boot(){
     ? S.victim+' is dead. '+S.discovery.finder+' found the body in the '+
       String(S.discovery.place||'').replace(/^[Tt]he\\s+/,'')+'.'
     : S.victim+' is dead. One of them did it.')+
-    (S.you&&S.you.role?' You are '+S.you.role.replace(/^(An?|The) /i,
+    (S.you&&S.you.name?' You are '+S.you.name+'.':
+     S.you&&S.you.role?' You are '+S.you.role.replace(/^(An?|The) /i,
       m=>m.toLowerCase()).replace(/\\.$/,'')+'.':'')+
     ' '+Coming()+' are on their way, and you are not '+coming()+'.';
 

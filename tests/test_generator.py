@@ -1137,7 +1137,7 @@ def test_the_targets_reach_the_model_after_the_shape(monkeypatch) -> None:
     import mystery.measures
     from mystery.generator import _user_prompt
 
-    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL, dealt_objects=0))
     prompt = _user_prompt(GenerationRequest(setting="a house", seed=1))
     assert prompt.index("SHAPE OF THE SOLUTION") < prompt.index("WHAT THE CASE IS MEASURED ON")
     assert prompt.index("WHAT THE CASE IS MEASURED ON") < prompt.index("Setting:")
@@ -1149,7 +1149,7 @@ def test_a_draft_short_of_normal_is_redrafted_and_told_why(monkeypatch) -> None:
     murder hour, and the redraft is told exactly that."""
     import mystery.measures
 
-    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL, dealt_objects=0))
     drafter = _flaky_drafter(_SHORT)
     with pytest.raises(GenerationFailed):
         generate(REQUEST, drafter=drafter, attempts=2)
@@ -1162,7 +1162,7 @@ def test_the_closest_miss_is_kept_for_review(tmp_path, monkeypatch) -> None:
     """Three playable drafts each one number short used to be thrown away."""
     import mystery.measures
 
-    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL, dealt_objects=0))
     cache = tmp_path / "mysteries"
     with pytest.raises(GenerationFailed):
         generate(REQUEST, drafter=_flaky_drafter(_SHORT), cache_dir=cache, attempts=2)
@@ -1286,7 +1286,7 @@ def test_a_skeleton_short_of_normal_is_revised_from_its_own_previous_version(
     import mystery.measures
     from mystery.generator import _bare
 
-    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL, dealt_objects=0))
     short = _bare(Mystery.model_validate(_SHORT))
     drafter = _staged([short, _bones()])
     generate(REQUEST, drafter=drafter)
@@ -1332,10 +1332,36 @@ def test_a_revision_names_what_already_passes(monkeypatch) -> None:
     from mystery.generator import _holding, _revision
     from mystery.solver import solve
 
-    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL))
+    monkeypatch.setattr(mystery.measures, "GATE", dict(mystery.measures.NORMAL, dealt_objects=0))
 
     held = _holding(solve(Mystery.model_validate(SHIPPED)), "the_lie")
     assert "3 suspects with a reason and the chance" in held
     text = _revision({"premise": "x"}, ["a problem"], held, "skeleton")
     assert "YOUR PREVIOUS SKELETON" in text and '"premise": "x"' in text
     assert "a problem" in text and held in text
+
+
+def test_the_skeleton_must_give_ages_and_the_old_business() -> None:
+    """D-201: a number for everybody, and the history as a roster."""
+    from mystery.generator import _skeleton_schema
+
+    schema = _skeleton_schema()
+    assert "history" in schema["required"]
+    assert "age" in schema["$defs"]["Character"]["required"]
+
+
+def test_a_look_that_does_not_say_the_age_is_a_prose_gap() -> None:
+    from mystery.example import OPENING_NIGHT
+    from mystery.generator import _prose_gaps
+
+    m = Mystery.model_validate(OPENING_NIGHT)
+    who = next(c for c in m.characters if c.id != m.victim and c.look)
+    said = who.model_copy(update={"age": 61, "look": "Sixty-one, long and stooped."})
+    unsaid = who.model_copy(update={"age": 61, "look": "Fifty-six, broad and slow."})
+
+    def gaps(c):
+        people = [c if x.id == c.id else x for x in m.characters]
+        return [g for g in _prose_gaps(m.model_copy(update={"characters": people})) if "age" in g]
+
+    assert gaps(said) == []
+    assert gaps(unsaid) and "61" in gaps(unsaid)[0]

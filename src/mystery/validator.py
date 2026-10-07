@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from mystery.models import Constraint, Mystery
+from mystery.models import STAGES, Constraint, Mystery
 
 Phase = Literal["proposed", "final"]
 
@@ -772,6 +772,54 @@ def check_the_victim_has_time_to_live(mystery: Mystery) -> list[Violation]:
     ]
 
 
+def check_ages_add_up(mystery: Mystery) -> list[Violation]:
+    """V16: everybody's age at the old business is their age now, minus the
+    years, and fits what they were there (D-201).
+
+    Protects against the model, which wrote a widow of fifty-six who had been
+    "a girl of nineteen" twelve years earlier, and a roster nobody named. Cases
+    from before ages existed have neither, and pass.
+    """
+    people = {c.id: c for c in mystery.characters}
+    if not mystery.history and all(c.age is None for c in mystery.characters):
+        return []
+
+    out: list[Violation] = []
+    missing = [c.id for c in mystery.characters if c.age is None]
+    if missing:
+        out.append(Violation("V16", f"No `age` for {', '.join(missing)}: every person, "
+                             f"the victim too, needs one, as a number"))
+    for event in mystery.history:
+        if event.years_ago < 0:
+            out.append(Violation("V16", f"`{event.id}` is {event.years_ago} years ago, "
+                                 f"which has not happened yet"))
+        seen: set[str] = set()
+        for p in event.present:
+            if p.who in seen:
+                out.append(Violation("V16", f"{p.who!r} is at `{event.id}` twice"))
+            seen.add(p.who)
+            if p.who != "investigator" and p.who not in people:
+                out.append(Violation("V16", f"`{event.id}` has {p.who!r} there, who is "
+                                     f"not in the case (a character id, or \"investigator\")"))
+                continue
+            age = people[p.who].age if p.who in people else None
+            if age is not None and p.age_then != age - event.years_ago:
+                out.append(Violation(
+                    "V16",
+                    f"{p.who!r} is {age} now, so {event.years_ago} years ago at "
+                    f"`{event.id}` they were {age - event.years_ago}, not {p.age_then}",
+                ))
+            low, high = STAGES[p.stage]
+            if not low <= p.age_then <= high:
+                out.append(Violation(
+                    "V16",
+                    f"{p.who!r} was {p.age_then} at `{event.id}`, which is not a "
+                    f"{p.stage} ({low} to {high}). Change the age, the years, or "
+                    f"what they were there",
+                ))
+    return out
+
+
 PROPOSED_RULES = [
     check_roles_are_roles_not_histories,
     check_the_commission_names_nobody,
@@ -781,6 +829,7 @@ PROPOSED_RULES = [
     check_exclusive_scenes_do_not_collide,
     check_the_body_is_not_stepped_over,
     check_the_body_was_carried_next_door,
+    check_ages_add_up,
     # Both about the victim's timeline, and both here rather than only at the
     # final gate so that the complaint the model reads names the real problem
     # rather than the solver's symptom of it (D-158). Neither costs a draft on
@@ -804,6 +853,7 @@ FINAL_RULES = [
     check_exclusive_scenes_do_not_collide,
     check_the_body_is_not_stepped_over,
     check_the_body_was_carried_next_door,
+    check_ages_add_up,
 ]
 
 

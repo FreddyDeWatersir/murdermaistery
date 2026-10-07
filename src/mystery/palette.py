@@ -508,6 +508,62 @@ def body_moved(seed: int, topology: str) -> bool:
     return random.Random(f"moved|{seed}").random() < 1 / 3
 
 
+# What objects are for (D-200, D-203). Dealt like the lies: a hand of roles
+# per case, so the object with the body is not always the red herring, the
+# killer's thing is not always there, and something left by a secret always is.
+OBJECT_ROLES = {
+    "residue": "residue: the trace a secret left where it happened (a burnt draft, "
+    "wax on a sleeve, a wet cloak, ash that is not kitchen ash). It does not move. "
+    "Strange before the secret opens, obvious after",
+    "killer_trace": "the killer's trace: the killer's own, or something the killer "
+    "moved, and never a pointer. At least two people could have moved it, or an "
+    "innocent moved it too for a reason of their own, or what it proves is an hour "
+    "or a room, not a person",
+    "misleading": "misleading: an innocent's, lying where it seems to point at them, "
+    "for an innocent reason. It is resolved by asking when it got there, not whose "
+    "it is",
+    "carried": "carried: something an innocent took and still has, to hide a "
+    "secret. Its path contradicts where they say they were",
+    "weapon": "the weapon: what killed. Where it ends up confirms the room or the "
+    "hour; it never names who",
+    "missing": "missing: something that should be in a room and is not. The absence "
+    "is the clue",
+    "out_of_place": "out of place: put back wrong (a book reshelved backwards, a "
+    "stopped clock). It says somebody was there, never who",
+}
+# In the deck, never dealt: an absence can only be noticed by somebody who can
+# look round a room, and players cannot yet (D-200).
+NOT_YET_DEALT = frozenset({"missing", "out_of_place"})
+# What can be lying with the body when it is found.
+SCENE_ROLES = ("misleading", "killer_trace", "residue", "weapon")
+
+
+def object_hand(seed: int) -> list[str]:
+    """The roles this case's objects play (D-203): residue always, the killer's
+    trace and a misleading object about half the time each, three or four in
+    all, the rest from what is left."""
+    draw = random.Random(f"objects|{seed}")
+    held = ["residue"]
+    if draw.random() < 0.5:
+        held.append("killer_trace")
+    if draw.random() < 0.5:
+        held.append("misleading")
+    size = 3 if draw.random() < 0.5 else 4
+    rest = [k for k in OBJECT_ROLES if k not in held and k not in NOT_YET_DEALT
+            and k not in ("killer_trace", "misleading")]
+    draw.shuffle(rest)
+    while len(held) < size and rest:
+        held.append(rest.pop())
+    return held
+
+
+def scene_object(seed: int) -> str:
+    """Which role lies with the body, or "nothing" (D-203). From the hand, so
+    the two cannot disagree, and "nothing" is always possible."""
+    options = [k for k in object_hand(seed) if k in SCENE_ROLES] + ["nothing"]
+    return random.Random(f"scene|{seed}").choice(options)
+
+
 def killer_position(seed: int) -> str:
     """Which position the killer is dealt (D-188), by key."""
     return random.Random(f"position|{seed}").choice(sorted(POSITIONS))
