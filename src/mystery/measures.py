@@ -104,6 +104,10 @@ class Measures:
     # For every object move the killer could have made: how many people could
     # have made it (D-202). One is the killer, named by an object.
     movers: list[int] = listed(default_factory=list)
+    # How deep the killer's trail and the deepest innocent's go (D-205), so a
+    # draft told "the killer's is deepest" is also told by how much.
+    killer_depth: int = 0
+    innocent_depth: int = 0
 
     def movers_met(self, targets: dict[str, int] = NORMAL) -> bool:
         return all(n >= targets.get("movers", 0) for n in self.movers)
@@ -333,6 +337,8 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
             name for name, found in candidates.items() if name not in hidden and found == {killer}
         ],
         movers=[len(m.could) for m in possible_movers(mystery)],
+        killer_depth=depth.get(killer, 0),
+        innocent_depth=max((d for p, d in depth.items() if p != killer), default=0),
     )
 
 
@@ -367,7 +373,20 @@ _FIX = {
 def complaints(m: Measures, targets: dict[str, int] | None = None) -> list[str]:
     """Why a draft misses the targets, one sentence per number (D-188)."""
     targets = targets if targets is not None else GATE
-    found = [_FIX[name] for name in m.shortcuts][: max(0, len(m.shortcuts) - targets["shortcuts"])]
+    def fix(name: str) -> str:
+        if name != "deepest":
+            return _FIX[name]
+        # With the numbers (D-205): three drafts in a row were told only that
+        # the killer's was deepest, and made it deeper.
+        return (
+            f"The killer's trail is {m.killer_depth} gates deep and the deepest "
+            f"innocent's is {m.innocent_depth}, so following whatever goes deepest "
+            f"finds the killer. Bring one innocent's damning trail to "
+            f"{m.killer_depth} gates (level is fine), not on the road to the "
+            f"killer's motive."
+        )
+
+    found = [fix(name) for name in m.shortcuts][: max(0, len(m.shortcuts) - targets["shortcuts"])]
     if targets["field"] and (m.field < targets["field"] or not m.killer_in_field):
         found.append(
             f"Only {m.field} suspects have both a damning reason and the chance at the "

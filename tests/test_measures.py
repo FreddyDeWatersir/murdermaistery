@@ -130,3 +130,14 @@ def test_half_the_gates_open_with_an_object_and_the_key_roads_have_one() -> None
     from mystery.measures import complaints
 
     assert any("open with an object" in c for c in complaints(stripped, NORMAL))
+
+
+def test_the_deepest_complaint_says_how_deep() -> None:
+    """D-205: the redraft is told the two depths, and that level is fine."""
+    from mystery.measures import Measures, complaints
+
+    m = Measures(shortcuts=["deepest"], killer_depth=5, innocent_depth=3)
+    said = complaints(m, {"field": 0, "shortcuts": 0, "motive": 0, "trail": 0,
+                          "liars_at_hour": 0})
+    assert any("5 gates deep" in c and "innocent's is 3" in c and "level is fine" in c
+               for c in said)

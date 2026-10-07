@@ -5451,3 +5451,48 @@ holds every time.
 
 Hand frequencies over ten thousand seeds: 3 objects 63%, 4 37%; killer's
 trace 49%, misleading 50%; nothing with the body 28%.
+
+## D-204 The first batch on D-201 to D-203
+**Date:** 2026-10-07
+**Status:** active
+
+Seeds 500009 to 500016, $11.73 in all. Three shelved, one lost to a crash
+(below, recoverable), four short by one number each and kept for review.
+
+What landed, on every case that got through: ages and the old business as a
+roster with no V16 left, the player's name, objects playing exactly the roles
+dealt, the scene object where it was dealt. Two of the three shelved meet
+Normal; the third is the soft path working as decided, one object only the
+killer could have moved after every redraft, kept and counted easier. V16 sent
+back one draft (somebody at the old business who was not in the case).
+
+What failed, and why:
+
+- **"The killer's trail is the deepest"**: 14 of the batch's rejections, and
+  the last word on three of the four failed seeds. Those drafts put the
+  motive behind four or five gates, deeper than any innocent trail. The
+  complaint gives no numbers. Open: see STATE.
+- **An `investigator` written into the skeleton** as a sentence, which the
+  skeleton never asks for: three drafts thrown away on a parse error. Fixed:
+  the prose stage's fields are dropped from a skeleton before it is judged.
+- **A paid case lost to the console**: Windows writes a redirected stdout in
+  cp1252, a surname with "ř" in the printout raised, and the CLI prints before
+  it saves. The draft is in the cache, so running the seed again costs
+  nothing. Fixed: both entry points write UTF-8 whatever the console.
+- One seed was a gate short on objects (one in ten opened by an object).
+
+## D-205 The deepest-trail complaint says how deep
+**Date:** 2026-10-07
+**Status:** active
+
+The batch's main blocker (D-204) was "the killer's trail is the deepest",
+sent back three times a seed with no numbers, and each redraft went deeper.
+The complaint now gives both depths and the target: bring one innocent's
+damning trail to the killer's depth, level being fine (a tie was always
+allowed: the shortcut fires only when the killer is alone at the top).
+
+No ceiling on the motive, decided: Normal has only a floor (one gate), the
+killer has more secrets than the motive, and a shallow killer trail is its
+own giveaway. The fix is to raise an innocent, not to lower the killer.
+On the four failed seeds the new message reads 5 against 2, 4 against 3,
+5 against 4.

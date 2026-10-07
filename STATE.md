@@ -1,15 +1,10 @@
 # STATE
 
-**NEXT (7 Oct 2026):** a batch on D-201 to D-203 (ages, who could have moved it,
-the object deck), on your PC, in the repo, nothing else running and no files
-edited while it goes:
-
-    foreach ($s in 500009..500016) { uv run python -m mystery.cli --seed $s *>&1 | Out-File -Encoding utf8 "var\gen-$s.log" }
-
-Then `uv run python -m mystery.cli --stats` (spoiler-free). After the batch:
-step 4 of D-200 (lies at other hours, the killer's earlier lie), then step 5
-(the window and hidden visits). The Oath is ready for friends: repaint,
-bundle, `add`, `play`.
+**NEXT (7 Oct 2026):** recover seed 500011, free from the cache (D-204):
+`uv run python -m mystery.cli --seed 500011`. The deepest-trail complaint now
+gives numbers (D-205); the next batch says whether that is enough. Then the bracket strip and the length stat for the
+suspects' answers, step 4 of D-200 (lies at other hours, the killer's earlier
+lie), step 5 (the window and hidden visits). The Oath is ready for friends.
 
 ---
 
