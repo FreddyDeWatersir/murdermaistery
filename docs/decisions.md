@@ -5496,3 +5496,133 @@ killer has more secrets than the motive, and a shallow killer trail is its
 own giveaway. The fix is to raise an innocent, not to lower the killer.
 On the four failed seeds the new message reads 5 against 2, 4 against 3,
 5 against 4.
+
+## D-206 Lies at other hours, the window, hidden visits; soft checks from the first draft
+**Date:** 2026-10-07
+**Status:** active (the killer's earlier lie: open, see below)
+
+Steps 4 and 5 of D-200, the parts that need no new rule.
+
+- **Soft checks from the first draft.** The object checks ran only once a
+  draft passed everything hard, usually on the third or fourth attempt, so
+  their message arrived with no redraft left: three of six shelved cases in
+  the last round were kept on an object no redraft had been told about. Now
+  every parsed draft gets them beside its hard complaints. Acceptance is
+  unchanged: a case whose only faults are soft is kept and counted easier.
+- **Lies at other hours** (`other_lies`, Normal 1): a lie at any hour but the
+  murder's.
+- **The window** (`time_of_death`, Normal 2): by what people first say, every
+  lie standing in for the truth, the hours from the last time anybody admits
+  being with the victim to the murder, plus the hours after it in which
+  nobody admits going into the room she is found in.
+- **Hidden visits** (Normal 1): innocents with the victim inside that stretch
+  who say they were elsewhere. On the shelf only 4 of 48 cases have one, so
+  this is the number the next batch will move or not.
+- All three are **soft** (`measures.SOFT`), like D-202 and D-203: sent back,
+  never fatal, counted in `meets`. Hard can follow once a batch shows drafts
+  can meet them.
+- The targets say all three from the gate, including that `discovery.summary`
+  and `commission` give when she was last seen and when found, never the
+  hour of death as a fact.
+- **The case file** says "Last seen alive: <hour>, in <room>. When it
+  happened after that, nobody says." by the same reckoning.
+- **Opening Night**, the example in the prompt, gets a hidden visit: Tomas was
+  in the green room with Bram before the interval and says the dressing
+  corridor, covering the padding. It still meets Normal.
+
+**Open: the killer's earlier lie.** D-200 dealt it a third of the time, and it
+collides with V8, one lie per person (D-042): the brief withholds what a liar
+saw at the hour they lie about, and two lies leave a person who saw almost
+nothing. Either the killer may tell two lies when the card is dealt, or the
+card moves the killer's one lie to an earlier hour and the killer is honest
+and unspecific at the murder hour, as in the shapes where the killer never
+lies.
+
+## D-207 The killer's earlier lie: a second lie, kept small
+**Date:** 2026-10-07
+**Status:** active
+
+D-206 left it open against V8. Moving the killer's one lie to an earlier hour
+and leaving them honest and vague at the murder hour was rejected: honest and
+vague is the weak version of a killer, and the honest shapes have shown it.
+So the killer may tell two lies, and the cost D-042 warned of (a person who
+saw almost nothing all evening) is kept small by construction.
+
+- Dealt a third of the time (`palette.earlier_lie`), never to an honest
+  killer and never in the conspiracy.
+- V8: the killer may tell two lies at different hours; everybody else one.
+  `Mystery.lies_by` lists them; `false_claim`, the lie the case turns on, is
+  the killer's lie about the murder hour when there is one.
+- The request, when dealt: a second `false_claims` entry for the killer at an
+  hour before the murder, covering the preparation; in the room the killer
+  was really in, **at most one other person**, an innocent busy with a secret
+  of their own; the killer in the `known_by` of an innocent's secret.
+- The brief: the murder-hour lie is concealed and never given up, as before.
+  The earlier one is guarded: when it breaks, the killer owns up to being
+  there and nothing more, and in the same breath says something true about
+  somebody else.
+- Soft check (`_earlier_complaints`): dealt and missing; not dealt and there;
+  more than one other person in the room at that hour; no innocent's secret
+  for the half-truth to point at.
+
+## D-208 Rooms, and a case in another language
+**Date:** 2026-10-07
+**Status:** active (the page itself in French and Italian: D-209)
+
+D-178 left rooms open. Decided: Federico makes them, one login and password
+per room, each its own game, a language per room.
+
+- **Rooms.** `var/rooms.json` lists them: a login name and the case it plays.
+  One process serves them all (`--rooms`): Caddy checks the password and
+  passes the login on as `X-Remote-User`, set by Caddy over anything a
+  browser sends, and the game hands that login its room's app (`ByRoom`),
+  which is the ordinary one-case app, unchanged. A login with no room gets a
+  403. Each room keeps its game under its own name (`room-NAME`) in the
+  session store, so a restart, an update or a new room no longer ends
+  anybody's evening.
+- **`mysteryctl room add NAME CASE`**, `list`, `fresh NAME`, `remove NAME`.
+  `add` lists the room, asks for the password, adds the login beside the
+  others, switches the server to rooms and restarts it. `password` now
+  replaces only the tester line instead of rewriting the file.
+- **A case in another language**, made once on the PC: `--translate CASE
+  --lang it|fr` saves `CASE-it` beside the original, with a copy of its
+  pictures. Every word a person reads or hears is translated, every id left
+  alone, so it is the same case to the solver and the checks. Two passes:
+  the names (rooms, hours, objects, what people are, the title) first, then
+  everything else with those as a glossary, so "the chapter house" is one
+  phrase everywhere. People keep their names. `Mystery.language` is stamped;
+  a room takes its language from its case.
+- **The suspects** are told first of all to speak that language, whatever
+  they are asked in. Their knowledge is already written in it.
+
+Not built here: the page's own words (buttons, headings, help) in French and
+Italian. That is D-209.
+
+## D-209 The page in French and Italian
+**Date:** 2026-10-07
+**Status:** active
+
+The whole page, not only the case file. The page is one English string with
+its script inside, built from sentence pieces, so it is translated where it
+can be translated safely: in its string literals and nowhere else.
+
+- `jsscan.string_literals` finds every string literal in the script, skipping
+  comments and regular expressions and following `${...}` inside template
+  literals. `i18n.LITERALS[lang]` maps the English text of each literal the
+  player sees to its translation; `translate_page` swaps those literals,
+  quote for quote, and touches no code. About 140 entries per language.
+- `i18n.SNIPPETS` swaps a few whole pieces no table of literals can: plurals
+  built as "question" + "s", the static markup (buttons, tooltips, the title),
+  `<html lang>`, and the line that strips "the" from a room's name, which now
+  strips Italian and French articles too, because the sentence supplies its
+  own ("in sala capitolare").
+- A room is served the page in its case's language (`page_in`, once per
+  process). "The police" become "gli agenti" or "les gendarmes" when the case
+  is translated and its world names nobody else.
+- Gendered sentences were rewritten to be neutral ("non è più in vita",
+  "Arrivi dopo i fatti", "Non ha risposto N volte"), since a translation table
+  cannot know who died.
+- `tests/test_i18n.py` fails when an entry no longer exists in the page, when
+  a translated literal is left English, and when the translated script stops
+  parsing (with node installed). A sentence added to the page later simply
+  shows in English until it is added here.

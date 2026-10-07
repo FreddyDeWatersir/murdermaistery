@@ -76,6 +76,8 @@ class Brief:
     # Their age now (D-201), so nobody improvises having been a child at
     # something they were forty at.
     age: int | None = None
+    # The language they speak tonight, when not English (D-208).
+    language: str = ""
     wants: str = ""
     manner: str = ""
     voice: str = ""
@@ -223,8 +225,8 @@ def build_brief(
     yielding: list[Fact] = []
     hearsay: list[Fact] = []
 
-    claim = mystery.lie_by(character)
-    lying_about = claim.slot if claim else None
+    # One lie, or two for a killer dealt the earlier lie (D-207).
+    lies = {c.slot: c for c in mystery.lies_by(character)}
     is_the_killer = character == mystery.killer
     scene = mystery.murder_scene
     killed_at = scene.slot if scene is not None else None
@@ -234,7 +236,8 @@ def build_brief(
         if where is None:
             continue
 
-        if slot.id == lying_about:
+        if slot.id in lies:
+            claim = lies[slot.id]
             facts.append(
                 Fact(
                     id=f"self:{slot.id}",
@@ -248,7 +251,29 @@ def build_brief(
                 f"You were actually in {places.get(where, where)} at {times[slot.id]}."
             )
 
-            if is_the_killer:
+            if is_the_killer and slot.id != killed_at:
+                # The killer's earlier lie (D-207) can be broken, and is meant
+                # to be: when it goes, they own up to being there and to nothing
+                # worse, and point somewhere else with something true.
+                condition = claim.admits_when or (
+                    "somebody can already place you there"
+                )
+                guarded.append(
+                    Fact(
+                        id=f"truth:{slot.id}",
+                        text=(
+                            f"{really} You said otherwise. What would bring you to "
+                            f"it: {condition.rstrip('.')}. When it comes out, own up "
+                            f"to being there and to nothing more, and in the same "
+                            f"breath say something true you know about somebody "
+                            f"else, which takes the question away from you."
+                        ),
+                        subject=character,
+                        slot=slot.id,
+                        place=where,
+                    )
+                )
+            elif is_the_killer:
                 # The killer never gives this up. Under pressure they offer the
                 # shield instead: a smaller true thing that explains the
                 # evasiveness and is not the murder.
@@ -325,7 +350,7 @@ def build_brief(
         )
 
     for observation in know.observations:
-        if observation.slot == lying_about:
+        if observation.slot in lies:
             continue
         facts.append(
             Fact(
@@ -651,6 +676,7 @@ def build_brief(
         name=names.get(character, character),
         role=person.role if person else "",
         age=person.age if person else None,
+        language=mystery.language,
         on_the_table=on_the_table,
         wants=person.wants if person else "",
         manner=person.manner if person else "",
@@ -923,7 +949,16 @@ SYSTEM = SYSTEM_STABLE + SYSTEM_HISTORY + SYSTEM_LIVE
 
 
 def render_person(brief: Brief) -> str:
+    from mystery.translate import LANGUAGES
+
+    tongue = LANGUAGES.get(brief.language, "") if brief.language not in ("", "en") else ""
     lines = [
+        # First of all, when it applies (D-208): the case is written in it, and
+        # the instructions around it are not.
+        f"  You speak {tongue}, and every word you say tonight is in {tongue}, "
+        f"whatever language you are asked in."
+        if tongue
+        else "",
         # First, because it is who they are, and because a character who does
         # not know their own standing in the house denies it when asked (D-137).
         f"  The household would describe you as: {brief.role}. That is public and "

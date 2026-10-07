@@ -355,6 +355,12 @@ def _draw(args, announce: bool = True) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows writes a redirected stdout in cp1252, and a Czech surname in the
+    # printout crashed a run after the case was paid for and before it was
+    # saved (D-204). UTF-8 always, whatever the console.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Generate, solve and check one mystery.")
     parser.add_argument(
         "--setting",
@@ -446,6 +452,14 @@ def main(argv: list[str] | None = None) -> int:
         help="which case is today's, and how many are waiting behind it",
     )
     parser.add_argument(
+        "--translate",
+        metavar="CASE",
+        help="make a copy of a case in another language (--lang), saved as CASE-LANG "
+        "with its pictures, for a room in that language (D-208). One model call or "
+        "two per language",
+    )
+    parser.add_argument("--lang", default="it", help="it or fr, for --translate")
+    parser.add_argument(
         "--bundle",
         metavar="CASE",
         help="pack a case and its pictures into one zip you can carry to another "
@@ -497,6 +511,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.casts:
         print(_casts())
+        return 0
+
+    if args.translate:
+        from mystery.translate import anthropic_translator, translate_case
+
+        print(f"  Translating {args.translate} into {args.lang} on {DRAFT_MODEL}.")
+        path = translate_case(
+            args.translate, args.lang, anthropic_translator(DRAFT_MODEL), LIBRARY_DIR, ART
+        )
+        print(f"  Saved {path.name}. Bundle it: --bundle {args.translate}-{args.lang}")
         return 0
 
     if args.bundle:

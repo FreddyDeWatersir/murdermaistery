@@ -44,7 +44,8 @@ ends_the_game() {
 restart_and_wait() {
 	systemctl restart mystery
 	for _ in $(seq 30); do
-		if curl -fs -o /dev/null http://127.0.0.1:8000/; then
+		# Any answer will do: in rooms, a request with no login is a 403 (D-208).
+		if curl -s -o /dev/null http://127.0.0.1:8000/; then
 			echo "  Up at $URL"
 			return 0
 		fi
@@ -63,6 +64,26 @@ caddy_reload() {
 	systemctl reload caddy
 }
 
+# One login in the Caddy password file, replaced or added, the others kept
+# (D-208: every room is a login now, and `password` used to rewrite the file).
+set_login() {
+	local tmp
+	tmp=$(mktemp)
+	{ grep -v "^$1 " "$USERS" 2>/dev/null || true; [[ -n ${2:-} ]] && printf '%s %s\n' "$1" "$2"; } >"$tmp"
+	install -o root -g caddy -m 640 "$tmp" "$USERS"
+	rm -f "$tmp"
+}
+
+# Serve the rooms, from now on. Restarting is safe in rooms: every room keeps
+# its game under its own name (D-208).
+serve_rooms() {
+	printf 'MYSTERY_ARGS=--rooms var/rooms.json\n' >"$RUN_ENV"
+	chown mystery:mystery "$RUN_ENV"
+	chmod 640 "$RUN_ENV"
+	restart_and_wait
+	caddy_reload
+}
+
 usage() {
 	cat <<'EOF'
   sudo mysteryctl status          is it running, and which case
@@ -71,6 +92,10 @@ usage() {
   sudo mysteryctl play CASE_ID    serve that case (a fresh game)
   sudo mysteryctl fresh           same case, fresh game for the next group
   sudo mysteryctl password        change the tester password
+  sudo mysteryctl room add NAME CASE_ID   a room: login NAME, its own game of CASE_ID
+  sudo mysteryctl room list               every room and its case
+  sudo mysteryctl room fresh NAME         a fresh game in that room
+  sudo mysteryctl room remove NAME        close a room and its login
   sudo mysteryctl transcripts     copy every session to ~/transcripts
   sudo mysteryctl update          pull the latest code and restart
   sudo mysteryctl logs            follow the log (Ctrl+C to stop)
@@ -134,16 +159,54 @@ password)
 	# beats piping it through a prompt that may or may not read stdin.
 	hash=$(caddy hash-password --plaintext "$pw")
 	unset pw again
-	tmp=$(mktemp)
-	printf 'tester %s\n' "$hash" >"$tmp"
-	install -o root -g caddy -m 640 "$tmp" "$USERS"
-	rm -f "$tmp"
+	set_login tester "$hash"
 	if grep -qs 'sites/\*\.caddy' /etc/caddy/Caddyfile; then
 		caddy_reload
 		echo "  Changed. Testers log in as 'tester' with the new password."
 	else
 		echo "  Saved. Caddy is not serving the game yet (deploy/README.md, step 9)."
 	fi
+	;;
+
+room)
+	what=${1:-list}
+	name=${2:-}
+	case $what in
+	list)
+		as_mystery "$PY" -m mystery.rooms list
+		;;
+	add)
+		id=${3:-}
+		[[ $name =~ ^[a-z0-9][a-z0-9_-]{1,31}$ ]] || die "A room name is 2 to 32 lowercase letters, digits, - or _."
+		[[ $id =~ ^[A-Za-z0-9_-]+$ ]] || die "Which case? 'sudo mysteryctl cases' lists them."
+		as_mystery "$PY" -m mystery.rooms add "$name" "$id"
+		read -rsp "  Password for $name: " pw
+		echo
+		read -rsp "  Again: " again
+		echo
+		[[ $pw == "$again" ]] || die "They did not match. The room is listed but has no login yet: run this again."
+		((${#pw} >= 10)) || die "Use at least 10 characters. The room has no login yet: run this again."
+		hash=$(caddy hash-password --plaintext "$pw")
+		unset pw again
+		set_login "$name" "$hash"
+		serve_rooms
+		echo "  $URL, login '$name'. Its game is kept until it is solved or two days pass."
+		;;
+	fresh)
+		[[ -n $name ]] || die "Which room? sudo mysteryctl room fresh NAME"
+		as_mystery "$PY" -m mystery.rooms fresh "$name"
+		serve_rooms
+		;;
+	remove)
+		[[ -n $name ]] || die "Which room? sudo mysteryctl room remove NAME"
+		as_mystery "$PY" -m mystery.rooms remove "$name"
+		set_login "$name" ""
+		serve_rooms
+		;;
+	*)
+		die "room add NAME CASE_ID | room list | room fresh NAME | room remove NAME"
+		;;
+	esac
 	;;
 
 transcripts)

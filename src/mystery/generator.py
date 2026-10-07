@@ -47,6 +47,7 @@ from mystery.palette import (
     POSITIONS,
     body_moved,
     commission,
+    earlier_lie,
     innocent_lies,
     killer_position,
     murder_slot,
@@ -634,6 +635,11 @@ anybody. What kind of person that is, is dealt: work out who that is in *this* \
 building. Whatever the dealt standing, **not an insurer's assessor or adjuster**: \
 left alone, every other case comes back with one.
 
+**If the killer tells two lies**, the earlier one's `admits_when` says what \
+brings them to own up to being there, and that they do it with something \
+true about another person's secret, which points away from them. The lie \
+about the murder hour is never admitted.
+
 **`commission`** is what the player is told before the first question, as the \
 request describes under WHAT THEY ASKED YOU FOR.
 
@@ -889,6 +895,30 @@ def _targets(shape: str = "", gate: dict[str, int] | None = None) -> str:
             f"`revealed_by` carries `evidence`. Not every secret needs one, but a "
             f"case the player can only argue open is a case of talk."
         )
+    if gate.get("other_lies"):
+        rules.append(
+            f"- **At least {gate['other_lies']} lie is about an hour other than the "
+            f"murder's**, before it or after it: a visit, an errand, what somebody "
+            f"did once it was over. Lies that all sit on the murder hour make that "
+            f"hour the whole puzzle."
+        )
+    if gate.get("window"):
+        rules.append(
+            f"- **When the victim died is a window, not an hour.** By what people "
+            f"first say, she could have died in at least {gate['window']} hours: the "
+            f"last hour anybody admits being with her, to the murder, and the hours "
+            f"after it in which nobody admits going into the room she is found in. "
+            f"`discovery.summary` and `commission` say when she was last seen and "
+            f"when found, never the hour of death as a fact."
+        )
+    if gate.get("hidden_visits"):
+        rules.append(
+            f"- **At least {gate['hidden_visits']} innocent was with her inside that "
+            f"window and says they were elsewhere**, for a secret of their own: a "
+            f"debt, an argument, an affair, a favour asked. A hidden visit. Each one "
+            f"that comes out moves \"last seen alive\" later, so narrowing the hour "
+            f"is progress the player earns."
+        )
     if gate.get("movers"):
         rules.append(
             f"- **No object names the killer.** If the killer could have moved a "
@@ -965,6 +995,29 @@ def _lies(request: GenerationRequest) -> str:
     )
 
 
+_EARLIER_LIE = (
+    "**The killer also lies about an earlier hour, and that is dealt.** Two "
+    "`false_claims` for the killer: the one the shape asks for, and one about "
+    "an hour before the murder, covering the preparation (fetching what they "
+    "used, reading what gave them the reason, a word with the victim), a "
+    "secret of the killer's named in `covers`. That "
+    "earlier hour is not an empty one: in the room the killer was really in, "
+    "at most one other person, an innocent busy with a secret of their own, "
+    "whose residue or carried object is there. Opening that innocent's "
+    "secret gives the player a witness against the killer's earlier lie. "
+    "Put the killer in the `known_by` of a secret an innocent holds: when "
+    "the earlier lie breaks, the killer owns up to being there and, in the "
+    "same breath, says something true about that secret, which points away.\n\n"
+)
+
+
+def _earlier(request: GenerationRequest) -> str:
+    """The killer's earlier lie, when dealt (D-207)."""
+    if not earlier_lie(request.seed, request.topology):
+        return ""
+    return _EARLIER_LIE
+
+
 def _objects(request: GenerationRequest) -> str:
     """The roles the objects play, and what lies with the body, dealt (D-203)."""
     held = object_hand(request.seed)
@@ -1008,6 +1061,7 @@ def _user_prompt(request: GenerationRequest, targets: bool = True) -> str:
         f"{_casting(request.seed)}\n\n"
         f"{_lies(request)}"
         f"{_body(request)}"
+        f"{_earlier(request)}"
         f"{_objects(request)}"
         f"{_material(request)}\n"
         f"Variation key {request.seed}: use it to take a different angle on this "
@@ -1040,7 +1094,10 @@ def _tool_schema() -> dict[str, Any]:
 
 
 # Written by `generate` after the draft, never by the model.
-STAMPED = ("built_with", "world", "authority", "killer_position", "spent_usd", "moved_body")
+STAMPED = (
+    "built_with", "world", "authority", "killer_position", "spent_usd", "moved_body",
+    "language",
+)
 
 
 # What each stage writes (D-191). Everything a gate reads is in the skeleton;
@@ -1430,6 +1487,7 @@ def prompt_version() -> str:
         + "".join(LIES[k] for k in sorted(LIES))
         + "".join(POSITIONS[k] for k in sorted(POSITIONS))
         + "".join(OBJECT_ROLES[k] for k in sorted(OBJECT_ROLES))
+        + _EARLIER_LIE
     )
     return hashlib.sha256(standing.encode("utf-8")).hexdigest()[:8]
 
@@ -1757,12 +1815,20 @@ def _in_two_stages(
 
     for attempt in range(1, SKELETON_ATTEMPTS + 1):
         raw = _unwrap(drafter.skeleton(request, complaints, previous))
+        # The prose stage's fields have no business here, and an `investigator`
+        # written as a sentence failed three drafts in one batch (D-204).
+        raw = {k: v for k, v in raw.items() if k not in PROSE_TOP}
         previous = raw
         mystery, complaints, quality_only = _judge(
             {"title": "", **raw}, request, built_with, attempt
         )
+        if mystery is not None and complaints:
+            # Said from the first draft, beside the hard ones (D-206): checked only
+            # once everything else passed, they arrived on the last draft or
+            # after it, and no case in a batch ever fixed one.
+            complaints = complaints + [c for c in _soft(mystery, request) if c not in complaints]
         if mystery is not None and not complaints:
-            soft = measures.mover_complaints(mystery) + _object_complaints(mystery, request)
+            soft = _soft(mystery, request)
             if not soft:
                 bones, bones_usd = mystery, drafter.last_usd
                 log.info("mystery.skeleton_passed", attempt=attempt)
@@ -1824,6 +1890,59 @@ def _in_two_stages(
     # so the prose can be written again later rather than the whole thing.
     _keep_for_review(cache_dir, request, bones, complaints, stage="skeleton")
     raise GenerationFailed(complaints)
+
+
+def _soft(mystery: Mystery, request: GenerationRequest) -> list[str]:
+    """Everything a draft is sent back for but never thrown away for (D-206)."""
+    try:
+        m = measures.measure(mystery, request.topology or "")
+    except Exception:  # noqa: BLE001 - a draft too broken to measure is judged elsewhere
+        return []
+    return (
+        measures.soft_complaints(mystery, m)
+        + _object_complaints(mystery, request)
+        + _earlier_complaints(mystery, request)
+    )
+
+
+def _earlier_complaints(mystery: Mystery, request: GenerationRequest) -> list[str]:
+    """The killer's earlier lie, when dealt, is there and costs the killer little
+    sight (D-207). Soft, like the other dealt cards."""
+    if not measures.GATE.get("dealt_objects") or not mystery.killer:
+        return []
+    lies = mystery.lies_by(mystery.killer)
+    scene = mystery.murder_scene
+    order = {s.id: s.index for s in mystery.slots}
+    died = order.get(scene.slot) if scene is not None else None
+    earlier = [c for c in lies if died is not None and order.get(c.slot, died) < died]
+    if not earlier_lie(request.seed, request.topology):
+        return [] if not earlier else [
+            "The killer lies about an hour before the murder, and that was not dealt. "
+            "One lie for the killer, the one the shape asks for."
+        ]
+    if not earlier:
+        return ["The killer's earlier lie was dealt and is not there: a second "
+                "`false_claims` entry for the killer, at an hour before the murder."]
+    out = []
+    claim = earlier[0]
+    really = mystery.placements.get(mystery.killer, {}).get(claim.slot)
+    others = [
+        p for p, rows in mystery.placements.items()
+        if p not in (mystery.killer, mystery.victim) and rows.get(claim.slot) == really
+    ]
+    if len(others) > 1:
+        out.append(
+            f"At {claim.slot}, the hour of the killer's earlier lie, {len(others)} "
+            f"people were in the room the killer was really in. At most one, an "
+            f"innocent busy with their own secret, or the killer is left having seen "
+            f"almost nothing all evening."
+        )
+    holds = {s.holder for s in mystery.secrets if mystery.killer in s.known_by}
+    if not holds - {mystery.killer, mystery.victim}:
+        out.append("For the earlier lie, the killer must be in the `known_by` of a "
+                   "secret an innocent holds, so their half-truth has something true "
+                   "to point at.")
+    return out
 
 
 def _object_complaints(mystery: Mystery, request: GenerationRequest) -> list[str]:

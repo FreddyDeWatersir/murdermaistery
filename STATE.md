@@ -1,10 +1,11 @@
 # STATE
 
-**NEXT (7 Oct 2026):** recover seed 500011, free from the cache (D-204):
-`uv run python -m mystery.cli --seed 500011`. The deepest-trail complaint now
-gives numbers (D-205); the next batch says whether that is enough. Then the bracket strip and the length stat for the
-suspects' answers, step 4 of D-200 (lies at other hours, the killer's earlier
-lie), step 5 (the window and hidden visits). The Oath is ready for friends.
+**NEXT (7 Oct 2026):** rooms, translated cases and the page in French and
+Italian are built (D-208, D-209). To give the Oath to friends:
+`--translate the-oath-and-the-snow-d1f4 --lang it` (and `fr`), bundle, `add`,
+then `sudo mysteryctl room add NAME the-oath-and-the-snow-d1f4-it`. Then one
+batch on D-204 to D-207:
+`foreach ($s in 500017..500024) { uv run python -m mystery.cli --seed $s *>&1 | Out-File -Encoding utf8 "var\gen-$s.log" }`.
 
 ---
 

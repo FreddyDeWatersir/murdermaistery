@@ -943,7 +943,7 @@ def the_murder_hour_is_not_a_giveaway(mystery: Mystery) -> list[Advisory]:
     This is A7's argument moved one level down. A7 protects the alibi from being
     broken by a single witness; this protects the *lie* from naming one person.
     """
-    claim = mystery.lie_by(mystery.killer)
+    claim = mystery.false_claim
     if claim is None:
         # Some shapes have the killer tell no lie at all, and in those the
         # question this check asks does not arise.

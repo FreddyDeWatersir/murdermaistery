@@ -492,6 +492,9 @@ class Mystery(BaseModel):
     # What the calls that made this case cost, in dollars, rejected ones not
     # included: those are in `var/rejected` with their own price (D-191).
     spent_usd: float = 0.0
+    # The language the case is written in, when it is not English: set by
+    # `--translate` on the copy it makes, never by the model (D-208).
+    language: str = ""
 
     def accounts_of(self, constraint: str) -> list[Account]:
         return [a for a in self.accounts if a.constraint == constraint]
@@ -505,10 +508,22 @@ class Mystery(BaseModel):
         break. Kept as a property so those readers did not all have to learn
         about the list (D-063).
         """
-        return self.lie_by(self.killer) if self.killer else None
+        if not self.killer:
+            return None
+        # The killer may tell two (D-207); the one the case turns on is the
+        # one about the hour of the killing, when there is one.
+        scene = self.murder_scene
+        lies = self.lies_by(self.killer)
+        at_hour = next((c for c in lies if scene is not None and c.slot == scene.slot), None)
+        return at_hour or (lies[0] if lies else None)
 
     def lie_by(self, character: CharacterId) -> "FalseClaim | None":
         return next((c for c in self.false_claims if c.character == character), None)
+
+    def lies_by(self, character: CharacterId) -> "list[FalseClaim]":
+        """Every lie this person tells: one, or for a killer dealt the earlier
+        lie, two (D-207)."""
+        return [c for c in self.false_claims if c.character == character]
 
     @property
     def found_in(self) -> "PlaceId | None":

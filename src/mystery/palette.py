@@ -564,6 +564,15 @@ def scene_object(seed: int) -> str:
     return random.Random(f"scene|{seed}").choice(options)
 
 
+def earlier_lie(seed: int, topology: str | None) -> bool:
+    """Whether the killer also lies about an earlier hour (D-200, D-207). A
+    third of the cases where the killer lies at all: never for an honest
+    killer, nor for the conspiracy, whose one shared lie is the whole shape."""
+    if topology in HONEST_KILLER or topology == "the_conspiracy":
+        return False
+    return random.Random(f"earlier|{seed}").random() < 1 / 3
+
+
 def killer_position(seed: int) -> str:
     """Which position the killer is dealt (D-188), by key."""
     return random.Random(f"position|{seed}").choice(sorted(POSITIONS))

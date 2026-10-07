@@ -19,6 +19,7 @@ import json
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, Response
@@ -759,12 +760,35 @@ class Accusation(BaseModel):
 COOKIE = "mystery_session"
 
 
+def _authority(mystery) -> str:
+    """Who is coming, in the case's own language when it has one (D-209)."""
+    if mystery.language and mystery.language != "en":
+        police = {"it": "gli agenti", "fr": "les gendarmes"}.get(mystery.language, "the police")
+        return mystery.authority or police
+    return getattr(world_named(mystery.world), "authority", "the police")
+
+
+def _last_seen(game) -> dict[str, str] | None:
+    """The last hour and room anybody says they saw the victim alive (D-206)."""
+    from mystery.measures import time_of_death
+
+    death = time_of_death(game.mystery)
+    if death.last_seen is None:
+        return None
+    labels = {s.id: s.label for s in game.mystery.slots}
+    return {
+        "when": labels.get(death.last_seen, death.last_seen),
+        "where": game.places.get(death.last_room, death.last_room or ""),
+    }
+
+
 def build_app(
     case: Case | Game,
     responder: Responder | None = None,
     sessions: Sessions | None = None,
     budget: int = QUESTIONS,
     together: bool = False,
+    session: Session | None = None,
 ) -> FastAPI:
     """One case, any number of people playing it separately (D-077).
 
@@ -785,6 +809,11 @@ def build_app(
         responder = responder or case.responder
         case = case.case
         together = True
+    elif session is not None:
+        # A room's own game, kept under the room's name (D-208).
+        store = sessions or InMemorySessions()
+        shared = session
+        store.save(shared)
     else:
         store = sessions or InMemorySessions()
         shared = store.create(case.id) if together else None
@@ -848,6 +877,11 @@ def build_app(
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
+        # The page in the case's language, made once per language (D-209).
+        if the_case.mystery.language and the_case.mystery.language != "en":
+            from mystery.i18n import page_in
+
+            return page_in(the_case.mystery.language)
         return PAGE
 
     @app.get("/state")
@@ -887,6 +921,8 @@ def build_app(
                 for p in game.mystery.places
             ],
             "scene": "/scene/setting.png" if "setting" in game.scenery else None,
+            # The page's language, from the case (D-208).
+            "lang": game.mystery.language or "en",
             # Who the player is tonight (D-101). Shown, because a position the
             # player cannot see is not a position they can play.
             "you": (
@@ -910,6 +946,9 @@ def build_app(
                     "summary": game.mystery.discovery.summary,
                     # Told at the door, like the finding itself (D-199).
                     "found": [t.name for t in game.mystery.found_with],
+                    # When she was last seen, by what people say at first; never
+                    # the hour of death (D-206).
+                    "last_seen": _last_seen(game),
                 }
                 if game.mystery.discovery
                 else None
@@ -928,7 +967,7 @@ def build_app(
             # Looked up from the world's key in the deck rather than read off
             # the case, so a case whose draft wrote something of its own into
             # `authority` still says the police (D-182).
-            "authority": getattr(world_named(game.mystery.world), "authority", "the police"),
+            "authority": _authority(game.mystery),
             "notebook": game.notebook(),
         }
 
@@ -1942,6 +1981,8 @@ function paintBrief(){
     '<h4>1 &middot; What happened</h4>'+
     (d?'<p><b>'+esc(S.victim)+'</b> is dead. '+esc(d.finder)+' found the body in the '+
         esc(at(d.place))+'.</p>'+(d.summary?'<p>'+esc(d.summary)+'</p>':'')+
+        (d.last_seen?'<p>Last seen alive: <b>'+esc(d.last_seen.when)+'</b>, in the '+
+          esc(at(d.last_seen.where))+'. When it happened after that, nobody says.</p>':'')+
         /* What lay in the room with the body (D-199): the first objects a
            player hears of, so "when did that get there?" can be asked early. */
         (d.found&&d.found.length?'<div class="asked"><b>Found with the body</b><ul>'+
@@ -2869,7 +2910,94 @@ def _draw(args, store=None, announce: bool = True) -> None:
             print(f"  Occasion: {args.setting}")
 
 
+class ByRoom:
+    """One app per room, chosen by who Caddy says logged in (D-208).
+
+    Plain ASGI rather than a FastAPI route, so that each room's app is the
+    ordinary single-case app, unchanged, and a room is only a choice of which
+    one to call. The header is trusted because the game listens on 127.0.0.1
+    and Caddy sets it, replacing anything a browser sent.
+    """
+
+    def __init__(self, rooms: dict[str, Any]) -> None:
+        self.rooms = rooms
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        headers = dict(scope.get("headers") or [])
+        user = headers.get(b"x-remote-user", b"").decode("latin-1").strip().lower()
+        app = self.rooms.get(user)
+        if app is None:
+            body = (
+                b"<!doctype html><meta charset=utf-8><title>No room</title>"
+                b"<p style='font:16px Georgia;margin:3em'>This login has no room yet.</p>"
+            )
+            await send({"type": "http.response.start", "status": 403,
+                        "headers": [(b"content-type", b"text/html; charset=utf-8")]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        await app(scope, receive, send)
+
+
+def room_session(store: Sessions, user: str, case_id: str) -> Session:
+    """The room's game: the one it had, or a fresh one under its name."""
+    from mystery.rooms import session_id
+
+    found = store.get(session_id(user))
+    if found is None or found.case_id != case_id:
+        found = Session(id=session_id(user), case_id=case_id)
+        store.save(found)
+    return found
+
+
+def build_rooms(rooms: dict[str, dict[str, str]], responder: Responder, store: Sessions,
+                load, budget: int = QUESTIONS) -> ByRoom:
+    """Every room's app. `load(case_id)` gives a `Case`; one per case, shared by
+    every room that plays it, since a case never changes (D-077)."""
+    cases: dict[str, Case] = {}
+    apps: dict[str, Any] = {}
+    for user, room in rooms.items():
+        case_id = room["case"]
+        if case_id not in cases:
+            cases[case_id] = load(case_id)
+        apps[user] = build_app(
+            cases[case_id], responder, sessions=store, budget=budget,
+            session=room_session(store, user, case_id),
+        )
+    return ByRoom(apps)
+
+
+def _load_case(store, case_id: str) -> Case:
+    """A case off the shelf with whatever pictures it already has, ready to
+    serve. No model, no painting."""
+    saved = store.load(case_id)
+    art = pick_gallery()
+    case = Case(
+        saved.mystery,
+        id=saved.id,
+        portraits=art.names(saved.id, "portraits"),
+        scenery=art.names(saved.id, "scenery"),
+        setting=saved.setting,
+        seed=saved.seed or 0,
+    )
+    case.gallery = art
+    return case
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Windows writes a redirected stdout in cp1252, and a Czech surname in the
+    # printout crashed a run after the case was paid for and before it was
+    # saved (D-204). UTF-8 always, whatever the console.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Play a mystery in a browser.")
     parser.add_argument(
         "--setting",
@@ -2941,6 +3069,12 @@ def main(argv: list[str] | None = None) -> int:
         "--cases", action="store_true", help="list the cases on the shelf and stop"
     )
     parser.add_argument(
+        "--rooms",
+        default=None,
+        help="serve every room in this file (var/rooms.json), one login each, behind "
+        "Caddy (D-208)",
+    )
+    parser.add_argument(
         "--score",
         action="store_true",
         help="solve and measure every draft you have already paid for, and stop. "
@@ -3003,6 +3137,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cases:
         print(catalogue(store))
+        return 0
+
+    if args.rooms:
+        import uvicorn
+
+        from mystery.agent import anthropic_responder
+        from mystery.rooms import read
+
+        rooms = read(Path(args.rooms))
+        print(f"  {len(rooms)} room(s): {', '.join(sorted(rooms)) or 'none yet'}")
+        uvicorn.run(
+            build_rooms(rooms, anthropic_responder(model=args.model), pick_sessions(),
+                        lambda case_id: _load_case(store, case_id), budget=args.questions),
+            host="127.0.0.1",
+            port=args.port,
+            log_level="warning",
+        )
         return 0
 
     # Beside `--cases` and above every draw, because a command that generates

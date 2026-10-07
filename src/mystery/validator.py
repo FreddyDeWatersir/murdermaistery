@@ -210,11 +210,18 @@ def check_false_claims_are_false(mystery: Mystery) -> list[Violation]:
                 )
             )
 
-        if claim.character in told_by:
+        # The killer may tell two, at different hours (D-207): the card that
+        # deals it is checked by the generator, not here.
+        allowed = 2 if claim.character == mystery.killer else 1
+        earlier = [c for c in mystery.false_claims[: mystery.false_claims.index(claim)]
+                   if c.character == claim.character]
+        if len(earlier) >= allowed or any(c.slot == claim.slot for c in earlier):
             violations.append(
                 Violation(
                     rule="V8",
-                    message=f"{claim.character!r} tells more than one lie about where they were",
+                    message=f"{claim.character!r} tells more than "
+                    f"{'one lie' if allowed == 1 else 'two lies, or two about one hour,'} "
+                    f"about where they were",
                 )
             )
         told_by.add(claim.character)

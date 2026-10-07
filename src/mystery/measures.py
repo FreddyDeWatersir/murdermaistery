@@ -53,7 +53,17 @@ NORMAL = {
     "movers": 2,
     # Whether the objects must play the roles they were dealt (D-203).
     "dealt_objects": 1,
+    # Lies about an hour other than the murder's (D-206). Hard will ask two.
+    "other_lies": 1,
+    # Hours the death could have happened in, by what people first say (D-206).
+    "window": 2,
+    # Innocents who were with the victim inside the window and say otherwise.
+    "hidden_visits": 1,
 }
+
+# Checked while drafting but never fatal (D-202, D-206): sent back while there
+# are drafts left, and a case still short on them is kept and counted easier.
+SOFT = ("movers", "dealt_objects", "other_lies", "window", "hidden_visits")
 
 # What the generation gate holds a draft to (D-188). Normal until difficulty is
 # an input. Read at call time, so the test suite can open it for the tests that
@@ -108,6 +118,11 @@ class Measures:
     # draft told "the killer's is deepest" is also told by how much.
     killer_depth: int = 0
     innocent_depth: int = 0
+    # D-206: lies at other hours, the time-of-death window by what people first
+    # say, and innocents hiding that they were with the victim inside it.
+    other_lies: int = 0
+    window: int = 0
+    hidden_visits: int = 0
 
     def movers_met(self, targets: dict[str, int] = NORMAL) -> bool:
         return all(n >= targets.get("movers", 0) for n in self.movers)
@@ -123,6 +138,9 @@ class Measures:
         return (
             self.objects_met(targets)
             and self.movers_met(targets)
+            and self.other_lies >= targets.get("other_lies", 0)
+            and self.window >= targets.get("window", 0)
+            and self.hidden_visits >= targets.get("hidden_visits", 0)
             and
             self.field >= targets["field"]
             and self.killer_in_field
@@ -208,6 +226,97 @@ def mover_complaints(mystery: Mystery, targets: dict[str, int] | None = None) ->
     return out
 
 
+@dataclass
+class Death:
+    """When she died, as the house tells it at first (D-206)."""
+
+    window: int
+    hidden: set[str]
+    last_seen: str | None
+    last_room: str | None
+
+
+def time_of_death(mystery: Mystery) -> Death:
+    """How many hours the death could have happened in, by what people say.
+
+    Everybody's account, with each lie standing in for the truth: the last hour
+    anybody says they were with the victim, to the murder, plus the hours after
+    it in which nobody says they went into the room she was found in. A hidden
+    visit is an innocent who was with her in that stretch and says otherwise:
+    each one that comes out moves "last seen alive" later.
+    """
+    scene = mystery.murder_scene
+    ordered = [s.id for s in sorted(mystery.slots, key=lambda s: s.index)]
+    if scene is None or scene.slot not in ordered:
+        return Death(0, set(), None, None)
+    victim, killer = mystery.victim, mystery.killer
+    lies = {(c.character, c.slot): c.place for c in mystery.false_claims}
+    rows = mystery.placements
+    living = [p for p in rows if p != victim]
+    her = rows.get(victim, {})
+
+    def said(person: str, slot: str) -> str | None:
+        return lies.get((person, slot), rows.get(person, {}).get(slot))
+
+    died = ordered.index(scene.slot)
+    seen = [
+        i for i in range(died + 1)
+        if her.get(ordered[i]) and any(said(p, ordered[i]) == her[ordered[i]] for p in living)
+    ]
+    last = max(seen) if seen else 0
+    room = mystery.found_in
+    after = 0
+    for slot in ordered[died + 1:]:
+        if any(said(p, slot) == room for p in living):
+            break
+        after += 1
+    hidden = {
+        c.character
+        for c in mystery.false_claims
+        if c.character != killer
+        and c.slot in ordered
+        and last <= ordered.index(c.slot) <= died
+        and rows.get(c.character, {}).get(c.slot) == her.get(c.slot)
+    }
+    return Death(
+        window=died - last + 1 + after,
+        hidden=hidden,
+        last_seen=ordered[last] if seen else None,
+        last_room=her.get(ordered[last]) if seen else None,
+    )
+
+
+def soft_complaints(
+    mystery: Mystery, m: Measures, targets: dict[str, int] | None = None
+) -> list[str]:
+    """The soft numbers, said so a redraft can act on them (D-206)."""
+    targets = targets if targets is not None else GATE
+    out = mover_complaints(mystery, targets)
+    want = targets.get("other_lies", 0)
+    if m.other_lies < want:
+        out.append(
+            f"{m.other_lies} lie(s) are about an hour other than the murder's; at "
+            f"least {want} must be: before it or after it, a visit, an errand, what "
+            f"somebody did once it was over, for a secret of their own."
+        )
+    want = targets.get("window", 0)
+    if m.window < want:
+        out.append(
+            f"By what people first say, the victim could only have died in {m.window} "
+            f"hour(s). At least {want}: let fewer people admit seeing her late, or "
+            f"nobody admit going near the room afterwards."
+        )
+    want = targets.get("hidden_visits", 0)
+    if m.hidden_visits < want:
+        out.append(
+            f"{m.hidden_visits} innocent(s) were with the victim between when she was "
+            f"last seen and her death and lie about it; at least {want}. A hidden "
+            f"visit: an innocent with her in that stretch, who says they were "
+            f"elsewhere, for a secret of their own."
+        )
+    return out
+
+
 def measure(mystery: Mystery, shape: str = "") -> Measures:
     """Everything above, from the ground truth. No model, no solving."""
     from mystery.stats import trail_depths
@@ -268,11 +377,8 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
     # else was. The room the body was found in is the one thing about the
     # killing every player is told.
     found = mystery.found_in
-    said = {
-        p: (mystery.lie_by(p).place if mystery.lie_by(p) and mystery.lie_by(p).slot == hour
-            else where(p, hour))
-        for p in suspects
-    }
+    lied = {(c.character, c.slot): c.place for c in mystery.false_claims}
+    said = {p: lied.get((p, hour), where(p, hour)) for p in suspects}
     in_found_room = {p for p, room in said.items() if found and room == found}
 
     opportunity = alone | at_hour
@@ -321,6 +427,7 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
 
     hidden = HIDDEN_BY_SHAPE.get(shape, set())
     motive, trail = trail_depths(mystery)
+    death = time_of_death(mystery)
     return Measures(
         reason=len(reason),
         field=len(reason & opportunity),
@@ -337,6 +444,9 @@ def measure(mystery: Mystery, shape: str = "") -> Measures:
             name for name, found in candidates.items() if name not in hidden and found == {killer}
         ],
         movers=[len(m.could) for m in possible_movers(mystery)],
+        other_lies=sum(1 for c in mystery.false_claims if c.slot != hour),
+        window=death.window,
+        hidden_visits=len(death.hidden),
         killer_depth=depth.get(killer, 0),
         innocent_depth=max((d for p, d in depth.items() if p != killer), default=0),
     )

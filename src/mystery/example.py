@@ -338,6 +338,17 @@ OPENING_NIGHT: dict[str, Any] = {
             "covers": "the_replacement",
             "admits_when": "she is told her part was already being recast",
         },
+        {
+            # A hidden visit (D-206): with Bram in the green room in the hour
+            # before the interval, and saying he was in the dressing corridor,
+            # where Ilse and Nadia can say he was not. Until he admits it, "last
+            # seen alive" is earlier than it really was.
+            "character": "tomas",
+            "place": "dressing_corridor",
+            "slot": "s2",
+            "covers": "the_padding",
+            "admits_when": "he is told the invoices have already been looked at",
+        },
     ],
     "discovery": {
         "finder": "tomas",

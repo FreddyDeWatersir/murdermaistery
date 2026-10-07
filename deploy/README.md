@@ -107,6 +107,10 @@ the Console shows exactly what the tests cost.
 
 ### 8. A case
 
+`CASE_ID` below is a placeholder: replace it with a real id, like
+`the-sixth-name-on-the-board-78e3`. `uv run python -m mystery.web --cases`
+lists the ones you have.
+
 On your PC, in the repo:
 
 ```powershell
@@ -182,6 +186,31 @@ and on your PC: `scp -r federico@157.180.80.106:transcripts .`
 logs in shares it, and any restart (`fresh`, `play`, `update`, a reboot, a
 crash) starts a new one. So: one group per evening, and no `update` while
 somebody is playing.
+
+## Rooms: several groups at once (D-208)
+
+One login per room, each its own game, each in its case's language:
+
+```bash
+sudo mysteryctl room add marco the-oath-and-the-snow-d1f4-it
+sudo mysteryctl room list
+sudo mysteryctl room fresh marco      # a new game in that room
+sudo mysteryctl room remove marco
+```
+
+`add` asks for that room's password, adds the login beside the others and
+switches the server to rooms. From then on a restart or an `update` keeps
+every room's game. The old `tester` login has no room unless you make one
+called `tester`.
+
+A case in Italian or French is made on your PC first:
+
+```powershell
+uv run python -m mystery.cli --translate the-oath-and-the-snow-d1f4 --lang it
+uv run python -m mystery.cli --bundle the-oath-and-the-snow-d1f4-it
+```
+
+then `scp` and `sudo mysteryctl add` as for any case.
 
 ## Updating the code
 

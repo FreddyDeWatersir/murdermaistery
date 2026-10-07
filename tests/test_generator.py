@@ -1365,3 +1365,14 @@ def test_a_look_that_does_not_say_the_age_is_a_prose_gap() -> None:
 
     assert gaps(said) == []
     assert gaps(unsaid) and "61" in gaps(unsaid)[0]
+
+
+def test_a_skeleton_that_writes_prose_fields_is_not_failed_for_it() -> None:
+    """D-204: three drafts in one batch wrote `investigator` as a sentence in
+    the skeleton, which the skeleton never asks for, and each was thrown away."""
+    bones = {**_bones(), "investigator": "Brother Lope, a cantor", "title": "x"}
+    drafter = _staged([bones])
+    case = generate(REQUEST, drafter=drafter)
+
+    assert len(drafter.calls["skeleton"]) == 1
+    assert case.investigator is not None and case.investigator.role

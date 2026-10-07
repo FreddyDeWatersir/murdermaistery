@@ -22,5 +22,10 @@ mystery.7seastcg.com {
 
 	# No `encode` here, unlike the shop. Compressing the answer stream can hold
 	# words back until a chunk fills, and the suspects would stutter.
-	reverse_proxy 127.0.0.1:8000
+	# Who logged in, so the game can serve each room its own case (D-208).
+	# Set here, replacing anything a browser sent; the game only listens on
+	# 127.0.0.1, so nothing else can reach it with this header.
+	reverse_proxy 127.0.0.1:8000 {
+		header_up X-Remote-User {http.auth.user.id}
+	}
 }

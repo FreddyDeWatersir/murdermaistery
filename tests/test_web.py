@@ -1037,3 +1037,18 @@ def test_rooms_are_letters_on_the_timeline_with_a_legend() -> None:
     assert "function roomTags" in PAGE
     assert 'class="key rooms"' in PAGE
     assert "esc(roomTags()[p.id])+'</th>'" in PAGE
+
+
+def test_the_file_says_when_she_was_last_seen_and_not_when_she_died() -> None:
+    """D-206: a window, not an hour."""
+    from fastapi.testclient import TestClient
+
+    from mystery.solver import solve
+    from mystery.web import PAGE, Case, build_app
+
+    case = Case(solve(CASE, seed=0), id="seen", setting="a theatre")
+    client = TestClient(build_app(case, lambda s, q: {"speech": "", "used": [], "refused": True}))
+    got = client.get("/state").json()
+    if got["discovery"] is not None:
+        assert got["discovery"]["last_seen"]["when"]
+    assert "Last seen alive" in PAGE
