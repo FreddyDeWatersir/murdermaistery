@@ -1052,3 +1052,52 @@ def test_the_file_says_when_she_was_last_seen_and_not_when_she_died() -> None:
     if got["discovery"] is not None:
         assert got["discovery"]["last_seen"]["when"]
     assert "Last seen alive" in PAGE
+
+
+def test_one_track_under_every_case_when_there_is_one(tmp_path, monkeypatch) -> None:
+    """D-210: /music serves it, /state says whether there is one."""
+    from fastapi.testclient import TestClient
+
+    import mystery.web
+    from mystery.solver import solve
+    from mystery.web import PAGE, Case, build_app
+
+    track = tmp_path / "theme.mp3"
+    monkeypatch.setattr(mystery.web, "MUSIC", track)
+    app = build_app(Case(solve(CASE, seed=0), id="m"), lambda s, q: {}, together=True)
+    client = TestClient(app)
+
+    assert client.get("/music").status_code == 404
+    assert client.get("/state").json()["music"] is False
+    track.write_bytes(b"ID3fake")
+    got = client.get("/music")
+    assert got.status_code == 200 and got.headers["content-type"] == "audio/mpeg"
+    assert client.get("/state").json()["music"] is True
+    assert "new Audio('/music')" in PAGE
+
+
+def test_short_names_skip_titles(tmp_path) -> None:
+    """Brother Nuño is Nuño on the cards, not Brother (D-211)."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from mystery.web import PAGE
+
+    assert ".split(' ')[0]" not in PAGE, "every short name goes through first()"
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    start = PAGE.index("const TITLES")
+    end = PAGE.index("\n}\n", PAGE.index("function first(")) + 2
+    script = tmp_path / "first.js"
+    names = ["Brother Nuño Peláez", "Doña Sancha de Tineo", "Suor Elvira",
+             "Dr. Ada Lowe", "Tomas Reyes", "Brother", ""]
+    script.write_text(
+        PAGE[start:end] + f"\nconsole.log(JSON.stringify({names!r}.map(first)))",
+        encoding="utf-8",
+    )
+    out = subprocess.run([node, str(script)], capture_output=True, text=True,
+                         encoding="utf-8", check=True).stdout
+    assert json.loads(out) == ["Nuño", "Sancha", "Elvira", "Ada", "Tomas", "Brother", ""]

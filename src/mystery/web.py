@@ -62,6 +62,9 @@ from mystery.topology import get as get_topology
 log = structlog.get_logger()
 
 CACHE = Path("var/mysteries")
+# One track under every case (D-210). On the server, put there by
+# `mysteryctl music FILE.mp3`; none means silence, as before.
+MUSIC = Path("var/music/theme.mp3")
 
 
 def _unique(rows: list[dict]) -> list[dict]:
@@ -923,6 +926,8 @@ def build_app(
             "scene": "/scene/setting.png" if "setting" in game.scenery else None,
             # The page's language, from the case (D-208).
             "lang": game.mystery.language or "en",
+            # Whether there is a track to play under the case (D-210).
+            "music": MUSIC.exists(),
             # Who the player is tonight (D-101). Shown, because a position the
             # player cannot see is not a position they can play.
             "you": (
@@ -1004,6 +1009,16 @@ def build_app(
     @app.get("/scene/{filename}")
     def scene(filename: str):
         return _picture("scenery", filename)
+
+    @app.get("/music")
+    def music():
+        """One track under every case (D-210), when there is one."""
+        from fastapi.responses import FileResponse
+        from fastapi.responses import Response as Sent
+
+        if not MUSIC.exists():
+            return Sent(status_code=404)
+        return FileResponse(MUSIC, media_type="audio/mpeg")
 
     @app.post("/ask")
     def ask_endpoint(question: Question, request: Request, response: Response) -> dict:
@@ -1839,6 +1854,20 @@ function setSize(v){
 /* ---------- app -------------------------------------------------------- */
 function pitchOf(id){return 300+(hash(id)%9)*46}
 function nameOf(id){const s=S.suspects.find(x=>x.id===id);return s?s.name:id}
+// What to call someone in short: the first word that is not a title, so
+// "Brother Nuño Peláez" is Nuño, not Brother (D-211). One string, so the
+// page translation never swaps a word of it.
+const TITLES=new Set(('brother sister father mother fra frate suor suora padre madre '+
+  'frère frere sœur soeur père mère don doña dona dom dame lady lord sir dr mr mrs ms '+
+  'miss madame mademoiselle monsieur mme mlle signor signora signorina professor prof '+
+  'captain inspector reverend rev abbot abbess prior prioress count countess baron '+
+  'baroness señor señora uncle aunt').split(' '));
+function first(name){
+  const w=String(name||'').split(' ').filter(Boolean);
+  let i=0;
+  while(i<w.length-1&&TITLES.has(w[i].toLowerCase().replace(/\\.$/,'')))i++;
+  return w[i]||String(name||'');
+}
 
 function showPortrait(id){
   const s=S.suspects.find(x=>x.id===id);
@@ -1866,7 +1895,7 @@ function recall(id){
   const log=(NB.logs||{})[id]||[];
   if(!log.length){
     el.className='empty';
-    el.textContent='You have not asked '+nameOf(id).split(' ')[0]+' anything yet.';
+    el.textContent='You have not asked '+first(nameOf(id))+' anything yet.';
     return;
   }
   const last=log[log.length-1];
@@ -1888,14 +1917,14 @@ function paintHand(){
   if(!held.length){row.className='gone';row.innerHTML='';return}
   row.className='';
   const seen=new Set(((NB.shown||{})[who])||[]);
-  const to=who?nameOf(who).split(' ')[0]:'';
+  const to=who?first(nameOf(who)):'';
   row.innerHTML='<span class="label">You have</span>'+held.map(h=>{
     const done=seen.has(h.id);
     // Where it came from was in this payload from the day the hand existed and
     // was never drawn (D-112). Without it there is no cue that showing a thing
     // to somebody other than its owner is the move, which is where the whole
     // second half of a case lives.
-    const src=h.from?esc(h.from.split(' ')[0]):'';
+    const src=h.from?esc(first(h.from)):'';
     // Where it came from, and nothing else. An earlier version footed every card
     // with "SHOW MARGIT" and "GIVE IT BACK TO SANNE", which is the game telling
     // you the move rather than letting you find it: the provenance is the clue,
@@ -2044,6 +2073,18 @@ function showHelp(){
 }
 function showBrief(){paintBrief();$('brief').classList.add('on')}
 
+/* One track under every case (D-210). Browsers refuse to play sound before
+   the first click, so it starts on the first click or key, usually "Open the
+   case", loops quietly, and the Sound button mutes it with the blips. */
+let music=null;
+function startMusic(){
+  if(music||!S||!S.music)return;
+  music=new Audio('/music');music.loop=true;music.volume=.25;music.muted=!sound;
+  music.play().catch(()=>{music=null});
+}
+document.addEventListener('click',startMusic);
+document.addEventListener('keydown',startMusic);
+
 async function boot(){
   S=await (await fetch('/state')).json();
   /* The evening's own colour (D-164). Ground and text are fixed everywhere and
@@ -2074,13 +2115,14 @@ async function boot(){
       ?'<img src="'+s.portrait+'" style="width:30px;height:36px;border-radius:5px;'+
        'object-fit:cover;display:block">'
       :'<svg viewBox="0 0 200 250">'+portraitSVG(s.id,s.look,s.gender)+'</svg>')+'<span>'+
-      esc(s.name.split(' ')[0])+'</span>';
+      esc(first(s.name))+'</span>';
     b.onclick=()=>select(s.id);
     cast.appendChild(b);
   });
   $('q').onkeydown=e=>{if(e.key==='Enter')send()};
   $('askbtn').onclick=()=>send();
-  $('mute').onclick=()=>{sound=!sound;$('mute').textContent=sound?'Sound on':'Sound off'};
+  $('mute').onclick=()=>{sound=!sound;if(music)music.muted=!sound;
+    $('mute').textContent=sound?'Sound on':'Sound off'};
   setSize(load('size')||'');
   setBook(parseInt(load('book'),10)||BOOK_DEFAULT);
   grabEdge();
@@ -2258,7 +2300,7 @@ function viewLog(n){
 
   let h='<div id="dossiers">'+people.map(p=>
     '<button class="dt'+(p.id===page&&!term?' on':'')+'" data-who="'+esc(p.id)+'">'+
-    esc(p.name.split(' ')[0])+'<span>'+p.asked+'</span></button>').join('')+'</div>'+
+    esc(first(p.name))+'<span>'+p.asked+'</span></button>').join('')+'</div>'+
     '<input id="find" placeholder="Search everything anybody said" value="'+esc(find)+'">';
 
   const p=people.find(x=>x.id===page);
@@ -2291,7 +2333,7 @@ function viewLog(n){
     '<div class="aa" data-k="'+esc(r.id+'|'+r.i+'|a')+'">'+rich(r.a,r.id+'|'+r.i+'|a',term)+'</div></div>').join('')+
     '<div class="empty hint">Select words to underline them. Click an underline to rub it out.</div>';
 
-  if(!term&&p)h+='<h2>Your notes on '+esc(p.name.split(' ')[0])+'</h2>'+
+  if(!term&&p)h+='<h2>Your notes on '+esc(first(p.name))+'</h2>'+
     '<textarea id="mynotes" data-who="'+esc(p.id)+'" rows="5" placeholder="What you make '+
     'of them, what to come back to…">'+esc(noteFor(p.id))+'</textarea>';
   return h;
@@ -2717,7 +2759,7 @@ function accuse(id){
     'against it. This ends the game.</p>'+
     '<textarea id="why" rows="4" placeholder="They killed him because\u2026"></textarea>'+
     '<div style="margin-top:18px;display:flex;gap:10px">'+
-    '<button id="press" class="accuse">Charge '+esc(nameOf(id).split(' ')[0])+'</button>'+
+    '<button id="press" class="accuse">Charge '+esc(first(nameOf(id)))+'</button>'+
     '<button id="backout">Not yet</button></div>';
   $('revealcard').innerHTML=h;$('reveal').classList.add('on');
   $('why').focus();

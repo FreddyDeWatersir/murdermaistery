@@ -5626,3 +5626,26 @@ can be translated safely: in its string literals and nowhere else.
   a translated literal is left English, and when the translated script stops
   parsing (with node installed). A sentence added to the page later simply
   shows in English until it is added here.
+
+## D-210 One track under every case
+**Date:** 2026-10-07
+**Status:** active
+
+For now one mp3 plays under every case: `var/music/theme.mp3`, served at
+`/music`; `/state` says whether there is one. The page starts it on the first
+click or key (browsers refuse sound before one, so usually "Open the case"),
+loops it at a quarter volume, and the Sound button mutes it with the blips.
+No file, no music, as before. On the server, `mysteryctl music FILE.mp3` puts
+it in place and `mysteryctl music off` takes it away, no restart either way.
+Per case, travelling in the bundle, and ducking under answers are for later.
+
+## D-211 Short names skip titles
+**Date:** 2026-10-07
+**Status:** active
+
+The cards, the notebook tabs and the Charge button called people by the first
+word of their name, so in The Oath everyone was "Brother" or "Sister". The
+page now uses `first()`, the first word that is not a title (Brother, Sister,
+Fra, Suor, Doña, Dr., Madame and the like, in English, Italian, French and
+Spanish). The last word is never skipped, so a name that is only a title still
+shows. A rare first name that is also a title ("Don") loses to the surname.

@@ -1,5 +1,12 @@
 # STATE
 
+**NEXT (7 Oct 2026, later):** music (D-210) and short names without titles
+(D-211) are in. Before Nicholas plays: repaint the Oath portraits (move the old
+`portraits` folder aside, run `--portraits`), copy them into the `-it` and
+`-fr` art folders, bundle `-it`, `add`, `music`, `room add nicholas`.
+
+---
+
 **NEXT (7 Oct 2026):** rooms, translated cases and the page in French and
 Italian are built (D-208, D-209). To give the Oath to friends:
 `--translate the-oath-and-the-snow-d1f4 --lang it` (and `fr`), bundle, `add`,
